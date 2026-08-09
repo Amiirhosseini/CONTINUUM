@@ -1,6 +1,8 @@
 <p align="center">
-  <img src="docs/assets/logo.png" alt="CONTINUUM Logo" width="480" />
+  <img src="docs/assets/logo.png" alt="CONTINUUM Logo" width="160" />
 </p>
+
+<h1 align="center">CONTINUUM</h1>
 
 <p align="center">
   <strong>Agents that can lose their context without losing their work.</strong>
