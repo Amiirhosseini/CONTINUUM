@@ -269,10 +269,18 @@ class RecoveryEngine:
                 )
 
         if not validation.safe:
+            # Count only what actually needs repair. Reporting every status
+            # would include the VALID ones and overstate the damage — a run
+            # with two verified components and one stale one would claim three
+            # need repair. The decision itself is unaffected; the operator
+            # reading the rationale is not.
+            needs_repair = [
+                e for e in validation.report.statuses if e.status is not StateStatus.VALID
+            ]
             proposals.append(
                 (
                     RecoveryMode.REPAIR_AND_RESUME,
-                    f"{len(validation.report.statuses)} component(s) need repair before continuing",
+                    f"{len(needs_repair)} component(s) need repair before continuing",
                 )
             )
 

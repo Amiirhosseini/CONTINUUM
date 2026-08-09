@@ -386,6 +386,30 @@ def test_the_decision_explains_itself(store: SQLiteStorage) -> None:
     assert any("repair" in r for r in decision.rationale)
 
 
+def test_the_repair_count_excludes_verified_components(store: SQLiteStorage) -> None:
+    """ "N component(s) need repair" must count only the damaged ones.
+
+    The seeded run reports both VALID components (goal, progress) and
+    downgraded ones (dataset, evidence, finding). Counting every status would
+    overstate the damage to whoever reads the rationale.
+    """
+    from continuum.models import StateStatus
+
+    seed(store)
+    decision = RecoveryEngine(store).assess("run_1", current_environment=env("v4"))
+
+    statuses = decision.validation.report.statuses
+    downgraded = [e for e in statuses if e.status is not StateStatus.VALID]
+    verified = [e for e in statuses if e.status is StateStatus.VALID]
+
+    assert verified, "this fixture must contain VALID components for the test to mean anything"
+    assert len(downgraded) < len(statuses)
+
+    rationale = next(r for r in decision.rationale if "need repair" in r)
+    assert rationale.startswith(f"{len(downgraded)} component(s)")
+    assert not rationale.startswith(f"{len(statuses)} component(s)")
+
+
 def test_assessment_changes_nothing(store: SQLiteStorage) -> None:
     """Recovery decisions must be safe to compute against a live database."""
     seed(store)
