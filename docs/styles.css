@@ -1183,7 +1183,7 @@ body {
   background-color: var(--bg-surface);
   border: 1px solid var(--border-card);
   border-radius: var(--radius-xl);
-  overflow: hidden;
+  overflow-x: auto;
   box-shadow: var(--shadow-card);
 }
 
@@ -1191,46 +1191,53 @@ body {
   width: 100%;
   border-collapse: collapse;
   text-align: left;
-}
-
-.comp-table th, .comp-table td {
-  padding: 18px 24px;
-  border-bottom: 1px solid var(--border-subtle);
-  font-size: 0.9rem;
+  table-layout: fixed;
 }
 
 .comp-table th {
-  background-color: rgba(8, 10, 15, 0.6);
-  color: var(--text-secondary);
-  font-weight: 600;
-  font-family: var(--font-mono);
-  font-size: 0.82rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-primary);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
+  padding: 16px 14px 20px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  width: 20%;
+  background-color: rgba(8, 10, 15, 0.6);
+}
+
+.comp-table th:last-child {
+  color: var(--accent-terracotta);
+}
+
+.comp-table td {
+  padding: 22px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+  vertical-align: top;
+  line-height: 1.5;
+  word-wrap: break-word;
 }
 
 .comp-table tr:last-child td {
   border-bottom: none;
 }
 
-.comp-table td:first-child {
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
 .comp-badge {
   display: inline-block;
-  padding: 4px 10px;
-  border-radius: 100px;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
   font-family: var(--font-mono);
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   font-weight: 600;
+  line-height: 1.4;
 }
 
 .comp-badge.highlight {
-  background-color: var(--accent-terracotta-glow);
+  background-color: rgba(224, 109, 83, 0.1);
   color: var(--accent-terracotta);
-  border: 1px solid rgba(224, 109, 83, 0.3);
+  border: 1px solid rgba(224, 109, 83, 0.25);
 }
 
 /* Footer */

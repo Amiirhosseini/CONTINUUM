@@ -664,35 +664,35 @@ if status.safe:
         </thead>
         <tbody>
           <tr>
-            <td>Recovery Abstraction</td>
+            <td><strong>Recovery Abstraction</strong></td>
             <td>Full prompt re-execution</td>
             <td>Message list / dict state dump</td>
             <td>Deterministic step code replay</td>
             <td><span class="comp-badge highlight">Semantic State Checkpoint</span></td>
           </tr>
           <tr>
-            <td>Environment Shift Check</td>
+            <td><strong>Environment Shift Check</strong></td>
             <td>None</td>
             <td>None</td>
             <td>None</td>
-            <td><span class="comp-badge highlight">Independent Pre-Resume Check</span></td>
+            <td><span class="comp-badge highlight">Pre-Resume Contract Verification</span></td>
           </tr>
           <tr>
-            <td>Side-Effect Prevention</td>
+            <td><strong>Side-Effect Prevention</strong></td>
             <td>Duplicate API writes</td>
             <td>Manual application logic</td>
             <td>Activity execution journal</td>
             <td><span class="comp-badge highlight">Idempotent Action Ledger</span></td>
           </tr>
           <tr>
-            <td>Token Overhead</td>
-            <td>$O(N)$ exploding</td>
-            <td>$O(N)$ transcript growth</td>
-            <td>N/A</td>
-            <td><span class="comp-badge highlight">$O(1)$ Bounded Recovery Context</span></td>
+            <td><strong>Token Overhead</strong></td>
+            <td>O(N) Unbounded Growth</td>
+            <td>O(N) Transcript Overhead</td>
+            <td>N/A (Code Replay)</td>
+            <td><span class="comp-badge highlight">O(1) Bounded State Tree</span></td>
           </tr>
           <tr>
-            <td>Provenance & Audit</td>
+            <td><strong>Provenance &amp; Audit</strong></td>
             <td>None</td>
             <td>None</td>
             <td>Workflow history</td>
