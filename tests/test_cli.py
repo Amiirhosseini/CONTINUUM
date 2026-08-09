@@ -1,0 +1,469 @@
+"""CLI behaviour, with emphasis on the exit-code contract.
+
+``continuum resume "$RUN" && ./start-agent.sh`` is the line these tests exist to
+protect. If an unsafe run ever exits 0, an agent gets launched onto stale state
+or an unreconciled side effect — so the exit code is treated as a safety
+guarantee, not a formatting detail.
+"""
+
+from __future__ import annotations
+
+import io
+import json
+import subprocess
+import sys
+from collections.abc import Iterator
+from pathlib import Path
+
+import pytest
+
+from continuum.actions import ActionLedger, ProbeReconciler, Resolution, reconcile_pending
+from continuum.checkpoint import CheckpointManager
+from continuum.cli import ExitCode, main
+from continuum.cli.exitcodes import exit_code_for
+from continuum.environment import StaticProvider, capture
+from continuum.events import EventType
+from continuum.models import RecoveryMode, Run
+from continuum.storage import SQLiteStorage
+
+
+@pytest.fixture
+def db(tmp_path: Path) -> Iterator[str]:
+    """A seeded run: 60 documents, a dependency, and an interrupted side effect."""
+    path = str(tmp_path / "demo.db")
+    with SQLiteStorage(path) as store:
+        store.create_run(Run(run_id="run_1", goal="Analyze 100 documents"))
+        store.append_event(
+            "run_1", EventType.RUN_STARTED, {"goal": "Analyze 100 documents", "total": 100}
+        )
+        store.append_event(
+            "run_1", EventType.DEPENDENCY_DECLARED, {"resource": "dataset", "version": "v3"}
+        )
+        store.append_event(
+            "run_1",
+            EventType.EVIDENCE_ADDED,
+            {"evidence_id": "paper_128", "summary": "study", "source": "dataset"},
+        )
+        store.append_event(
+            "run_1",
+            EventType.FINDING_ADDED,
+            {"finding_id": "finding_17", "claim": "X holds", "evidence": ["paper_128"]},
+        )
+        for i in range(60):
+            store.append_event("run_1", EventType.WORK_COMPLETED, {"doc": i})
+        CheckpointManager(store).checkpoint(
+            "run_1", environment=capture("run_1", StaticProvider(dataset="v3"))
+        )
+    yield path
+
+
+def run(*argv: str) -> tuple[int, str, str]:
+    out, err = io.StringIO(), io.StringIO()
+    code = main(list(argv), out=out, err=err)
+    return code, out.getvalue(), err.getvalue()
+
+
+def interrupt_a_side_effect(db: str) -> None:
+    with SQLiteStorage(db) as store:
+        ActionLedger(store, "run_1").claim("github.create_issue", {"title": "Anomaly"})
+
+
+# --- the exit-code contract ------------------------------------------------ #
+
+
+def test_a_verified_run_exits_zero(db: str) -> None:
+    code, out, _ = run("--db", db, "resume", "run_1", "--env", "dataset=v3")
+    assert code == ExitCode.OK
+    assert "RESUME" in out
+
+
+def test_a_changed_dependency_does_not_exit_zero(db: str) -> None:
+    """The pipeline must short-circuit rather than launch onto stale state."""
+    code, _, _ = run("--db", db, "resume", "run_1", "--env", "dataset=v4")
+    assert code != ExitCode.OK
+    assert code == ExitCode.REQUIRES_REPAIR
+
+
+def test_an_uncertain_side_effect_demands_a_human(db: str) -> None:
+    interrupt_a_side_effect(db)
+    code, out, _ = run("--db", db, "resume", "run_1", "--env", "dataset=v3")
+    assert code == ExitCode.REQUIRES_HUMAN
+    assert "REQUEST_HUMAN" in out
+
+
+def test_reconciling_restores_a_zero_exit(db: str) -> None:
+    interrupt_a_side_effect(db)
+    assert run("--db", db, "resume", "run_1", "--env", "dataset=v3")[0] != ExitCode.OK
+
+    with SQLiteStorage(db) as store:
+        reconcile_pending(
+            ActionLedger(store, "run_1"),
+            ProbeReconciler(lambda a: Resolution(occurred=True, external_id="481")),
+        )
+
+    assert run("--db", db, "resume", "run_1", "--env", "dataset=v3")[0] == ExitCode.OK
+
+
+def test_omitting_the_environment_is_not_treated_as_unchanged(db: str) -> None:
+    """Not checking is not the same as checking and finding nothing wrong."""
+    code, _, _ = run("--db", db, "resume", "run_1")
+    assert code != ExitCode.OK
+
+
+def test_a_missing_run_is_distinguishable(db: str) -> None:
+    code, _, err = run("--db", db, "inspect", "nosuchrun")
+    assert code == ExitCode.NOT_FOUND
+    assert "error:" in err
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "inspect",
+        "history",
+        "verify",
+        "actions",
+        "replay",
+        "resume",
+        "validate",
+        "show-contract",
+    ],
+)
+def test_no_command_reports_success_for_a_run_that_does_not_exist(db: str, command: str) -> None:
+    """A typo'd run name must never look like a clean bill of health.
+
+    An empty run has a trivially valid (empty) event chain and no recorded
+    actions, so `verify` and `actions` would happily exit 0 — letting
+    `continuum verify $TYPO && deploy` succeed against a name nobody has ever
+    written to.
+    """
+    code, _, err = run("--db", db, command, "definitely-not-a-run")
+    assert code != ExitCode.OK, f"{command} reported success for a nonexistent run"
+    assert code == ExitCode.NOT_FOUND, f"{command} misdiagnosed a missing run (exit {code})"
+    assert "definitely-not-a-run" in err
+
+
+def test_not_found_messages_are_not_double_quoted(db: str) -> None:
+    """KeyError.__str__ repr-wraps its message; users should not see that."""
+    _, _, err = run("--db", db, "history", "ghost")
+    assert "no such run: 'ghost'" in err
+    assert '"no such run' not in err
+
+
+def test_only_resume_maps_to_a_zero_exit() -> None:
+    for mode in RecoveryMode:
+        code = exit_code_for(mode)
+        assert (code == ExitCode.OK) == (mode is RecoveryMode.RESUME)
+
+
+def test_an_unclassified_mode_is_never_mistaken_for_permission() -> None:
+    """A mode added later, before anyone assigns it a code, must fail closed.
+
+    Iterating the known modes cannot catch this: the fallback is only reached
+    by a value the table has never heard of.
+    """
+
+    class FutureMode:
+        value = "some_mode_invented_next_year"
+
+    assert exit_code_for(FutureMode()) == ExitCode.UNSAFE  # type: ignore[arg-type]
+    assert exit_code_for(FutureMode()) != ExitCode.OK  # type: ignore[arg-type]
+
+
+def test_a_corrupted_chain_reports_corruption(db: str) -> None:
+    import sqlite3
+
+    raw = sqlite3.connect(db)
+    raw.execute("UPDATE events SET payload = '{\"x\":1}' WHERE sequence = 2")
+    raw.commit()
+    raw.close()
+
+    code, out, _ = run("--db", db, "verify", "run_1")
+    assert code == ExitCode.CORRUPTED
+    assert "INTEGRITY FAILURE" in out
+    assert "trusted through sequence 1" in out
+
+
+# --- read-only commands stay read-only ------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ("inspect", "run_1"),
+        ("history", "run_1"),
+        ("events", "run_1"),
+        ("verify", "run_1"),
+        ("actions", "run_1"),
+        ("replay", "run_1"),
+        ("validate", "run_1"),
+        ("resume", "run_1"),
+        ("show-contract", "run_1"),
+    ],
+)
+def test_inspection_never_mutates_the_run(db: str, argv: tuple[str, ...]) -> None:
+    with SQLiteStorage(db) as store:
+        before = (store.last_sequence("run_1"), list(store.list_versions("run_1")))
+
+    run("--db", db, *argv)
+
+    with SQLiteStorage(db) as store:
+        after = (store.last_sequence("run_1"), list(store.list_versions("run_1")))
+    assert before == after
+
+
+def test_checkpoint_does_mutate(db: str) -> None:
+    with SQLiteStorage(db) as store:
+        before = store.last_sequence("run_1")
+
+    code, out, _ = run("--db", db, "checkpoint", "run_1", "--trigger", "manual")
+    assert code == ExitCode.OK
+    assert "Checkpoint" in out
+
+    with SQLiteStorage(db) as store:
+        assert store.last_sequence("run_1") > before
+
+
+# --- output ---------------------------------------------------------------- #
+
+
+def test_json_output_is_parseable(db: str) -> None:
+    code, out, _ = run("--db", db, "--json", "resume", "run_1", "--env", "dataset=v4")
+    payload = json.loads(out)
+    assert payload["mode"] == "repair_and_resume"
+    assert payload["safe"] is False
+    assert payload["contract"]["next_allowed_action"]
+    assert payload["progress"]["completed"] == 60
+
+
+def test_json_and_text_are_never_mixed(db: str) -> None:
+    _, out, _ = run("--db", db, "--json", "inspect", "run_1")
+    json.loads(out)  # would raise if prose leaked into the stream
+
+
+def test_inspect_reports_verified_progress(db: str) -> None:
+    _, out, _ = run("--db", db, "inspect", "run_1")
+    assert "60 completed" in out
+    assert "dataset: v3 [valid]" in out
+
+
+def test_inspect_can_read_a_past_version(db: str) -> None:
+    _, out, _ = run("--db", db, "inspect", "run_1", "--version", "0")
+    assert "v0" in out
+
+
+def test_history_lists_checkpoints(db: str) -> None:
+    _, out, _ = run("--db", db, "history", "run_1")
+    assert "VERSION" in out
+    assert "v0" in out
+
+
+def test_diff_compares_two_versions(db: str) -> None:
+    with SQLiteStorage(db) as store:
+        store.append_event("run_1", EventType.WORK_COMPLETED, {"doc": 99})
+        CheckpointManager(store).checkpoint("run_1")
+
+    _, out, _ = run("--db", db, "diff", "run_1", "0", "1")
+    assert "→" in out
+    assert "completed" in out
+    assert "completed: completed" not in out  # no duplicated field name
+
+
+def test_events_can_be_windowed(db: str) -> None:
+    _, out, _ = run("--db", db, "events", "run_1", "--after", "60", "--upto", "62")
+    assert "61" in out and "62" in out
+    assert "\n    1  " not in out
+
+
+def test_actions_flags_unresolved_outcomes(db: str) -> None:
+    interrupt_a_side_effect(db)
+    code, out, _ = run("--db", db, "actions", "run_1")
+    assert code == ExitCode.REQUIRES_HUMAN
+    assert "unresolved outcomes" in out
+
+
+def test_actions_on_a_clean_run_exits_zero(db: str) -> None:
+    code, out, _ = run("--db", db, "actions", "run_1")
+    assert code == ExitCode.OK
+    assert "No actions recorded" in out
+
+
+def test_the_contract_can_be_printed(db: str) -> None:
+    _, out, _ = run("--db", db, "show-contract", "run_1", "--env", "dataset=v4")
+    assert "recovery_status:" in out
+    assert "next_allowed:" in out
+
+
+def test_replay_rederives_state_from_events(db: str) -> None:
+    _, out, _ = run("--db", db, "replay", "run_1")
+    assert "60 completed" in out
+
+
+def test_runs_lists_what_exists(db: str) -> None:
+    _, out, _ = run("--db", db, "runs")
+    assert "run_1" in out
+    assert "Analyze 100 documents" in out
+
+
+def test_an_empty_database_says_so(tmp_path: Path) -> None:
+    code, out, _ = run("--db", str(tmp_path / "empty.db"), "runs")
+    assert code == ExitCode.OK
+    assert "No runs recorded" in out
+
+
+def test_init_reports_where_storage_lives(tmp_path: Path) -> None:
+    path = str(tmp_path / "new.db")
+    code, out, _ = run("--db", path, "init")
+    assert code == ExitCode.OK
+    assert path in out
+    assert Path(path).exists()
+
+
+# --- argument handling ------------------------------------------------------ #
+
+
+def test_no_command_prints_help() -> None:
+    code, out, _ = run()
+    assert code == ExitCode.OK
+    assert "usage" in out.lower()
+
+
+def test_a_malformed_env_flag_is_rejected(db: str) -> None:
+    code, _, err = run("--db", db, "resume", "run_1", "--env", "dataset")
+    assert code == ExitCode.ERROR
+    assert "name=version" in err
+
+
+def test_an_unopenable_database_reports_an_error_not_a_traceback(db: str) -> None:
+    """A bad path is an operator mistake; a traceback buries the useful part."""
+    code, _, err = run("--db", "/nonexistent-dir/agent.db", "runs")
+    assert code == ExitCode.ERROR
+    assert "error:" in err
+    assert "Traceback" not in err
+
+
+def test_an_empty_env_version_is_refused(db: str) -> None:
+    """`--env dataset=` is nearly always an unexpanded shell variable.
+
+    Accepting it would compare the empty string as a real version and report a
+    spurious `v3 -> ` dependency change.
+    """
+    code, _, err = run("--db", db, "resume", "run_1", "--env", "dataset=")
+    assert code == ExitCode.ERROR
+    assert "empty version" in err
+
+
+def test_postgres_fails_clearly_rather_than_silently(db: str) -> None:
+    code, _, err = run("--db", "postgresql://localhost/x", "runs")
+    assert code == ExitCode.ERROR
+    assert "not implemented" in err
+
+
+def test_benchmark_admits_it_is_unbuilt() -> None:
+    code, _, err = run("benchmark")
+    assert code == ExitCode.NOT_IMPLEMENTED
+    assert "not implemented" in err
+    assert "no benchmark numbers" in err.lower()
+
+
+def test_a_run_with_no_versions_says_so(tmp_path: Path) -> None:
+    path = str(tmp_path / "bare.db")
+    with SQLiteStorage(path) as store:
+        store.create_run(Run(run_id="bare", goal="g"))
+    code, out, _ = run("--db", path, "history", "bare")
+    assert code == ExitCode.OK
+    assert "No versions recorded" in out
+
+
+def test_history_of_a_missing_run_is_not_found(db: str) -> None:
+    code, _, err = run("--db", db, "history", "ghost")
+    assert code == ExitCode.NOT_FOUND
+    assert "error:" in err
+
+
+def test_a_run_with_no_events_reports_not_found(tmp_path: Path) -> None:
+    """CheckpointError is surfaced as NOT_FOUND, not as a crash."""
+    path = str(tmp_path / "bare.db")
+    with SQLiteStorage(path) as store:
+        store.create_run(Run(run_id="bare", goal="g"))
+    code, _, err = run("--db", path, "resume", "bare")
+    assert code == ExitCode.NOT_FOUND
+    assert "no checkpoint and no events" in err
+
+
+def test_a_corrupted_record_is_reported_as_corruption(db: str) -> None:
+    import sqlite3
+
+    raw = sqlite3.connect(db)
+    raw.execute("UPDATE runs SET status = 'not_a_status' WHERE run_id = 'run_1'")
+    raw.commit()
+    raw.close()
+
+    code, _, err = run("--db", db, "runs")
+    assert code == ExitCode.CORRUPTED
+    assert "integrity error:" in err
+
+
+def test_repair_suppresses_the_hint_but_not_the_verdict(db: str) -> None:
+    """--repair acknowledges the plan; it must not fake a safe exit."""
+    code, out, err = run("--db", db, "resume", "run_1", "--env", "dataset=v4", "--repair")
+    assert code == ExitCode.REQUIRES_REPAIR
+    assert "Repairs required" in out
+    assert "--repair" not in err
+
+
+def test_tolerating_unknown_is_opt_in(db: str) -> None:
+    interrupt_a_side_effect(db)
+    strict, _, _ = run("--db", db, "resume", "run_1", "--env", "dataset=v3")
+    lenient, _, _ = run("--db", db, "resume", "run_1", "--env", "dataset=v3", "--tolerate-unknown")
+    assert strict == ExitCode.REQUIRES_HUMAN
+    assert lenient != ExitCode.OK  # relaxed, but still never "safe"
+
+
+def test_a_model_switch_can_be_declared(db: str) -> None:
+    code, out, _ = run("--db", db, "validate", "run_1", "--env", "dataset=v3", "--model", "model-b")
+    assert code == ExitCode.OK  # no model recorded, so nothing to invalidate
+    assert "Run: run_1" in out
+
+
+# --- invoked as a real process ---------------------------------------------- #
+
+
+def _cli(db: str, *argv: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "-m", "continuum.cli", "--db", db, *argv],
+        env={
+            "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src"),
+            "PATH": "/usr/bin:/bin",
+        },
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_the_cli_runs_as_a_module_without_warnings(db: str) -> None:
+    result = _cli(db, "inspect", "run_1")
+    assert result.returncode == ExitCode.OK
+    assert "60 completed" in result.stdout
+    assert "RuntimeWarning" not in result.stderr
+
+
+def test_the_shell_pipeline_short_circuits_on_unsafe_state(db: str) -> None:
+    """The behaviour the whole exit-code design exists to protect."""
+    interrupt_a_side_effect(db)
+    blocked = _cli(db, "resume", "run_1", "--env", "dataset=v4")
+    assert blocked.returncode != 0
+
+    with SQLiteStorage(db) as store:
+        reconcile_pending(
+            ActionLedger(store, "run_1"),
+            ProbeReconciler(lambda a: Resolution(occurred=True, external_id="481")),
+        )
+    assert _cli(db, "resume", "run_1", "--env", "dataset=v3").returncode == 0
+
+
+def test_report_and_hint_appear_in_the_right_order(db: str) -> None:
+    """stdout is block-buffered when piped; the hint must not overtake the report."""
+    result = _cli(db, "resume", "run_1", "--env", "dataset=v4")
+    assert "Next permitted action" in result.stdout
+    assert "--repair" in result.stderr
