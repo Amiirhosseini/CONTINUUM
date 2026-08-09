@@ -17,6 +17,8 @@ from continuum.environment.snapshot import (
     process_fingerprint,
 )
 
+capture_environment = capture
+
 __all__ = [
     "UNKNOWN_VERSION",
     "CallableProvider",
@@ -28,6 +30,7 @@ __all__ = [
     "StaticProvider",
     "ValueProvider",
     "capture",
+    "capture_environment",
     "diff_environments",
     "process_fingerprint",
 ]

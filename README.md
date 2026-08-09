@@ -81,7 +81,7 @@ CONTINUUM separates **LLM context** (temporary) from **durable task state** (per
 
 > Not published to PyPI yet. Install from a clone: `uv venv && uv pip install -e ".[dev]"`
 
-What runs today (Phases 1–4): record events, project state, checkpoint, survive a crash.
+What runs today (Phases 1–5): record events, project state, checkpoint, survive a crash, and refuse to resume on stale state.
 
 ```python
 from continuum import EventType, Run, SQLiteStorage, project
@@ -535,6 +535,50 @@ That is a 228-event run rendered in 410 characters. **Stale state is shown, neve
 
 Token figures reported by `estimate_tokens` are a **character-based heuristic, not a tokenizer**. CONTINUUM takes no model-provider dependency for a size hint. No compression ratio is claimed until the benchmark measures real tokens.
 
+### State Validation (Phase 5 — Complete)
+
+**A persisted checkpoint is not trustworthy merely because it was persisted.** Before an agent resumes, every component is checked against the environment as it is now.
+
+```python
+from continuum import StaticProvider, capture_environment, validate_state
+
+now = capture_environment("run_4821", StaticProvider(dataset="v4"))
+outcome = validate_state(
+    restored.state,
+    checkpoint_environment=restored.checkpoint.environment,
+    current_environment=now,
+)
+
+outcome.safe  # False
+outcome.state  # same state, with statuses already revised
+```
+
+**Staleness propagates.** A dataset moving v3 to v4 does not only invalidate the dependency — it invalidates the reasoning built on it. The validator walks `dependency -> evidence -> finding -> decision`:
+
+```text
+[!!] external dependency dataset: conflicted — v3 -> v4
+[!!] evidence paper_128: stale — source 'dataset' changed
+[!!] finding finding_17: stale — rests on changed evidence: paper_128
+[!!] decision d_12: stale — rests on changed support: finding_17
+[ok] goal: valid — v1
+[ok] progress: valid — 60 completed
+
+Safe to resume: no
+```
+
+Marking only the dependency would leave the agent reasoning from conclusions it can no longer justify. State that did not depend on the change is left untouched, so the report stays worth reading.
+
+With the same dataset still in place, the identical run resumes cleanly:
+
+```text
+[ok] external dependency dataset: valid — verified unchanged
+Safe to resume: yes
+```
+
+**Uncertainty degrades, it does not resolve.** A resource that could not be inspected — an API that timed out, a file now unreadable — becomes `UNKNOWN`, never `VALID`. `UNKNOWN` is enough to withhold a clean resume. The system may say "I cannot tell"; it may not guess in its own favour. Callers who genuinely tolerate uncertainty opt in with `strict_unknown=False`, and it stays visible in the report.
+
+**Model switches are never assumed safe.** State produced under one model that carries model-specific assumptions is marked `STALE` when another model takes over, and requires revalidation.
+
 ### Security
 
 - **Deterministic canonical hashing** — sorted keys, UTC-normalized timestamps, enum-by-value serialization, rejection of non-finite floats
@@ -564,6 +608,7 @@ continuum/
 |       |   +-- extractor.py         Pluggable extraction (LLM optional)
 |       |   +-- versioning.py        Content-addressed version chain
 |       |   +-- diff.py              Semantic diff and renderer
+|       |   +-- validator.py         Validation and staleness propagation
 |       +-- storage/
 |       |   +-- __init__.py          open_storage() URL dispatch
 |       |   +-- base.py              Storage interface and stated guarantees
@@ -573,6 +618,10 @@ continuum/
 |       |   +-- policy.py            When to checkpoint
 |       |   +-- manager.py           Create, seal, persist, restore
 |       |   +-- context.py           Bounded recovery context
+|       +-- environment/
+|       |   +-- __init__.py
+|       |   +-- snapshot.py          Pluggable environment capture
+|       |   +-- diff.py              Conservative snapshot comparison
 |       +-- security/
 |           +-- __init__.py
 |           +-- hashing.py           Deterministic canonical hashing
@@ -592,6 +641,8 @@ continuum/
     +-- test_checkpoint_policy.py    Policy decisions and triggers
     +-- test_checkpoint_manager.py   Creation, restore, crash interleavings
     +-- test_recovery_context.py     Bounded context and truncation safety
+    +-- test_environment.py          Capture, diffing, unverifiable resources
+    +-- test_validator.py            Validation and staleness propagation
 ```
 
 ---
@@ -638,12 +689,12 @@ No benchmark results are claimed. The harness is being built. Results will be pu
 |   2   | Semantic state representation     | Complete    |
 |   3   | SQLite persistence                | Complete    |
 |   4   | Checkpoint creation               | Complete    |
-|   5   | State validation                  | Planned     |
+|   5   | State validation                  | Complete    |
 |   6   | Action ledger + Idempotency       | Planned     |
 |   7   | Recovery engine                   | Planned     |
 |   8   | CLI                               | Planned     |
 |   9   | Crash recovery examples           | Planned     |
-|  10   | Environment snapshots and diffs   | Planned     |
+|  10   | Environment snapshots and diffs   | Complete    |
 |  11   | Framework adapters                | Planned     |
 |  12   | Benchmark suite                   | Planned     |
 |  13   | Cloud API (FastAPI + PostgreSQL)  | Planned     |
@@ -693,7 +744,7 @@ mypy                      # Type check
 
 ## Contributing
 
-The project is in early development (Phases 1–4 complete). There are many components to build — storage engines, state validation, framework adapters, benchmark scenarios, documentation.
+The project is in early development (Phases 1–5 and 10 complete). There are many components to build — storage engines, state validation, framework adapters, benchmark scenarios, documentation.
 
 Open an issue before submitting large PRs.
 

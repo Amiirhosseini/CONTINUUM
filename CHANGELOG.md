@@ -6,6 +6,42 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added — Phase 5: state validation
+
+- Environment capture (`continuum.environment.snapshot`): pluggable `EnvironmentProvider` with
+  `StaticProvider`, `FileProvider` (content hashes, so touching a file does not invalidate work),
+  `ValueProvider` and `CallableProvider`. Providers never raise — a resource that cannot be
+  inspected is recorded as `UNKNOWN_VERSION`, because an environment check that fails open defeats
+  the purpose of checking.
+- Environment diffing (`continuum.environment.diff`) distinguishing `UNCHANGED`, `CHANGED`, `ADDED`,
+  `REMOVED` and `UNKNOWN`. `UNKNOWN` is not a softer `UNCHANGED`: an unverifiable resource is
+  treated as breaking, so uncertainty degrades rather than resolves in the system's favour. Adding a
+  resource is explicitly non-breaking; checksums outrank version labels as identity.
+- `StateValidator` (`continuum.state.validator`) checking every component against the environment as
+  it is *now*, and returning a `ValidationOutcome` whose `state` already carries the revised
+  statuses so callers need not re-derive them.
+- **Staleness propagation** along `dependency -> evidence -> finding -> decision`. A dataset moving
+  v3 to v4 does not only invalidate the dependency; it invalidates the reasoning built on it.
+  Marking only the dependency would leave an agent reasoning from conclusions it can no longer
+  justify. State that did not depend on the change is left untouched.
+- Approval expiry (by status and by timestamp), model-switch detection that never assumes switching
+  is safe, and detection of state citing support it cannot produce.
+- `strict_unknown` (default on) decides whether unverifiable resources block a clean resume.
+- 52 new tests (329 total), 100% line coverage maintained.
+
+### Fixed
+
+- `SemanticState.dangling_evidence()` reported a false alarm for any decision citing a *finding*
+  rather than raw evidence — which is legitimate provenance and occurs in every well-formed
+  reasoning chain. Findings now count as citable support. False alarms are how real ones get
+  ignored.
+
+### Removed
+
+- A dead branch in progress validation that re-checked a counter invariant the `Progress` model
+  already enforces on construction and deserialization. Verified unreachable rather than left as
+  untestable code; the invariant is tested at the model level.
+
 ### Added — Phase 4: checkpoint creation
 
 - Checkpoint policies (`continuum.checkpoint.policy`): `ManualPolicy`, `IntervalPolicy`,
