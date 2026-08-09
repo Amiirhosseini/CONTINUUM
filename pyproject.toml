@@ -33,6 +33,7 @@ dependencies = ["pydantic>=2.7"]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
+    "pytest-asyncio>=0.23",
     "hypothesis>=6.0",
     "ruff>=0.9",
     "mypy>=1.13",
@@ -44,6 +45,7 @@ Homepage = "https://github.com/continuum-agent/continuum"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/continuum"]
+artifacts = ["src/continuum/py.typed"]
 
 [tool.hatch.build.targets.sdist]
 exclude = [".venv", "tests", "examples", "benchmarks"]
@@ -76,3 +78,11 @@ warn_required_dynamic_aliases = true
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-q"
+
+[tool.coverage.run]
+source = ["continuum"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false

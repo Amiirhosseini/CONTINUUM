@@ -345,7 +345,7 @@ class ModelSpecificState(BaseModel):
 
 
 class ModelState(BaseModel):
-    model_config = Frozen
+    model_config = ConfigDict(frozen=True, extra="forbid", protected_namespaces=())
 
     model: str | None = None
     provider: str | None = None

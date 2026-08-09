@@ -6,6 +6,44 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added — Phase 7: recovery engine
+
+- `RecoveryEngine` (`continuum.recovery.engine`) reducing three independent signals — validation
+  statuses, action-ledger state and checkpoint integrity — to one `RecoveryMode`.
+- **The most cautious applicable signal wins.** Each signal proposes a mode and the engine takes the
+  maximum on an explicit severity ordering (`RESUME < REPAIR_AND_RESUME < REPLAN < WAIT <
+  REQUEST_HUMAN < ROLLBACK < ABORT`). These signals genuinely co-occur — a run can have a stale
+  dataset *and* an uncertain side effect — and returning whichever was noticed first would let the
+  unsafe answer win roughly half the time.
+- `plan_repairs` (`continuum.recovery.planner`) producing an ordered, deduplicated, deterministic
+  repair plan. Reconciling an uncertain side effect always sorts first: nothing else is safe while
+  the world may or may not have been modified. Dependencies are re-pinned before the evidence and
+  findings derived from them, since repairing in the wrong order produces work that is stale on
+  arrival.
+- Components with no mapped repair escalate to human review rather than passing silently, so an
+  unhandled case cannot be mistaken for a clean one.
+- `RecoveryContract` (`continuum.recovery.contract`) naming exactly **one** next permitted action.
+  Listing everything currently allowed would let an agent pick the convenient step and skip the
+  reconciliation it was supposed to do first. Contracts are deterministic and sealed with an
+  integrity hash — a contract editable between issue and enforcement would gate nothing.
+- The engine is read-only: it computes and explains a decision without mutating the run, which is
+  what makes assessment safe to perform against a live database.
+- 49 new tests (424 total), including a precedence matrix and five mutation checks confirming the
+  decision logic resists sabotage. 100% line coverage.
+
+### Fixed
+
+- `strict_unknown=False` was honoured by the validator but ignored by the planner, so unverifiable
+  resources still demanded human review and the setting had no observable effect.
+- Removed a dead `now` parameter from `StateValidator` that was accepted, typed as `object`, and
+  never used.
+
+### Removed
+
+- Two unreachable branches in the engine's decision rule (`ABORT` on an empty run, and an
+  empty-proposal fallback). `restore()` raises before the first can be reached and the second cannot
+  fire; both were verified dead rather than left as untestable code.
+
 ### Added — Phase 6: action ledger and idempotency
 
 - Idempotency keys (`continuum.actions.idempotency`) derived from action type plus canonically

@@ -97,7 +97,7 @@ class StateValidator:
     starts; a caller who genuinely tolerates uncertainty can opt out.
     """
 
-    def __init__(self, *, strict_unknown: bool = True, now: object = None) -> None:
+    def __init__(self, *, strict_unknown: bool = True) -> None:
         self.strict_unknown = strict_unknown
 
     def validate(

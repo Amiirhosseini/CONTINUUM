@@ -95,6 +95,17 @@ from continuum.models import (
     UnknownSideEffect,
     utcnow,
 )
+from continuum.recovery import (
+    RecoveryDecision,
+    RecoveryEngine,
+    RepairKind,
+    RepairPlan,
+    RepairStep,
+    build_contract,
+    plan_repairs,
+    render_contract,
+    verify_contract,
+)
 from continuum.state import (
     CompositeExtractor,
     DeterministicExtractor,
@@ -240,4 +251,14 @@ __all__ = [
     "idempotency_key",
     "reconcile_pending",
     "unresolved_actions",
+    # recovery engine
+    "RecoveryDecision",
+    "RecoveryEngine",
+    "RepairKind",
+    "RepairPlan",
+    "RepairStep",
+    "build_contract",
+    "plan_repairs",
+    "render_contract",
+    "verify_contract",
 ]

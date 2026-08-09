@@ -81,7 +81,7 @@ CONTINUUM separates **LLM context** (temporary) from **durable task state** (per
 
 > Not published to PyPI yet. Install from a clone: `uv venv && uv pip install -e ".[dev]"`
 
-What runs today (Phases 1–6): record events, project state, checkpoint, survive a crash, refuse to resume on stale state, and never duplicate an external side effect.
+What runs today (Phases 1–7): record events, project state, checkpoint, survive a crash, validate against the current environment, never duplicate an external side effect, and decide how it is safe to resume.
 
 ```python
 from continuum import EventType, Run, SQLiteStorage, project
@@ -647,6 +647,63 @@ issue count: 1
 
 Sixty documents not reprocessed, one dataset change detected and propagated, and **exactly one issue created** despite the crash.
 
+### Recovery Engine (Phase 7 — Complete)
+
+Validation says what is wrong. The ledger says what may have happened. The engine turns both into one decision.
+
+```python
+from continuum.recovery import RecoveryEngine
+
+decision = RecoveryEngine(store).assess("run_4821", current_environment=now)
+
+decision.mode  # RecoveryMode.REQUEST_HUMAN
+decision.next_allowed_action  # "reconcile_action:action_011f511d"
+decision.permits("rederive_finding:finding_17")  # False
+```
+
+**The most cautious applicable signal wins.** Each signal proposes a mode; the engine takes the maximum on an explicit ordering:
+
+```text
+RESUME < REPAIR_AND_RESUME < REPLAN < WAIT < REQUEST_HUMAN < ROLLBACK < ABORT
+```
+
+This matters because the signals co-occur. A run can have a stale dataset *and* an uncertain side effect at the same time. Returning whichever was noticed first would make recovery depend on iteration order — and the unsafe answer would win about half the time.
+
+**Repairs are ordered by dependency, not discovery.** Reconciling an uncertain side effect always comes first: nothing else is safe while the world may or may not have been modified. A dependency is re-pinned before the evidence and findings derived from it, since repairing in the wrong order produces work that is stale the moment it finishes.
+
+**The contract names exactly one next action.** Listing everything currently allowed would let an agent pick the convenient step and skip the reconciliation it was supposed to do first:
+
+```text
+run_id:            run_1
+checkpoint:        v2
+recovery_status:   requires_human
+verified:          goal, progress
+invalidated:       evidence:paper_128 (stale), external_dependency:dataset (conflicted),
+                   finding:finding_17 (stale)
+required_actions:
+  - reconcile_action:action_011f511df03cf454
+  - revalidate_dependency:dataset
+  - rederive_evidence:paper_128
+  - rederive_finding:finding_17
+next_allowed:      reconcile_action:action_011f511df03cf454
+```
+
+Contracts are deterministic and sealed with an integrity hash — one that could be edited between issue and enforcement would gate nothing.
+
+The engine is **read-only**. It computes and explains a decision without mutating the run, which is what makes assessment safe to perform against a live database.
+
+Full run — crash, dataset change, and an interrupted side effect together:
+
+```text
+Recovery decision: REQUEST_HUMAN
+  because 1 external side effect(s) have unknown outcomes
+
+agent tries to skip ahead -> permitted? False
+after reconciling         -> REPAIR_AND_RESUME, next: revalidate_dependency:dataset
+
+=== external system === issues created: 1
+```
+
 ### Security
 
 - **Deterministic canonical hashing** — sorted keys, UTC-normalized timestamps, enum-by-value serialization, rejection of non-finite floats
@@ -695,6 +752,11 @@ continuum/
 |       |   +-- idempotency.py       Content-derived action identity
 |       |   +-- ledger.py            Durable record of side effects
 |       |   +-- reconciliation.py    Resolving uncertain outcomes
+|       +-- recovery/
+|       |   +-- __init__.py
+|       |   +-- engine.py            Decide how a run may resume
+|       |   +-- planner.py           Ordered repair steps
+|       |   +-- contract.py          Sealed, gated next action
 |       +-- security/
 |           +-- __init__.py
 |           +-- hashing.py           Deterministic canonical hashing
@@ -718,6 +780,8 @@ continuum/
     +-- test_validator.py            Validation and staleness propagation
     +-- test_action_ledger.py        Idempotency and the crash gap
     +-- test_reconciliation.py       Strategies + real-subprocess crash tests
+    +-- test_recovery_engine.py      Decision precedence and contract gating
+    +-- test_recovery_planner.py     Repair ordering and determinism
 ```
 
 ---
@@ -766,7 +830,7 @@ No benchmark results are claimed. The harness is being built. Results will be pu
 |   4   | Checkpoint creation               | Complete    |
 |   5   | State validation                  | Complete    |
 |   6   | Action ledger + Idempotency       | Complete    |
-|   7   | Recovery engine                   | Planned     |
+|   7   | Recovery engine                   | Complete    |
 |   8   | CLI                               | Planned     |
 |   9   | Crash recovery examples           | Planned     |
 |  10   | Environment snapshots and diffs   | Complete    |
@@ -819,7 +883,7 @@ mypy                      # Type check
 
 ## Contributing
 
-The project is in early development (Phases 1–6 and 10 complete). There are many components to build — storage engines, state validation, framework adapters, benchmark scenarios, documentation.
+The project is in early development (Phases 1–7 and 10 complete). There are many components to build — storage engines, state validation, framework adapters, benchmark scenarios, documentation.
 
 Open an issue before submitting large PRs.
 
