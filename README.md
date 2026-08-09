@@ -382,6 +382,43 @@ chain.verify()  # recompute fingerprints, re-walk links
 
 `commit` returns `None` when nothing meaningful changed, so timer-driven checkpoint policies cannot inflate history with noise. Fingerprints ignore bookkeeping fields — a state means the same thing regardless of when it was projected.
 
+### Durable Storage (Phase 3 — Complete)
+
+SQLite by default. No server, no cloud account, no daemon:
+
+```python
+from continuum import SQLiteStorage, Run, EventType, project
+
+with SQLiteStorage("agent.db") as store:
+    store.create_run(Run(run_id="run_4821", goal="Analyze 10,000 documents"))
+    store.append_event("run_4821", EventType.RUN_STARTED, {"goal": "...", "total": 10000})
+    store.append_event("run_4821", EventType.WORK_COMPLETED, {"count": 3421})
+
+    state = project("run_4821", store.read_events("run_4821"))
+    store.verify_events("run_4821").ok
+```
+
+**What the engine guarantees:** append-only events, atomic sequence allocation, and durability once `append_event` returns. WAL journaling keeps readers unblocked while the agent writes. `synchronous=FULL` costs an fsync per append — the alternative can lose the last commits on a crash, silently reintroducing exactly the duplicate-work problem CONTINUUM exists to prevent.
+
+**What it does not guarantee:** exactly-once semantics. A crash between an external side effect and its ledger write leaves the ledger behind reality. Storage cannot close that gap alone; the action ledger reconciles it in Phase 6. The engine is also single-host and not encrypted at rest.
+
+**Write races fail loudly.** Two writers appending to one run take an `IMMEDIATE` lock, with `UNIQUE(run_id, sequence)` as a backstop. One commits, the other gets a `ConcurrentWriteError`. A silently forked chain that still verifies clean would be the worst possible failure, because it looks correct.
+
+**Corruption is refused, never returned.** Runs, versions and checkpoints are validated and hash-checked on read; a mismatch raises `CorruptedRecord` rather than handing back state an agent might act on.
+
+Verified end to end — a worker killed with `os._exit(9)` mid-run, then restarted against the same file:
+
+```text
+[pid 58807] started at 0 completed
+[pid 58807] *** CRASH at doc 39 ***
+
+[pid 58808] resumed at 40 completed
+[pid 58808] finished at 100 completed
+
+events        102, integrity ok=True, trusted_through=102
+docs written  100 events, 100 unique -> duplicates=0
+```
+
 ### Security
 
 - **Deterministic canonical hashing** — sorted keys, UTC-normalized timestamps, enum-by-value serialization, rejection of non-finite floats
@@ -411,6 +448,10 @@ continuum/
 |       |   +-- extractor.py         Pluggable extraction (LLM optional)
 |       |   +-- versioning.py        Content-addressed version chain
 |       |   +-- diff.py              Semantic diff and renderer
+|       +-- storage/
+|       |   +-- __init__.py          open_storage() URL dispatch
+|       |   +-- base.py              Storage interface and stated guarantees
+|       |   +-- sqlite.py            WAL, transactions, integrity on read
 |       +-- security/
 |           +-- __init__.py
 |           +-- hashing.py           Deterministic canonical hashing
@@ -424,6 +465,9 @@ continuum/
     +-- test_extractor.py            Extractor protocol and LLM containment
     +-- test_versioning.py           Version chain integrity
     +-- test_diff.py                 Semantic diff behaviour
+    +-- test_storage.py              Persistence, durability, corruption refusal
+    +-- test_storage_concurrency.py  Thread and multi-process write races
+    +-- test_storage_edges.py        Payload validation and URL handling
 ```
 
 ---
@@ -468,7 +512,7 @@ No benchmark results are claimed. The harness is being built. Results will be pu
 |:-----:|:----------------------------------|:------------|
 |   1   | Data models + Event system        | Complete    |
 |   2   | Semantic state representation     | Complete    |
-|   3   | SQLite persistence                | Planned     |
+|   3   | SQLite persistence                | Complete    |
 |   4   | Checkpoint creation               | Planned     |
 |   5   | State validation                  | Planned     |
 |   6   | Action ledger + Idempotency       | Planned     |
@@ -525,7 +569,7 @@ mypy                      # Type check
 
 ## Contributing
 
-The project is in early development (Phases 1–2 complete). There are many components to build — storage engines, state validation, framework adapters, benchmark scenarios, documentation.
+The project is in early development (Phases 1–3 complete). There are many components to build — storage engines, state validation, framework adapters, benchmark scenarios, documentation.
 
 Open an issue before submitting large PRs.
 
