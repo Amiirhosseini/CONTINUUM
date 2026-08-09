@@ -40,7 +40,11 @@ class GenericAgentAdapter(AgentAdapter):
         metadata: Mapping[str, Any] | None = None,
     ) -> Run:
         """Helper to create and initialize a new task run."""
-        run = Run(goal=goal, metadata=dict(metadata or {})) if run_id is None else Run(run_id=run_id, goal=goal, metadata=dict(metadata or {}))
+        run = (
+            Run(goal=goal, metadata=dict(metadata or {}))
+            if run_id is None
+            else Run(run_id=run_id, goal=goal, metadata=dict(metadata or {}))
+        )
         return self.storage.create_run(run)
 
     def capture_state(
