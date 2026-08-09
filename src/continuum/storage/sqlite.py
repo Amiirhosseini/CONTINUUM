@@ -25,7 +25,7 @@ import json
 import sqlite3
 import threading
 from collections.abc import Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Any
 
@@ -191,6 +191,19 @@ class SQLiteStorage(Storage):
     def close(self) -> None:
         with self._lock:
             self._connection.close()
+
+    def __del__(self) -> None:
+        """Release the connection if the owner never closed it.
+
+        A dropped handle should not leak an OS file descriptor. This is a
+        safety net, not a substitute for ``close()`` or a ``with`` block:
+        finalisation timing is not guaranteed, so durability still depends on
+        commits, which are synchronous.
+        """
+        connection = getattr(self, "_connection", None)
+        if connection is not None:
+            with suppress(Exception):  # interpreter teardown can be hostile
+                connection.close()
 
     # -- runs ------------------------------------------------------------- #
 

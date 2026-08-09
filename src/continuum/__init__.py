@@ -7,6 +7,20 @@ runtime (``Continuum``), storage engines, validation, action ledger and CLI
 arrive in later phases; nothing here imports an LLM provider.
 """
 
+from continuum.actions import (
+    ActionLedger,
+    ActionOutcome,
+    AssumeNotOccurredReconciler,
+    ManualReconciler,
+    ProbeReconciler,
+    Reconciler,
+    ReconciliationReport,
+    Resolution,
+    arguments_hash,
+    idempotency_key,
+    reconcile_pending,
+    unresolved_actions,
+)
 from continuum.checkpoint import (
     CheckpointDecision,
     CheckpointError,
@@ -213,4 +227,17 @@ __all__ = [
     "capture_environment",
     "diff_environments",
     "validate_state",
+    # action ledger
+    "ActionLedger",
+    "ActionOutcome",
+    "AssumeNotOccurredReconciler",
+    "ManualReconciler",
+    "ProbeReconciler",
+    "Reconciler",
+    "ReconciliationReport",
+    "Resolution",
+    "arguments_hash",
+    "idempotency_key",
+    "reconcile_pending",
+    "unresolved_actions",
 ]

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 import textwrap
@@ -15,12 +14,11 @@ from continuum.actions import (
     ManualReconciler,
     ProbeReconciler,
     Resolution,
-    idempotency_key,
     reconcile_pending,
     unresolved_actions,
 )
 from continuum.events import EventType
-from continuum.models import Action, ActionStatus, Run, UnknownSideEffect
+from continuum.models import Action, ActionStatus, Run
 from continuum.storage import SQLiteStorage
 
 

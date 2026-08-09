@@ -211,7 +211,7 @@ def _key_for(ledger: ActionLedger, action: Action) -> str | None:
     for key, candidate in ledger._replay().items():
         if candidate.action_id == action.action_id:
             return key
-    return None
+    return None  # pragma: no cover - pending() only yields actions read from the ledger
 
 
 def unresolved_actions(ledger: ActionLedger) -> tuple[Action, ...]:

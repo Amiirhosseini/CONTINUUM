@@ -302,6 +302,18 @@ def test_a_globally_scoped_action_deduplicates_across_runs(
     assert not ledger.claim("send_welcome_email", {"to": "x@y.z"}, scoped_to_run=False).fresh
 
 
+def test_a_malformed_action_event_is_skipped_not_fatal(
+    ledger: ActionLedger, store: SQLiteStorage
+) -> None:
+    """A foreign writer's action event must not make the ledger unreadable."""
+    store.append_event("run_1", EventType.ACTION_RECORDED, {"note": "no key here"})
+    outcome = ledger.claim("github.create_issue", ISSUE)
+    ledger.complete(outcome.key, external_id="481")
+
+    assert len(ledger.all()) == 1
+    assert not ledger.claim("github.create_issue", ISSUE).fresh
+
+
 def test_all_and_pending_report_the_ledger_contents(ledger: ActionLedger) -> None:
     done = ledger.claim("a.do", {"n": 1})
     ledger.complete(done.key)
