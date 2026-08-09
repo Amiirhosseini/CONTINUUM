@@ -79,32 +79,57 @@ CONTINUUM separates **LLM context** (temporary) from **durable task state** (per
 
 ## Quick Start
 
-```bash
-pip install continuum-agent
-```
+> Not published to PyPI yet. Install from a clone: `uv venv && uv pip install -e ".[dev]"`
+
+What runs today (Phases 1–4): record events, project state, checkpoint, survive a crash.
 
 ```python
-from continuum import Continuum
+from continuum import EventType, Run, SQLiteStorage, project
+
+store = SQLiteStorage("agent.db")
+store.create_run(Run(run_id="run_4821", goal="Analyze 10,000 documents"))
+store.append_event(
+    "run_4821", EventType.RUN_STARTED, {"goal": "Analyze 10,000 documents", "total": 10_000}
+)
+
+for i, doc in enumerate(documents):
+    analyze(doc)
+    store.append_event("run_4821", EventType.WORK_COMPLETED, {"doc": i})
+```
+
+The process dies. A new one picks up exactly where it stopped:
+
+```python
+store = SQLiteStorage("agent.db")
+state = project("run_4821", store.read_events("run_4821"))
+
+print(state.progress.completed)  # 3421 — already done, not repeated
+print(store.verify_events("run_4821").ok)  # True — chain intact after the crash
+
+for i, doc in enumerate(documents[state.progress.completed :], state.progress.completed):
+    ...
+```
+
+### The API this is being built toward
+
+The ergonomic wrapper below is **not implemented yet** — it arrives with the runtime and CLI in
+Phases 4–8. It is shown so the direction is clear, not because it works today:
+
+```python
+from continuum import Continuum  # not available yet
 
 runtime = Continuum("agent.db")
-
-run = runtime.start(goal="Analyze 10,000 documents for evidence supporting hypothesis X")
-
-for doc in documents:
-    result = analyze(doc)
-    run.record_finding(result)
-    run.update_progress(completed=run.progress.completed + 1)
-
+run = runtime.start(goal="Analyze 10,000 documents")
 run.checkpoint()
-run.record_action(type="github.create_issue", arguments={"title": "...", "body": "..."})
+run.record_action(type="github.create_issue", arguments={...})
 run.complete()
 ```
 
-Process crashes. Restart:
-
 ```bash
-continuum resume run_4821
+continuum resume run_4821                # CLI: Phase 8
 ```
+
+Target output, illustrating the intended recovery report (not a recording of a working build):
 
 ```
 CONTINUUM RECOVERY
@@ -125,7 +150,9 @@ Repair: Revalidate experiments 14-17
 Next permitted action: dataset_revalidation
 ```
 
-Zero duplicated work. Zero duplicated side effects. Verified safe recovery.
+The goal: zero duplicated work, zero duplicated side effects, verified safe recovery. Crash recovery
+with zero duplicated work is [demonstrated below](#durable-storage-phase-3--complete) against the
+storage layer that exists today; side-effect deduplication needs the action ledger in Phase 6.
 
 ---
 
@@ -245,10 +272,25 @@ Before allowing resume, CONTINUUM generates a deterministic, machine-readable co
 
 ## API
 
-### Python
+### Python — available now
 
 ```python
-from continuum import Continuum
+from continuum import EventType, Run, SQLiteStorage, VersionChain, diff_states, project
+
+store = SQLiteStorage("sqlite:///agent.db")
+store.create_run(Run(run_id="run_4821", goal="Analyze these documents"))
+store.append_event("run_4821", EventType.RUN_STARTED, {"goal": "...", "total": 100})
+
+state = project("run_4821", store.read_events("run_4821"))  # fold events into state
+store.put_version(state, reason="milestone")  # versioned history
+store.verify_events("run_4821")  # audit the chain
+diff_states(previous, state)  # what changed, semantically
+```
+
+### Python — planned (Phases 4–7)
+
+```python
+from continuum import Continuum  # not implemented yet
 
 runtime = Continuum(storage="sqlite:///agent.db")
 run = runtime.start(goal="Analyze these documents")
@@ -264,7 +306,7 @@ if status.safe:
     run.continue_execution()
 ```
 
-### CLI
+### CLI — planned (Phase 8)
 
 ```bash
 continuum init                              # Initialize storage
@@ -419,6 +461,80 @@ events        102, integrity ok=True, trusted_through=102
 docs written  100 events, 100 unique -> duplicates=0
 ```
 
+### Checkpointing (Phase 4 — Complete)
+
+Checkpointing every turn is the obvious design and the wrong one: it costs an fsync per step and fills history with versions that mean nothing. A policy decides instead.
+
+```python
+from continuum import CheckpointManager, SemanticPolicy, SQLiteStorage
+
+manager = CheckpointManager(store, policy=SemanticPolicy(progress_stride=25))
+
+for doc in documents:
+    process(doc)
+    manager.maybe_checkpoint("run_4821")  # writes only when it matters
+```
+
+| Policy | Fires when |
+|:--|:--|
+| `ManualPolicy` | asked explicitly |
+| `IntervalPolicy` | N seconds since the last checkpoint |
+| `EventPolicy` | a side effect or milestone event occurs |
+| `SemanticPolicy` | the *meaning* of the state changed |
+| `ContextPressurePolicy` | the context window is filling up |
+| `HybridPolicy` | any of the above (the default) |
+
+`SemanticPolicy` is the interesting one. Grinding from document 3,400 to 3,401 changes progress but nothing structural. Invalidating a single decision changes what the agent may safely do next. The first is ignored; the second always checkpoints.
+
+Policies are pure functions of an explicit context — including the clock — so checkpoint timing is testable rather than a source of flaky tests.
+
+**Restore replays the gap.** A checkpoint plus the events recorded after it, so a crash *between* checkpoints does not discard the work in between:
+
+```python
+restored = manager.restore("run_4821")
+restored.state.progress.completed  # caught up to the log
+restored.pending_events  # how much was replayed
+```
+
+Measured on a 200-document run killed at document 117:
+
+```text
+*** CRASH at doc 117 ***
+
+restored from checkpoint v8 | replayed 17 events (not 135)
+finished at 200
+```
+
+### Recovery Context
+
+On resume the agent is handed the minimum sufficient briefing, not the transcript:
+
+```text
+CURRENT GOAL
+  Analyze 200 documents  (goal v1)
+
+NEXT SAFE ACTION
+  continue_analysis
+
+VERIFIED PROGRESS
+  200 completed, 0 pending, 0 failed (of 200)
+  derived from events 1..227
+
+VALID DECISIONS
+  d_12: Only peer-reviewed studies
+
+RELEVANT FINDINGS
+  f_0 (0.90): pattern at 0
+  ... and 5 more findings
+
+EXTERNAL DEPENDENCIES
+  dataset: v3 [valid]
+```
+
+That is a 228-event run rendered in 410 characters. **Stale state is shown, never hidden** — an agent that is not told its dataset changed will confidently continue on invalid assumptions. Under a token budget, sections drop from the least important end, but goal, verified progress and stale state are never sacrificed.
+
+Token figures reported by `estimate_tokens` are a **character-based heuristic, not a tokenizer**. CONTINUUM takes no model-provider dependency for a size hint. No compression ratio is claimed until the benchmark measures real tokens.
+
 ### Security
 
 - **Deterministic canonical hashing** — sorted keys, UTC-normalized timestamps, enum-by-value serialization, rejection of non-finite floats
@@ -452,6 +568,11 @@ continuum/
 |       |   +-- __init__.py          open_storage() URL dispatch
 |       |   +-- base.py              Storage interface and stated guarantees
 |       |   +-- sqlite.py            WAL, transactions, integrity on read
+|       +-- checkpoint/
+|       |   +-- __init__.py
+|       |   +-- policy.py            When to checkpoint
+|       |   +-- manager.py           Create, seal, persist, restore
+|       |   +-- context.py           Bounded recovery context
 |       +-- security/
 |           +-- __init__.py
 |           +-- hashing.py           Deterministic canonical hashing
@@ -468,6 +589,9 @@ continuum/
     +-- test_storage.py              Persistence, durability, corruption refusal
     +-- test_storage_concurrency.py  Thread and multi-process write races
     +-- test_storage_edges.py        Payload validation and URL handling
+    +-- test_checkpoint_policy.py    Policy decisions and triggers
+    +-- test_checkpoint_manager.py   Creation, restore, crash interleavings
+    +-- test_recovery_context.py     Bounded context and truncation safety
 ```
 
 ---
@@ -513,7 +637,7 @@ No benchmark results are claimed. The harness is being built. Results will be pu
 |   1   | Data models + Event system        | Complete    |
 |   2   | Semantic state representation     | Complete    |
 |   3   | SQLite persistence                | Complete    |
-|   4   | Checkpoint creation               | Planned     |
+|   4   | Checkpoint creation               | Complete    |
 |   5   | State validation                  | Planned     |
 |   6   | Action ledger + Idempotency       | Planned     |
 |   7   | Recovery engine                   | Planned     |
@@ -569,7 +693,7 @@ mypy                      # Type check
 
 ## Contributing
 
-The project is in early development (Phases 1–3 complete). There are many components to build — storage engines, state validation, framework adapters, benchmark scenarios, documentation.
+The project is in early development (Phases 1–4 complete). There are many components to build — storage engines, state validation, framework adapters, benchmark scenarios, documentation.
 
 Open an issue before submitting large PRs.
 

@@ -6,6 +6,70 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added — Phase 4: checkpoint creation
+
+- Checkpoint policies (`continuum.checkpoint.policy`): `ManualPolicy`, `IntervalPolicy`,
+  `EventPolicy`, `SemanticPolicy`, `ContextPressurePolicy` and `HybridPolicy`, plus a
+  `default_policy()` that checks explicit requests, side effects and meaning before falling back to
+  time — so a checkpoint reports the real reason it was taken rather than "the timer went off".
+  Policies are pure functions of an explicit `PolicyContext`, including the clock, which makes
+  checkpoint timing testable instead of flaky.
+- `SemanticPolicy` fires on meaning, not volume: structural changes (a decision recorded or
+  invalidated, a dependency version change, an approval, a model switch) always checkpoint, while
+  incremental progress only checkpoints on crossing a configurable stride.
+- `CheckpointManager` (`continuum.checkpoint.manager`): evaluates policy, projects state, writes
+  version then checkpoint then annotation, and restores. The write ordering is documented against
+  each crash interleaving; no ordering can produce a checkpoint that claims to cover events it does
+  not.
+- `restore()` replays events recorded after the checkpoint onto it, so a crash *between* checkpoints
+  does not discard the work in between. `replay=False` returns the checkpoint on its own terms for
+  validators that must judge it before trusting anything newer.
+- Bounded recovery context (`continuum.checkpoint.context`): renders the minimum sufficient briefing
+  — goal, verified progress, stale state, items requiring review, valid decisions, pending work,
+  findings ranked by confidence, dependencies. Sections drop from the least important end under a
+  token budget, but goal, progress and stale state are never dropped: an agent that resumes without
+  knowing what to distrust is worse than one that does not resume.
+- Token counts are explicitly labelled heuristic estimates (character-based). CONTINUUM takes no
+  tokenizer dependency, and no compression ratio is claimed until the benchmark measures one.
+- 71 new tests (277 total), 100% line coverage maintained.
+
+### Fixed
+
+- A checkpoint's own `STATE_CHECKPOINTED` annotation was counted as unreplayed work, so every
+  freshly-checkpointed run looked stale and restore replayed a no-op event each time. The manager
+  now advances the cursor past its own annotation, with a fallback for the crash interleaving where
+  the annotation was never written.
+
+### Added — Phase 3: SQLite persistence
+
+- `Storage` interface (`continuum.storage.base`) covering runs, events, state versions and
+  checkpoints, with its guarantees and non-guarantees documented in the module itself: append-only
+  events, atomic sequence allocation and durability on commit are promised; exactly-once,
+  distribution and encryption at rest explicitly are not.
+- `SQLiteStorage` (`continuum.storage.sqlite`): WAL journaling so readers never block the writer,
+  `synchronous=FULL` so committed work survives power loss, enforced foreign keys, `IMMEDIATE`
+  write transactions, and a `UNIQUE(run_id, sequence)` backstop that turns a write race into a
+  `ConcurrentWriteError` instead of a silently forked chain.
+- Optimistic concurrency via `expected_sequence`, letting a caller detect that a run moved on
+  beneath it rather than blindly appending.
+- `verify_events` re-audits a persisted chain directly from SQL, reporting `trusted_through` and
+  flagging unreadable rows without raising.
+- Integrity on read: corrupted runs, versions and checkpoints raise `CorruptedRecord` rather than
+  returning untrustworthy state. Checkpoints are sealed with an integrity hash on write.
+- `Run` model and sealed `StateCheckpoint` (`content`/`digest`/`sealed`/`verify`).
+- `open_storage()` URL handling for `sqlite:///path`, bare paths and `:memory:`; PostgreSQL fails
+  with a clear `NotImplementedError` instead of silently falling back to a local file.
+- 65 new tests (206 total), including two OS processes racing on one database file and a hard
+  `os._exit` mid-run, verified to resume with zero duplicated work.
+
+### Fixed
+
+- Event payloads are now validated as JSON-native at construction. A `datetime` in a payload hashed
+  one way in memory and another way after being read back, which would have made a valid event fail
+  reload — phantom corruption caused by storage, not by tampering.
+- `sqlite://` URL parsing no longer strips the leading slash of an absolute path, which had caused
+  the database to be created in the working directory instead of the requested location.
+
 ### Added — Phase 2: semantic state representation
 
 - Deterministic projection (`continuum.state.semantic`): folds an event prefix into `SemanticState`.
@@ -26,7 +90,7 @@ All notable changes to this project are documented here. The format follows
 - 11 new event types: findings, work, dependencies, approvals and model identity.
 - `SemanticState` accessors used by validation and recovery, including `dangling_evidence()` for
   detecting state that cites support it cannot produce.
-- 60 additional tests (117 total), 100% line coverage of `src/continuum`.
+- 84 additional tests (141 total), 100% line coverage of `src/continuum`.
 
 ### Added — Phase 1: data models and event system
 
