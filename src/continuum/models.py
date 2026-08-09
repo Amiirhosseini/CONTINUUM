@@ -1,0 +1,569 @@
+"""CONTINUUM data models.
+
+Phase 1 defines the *shape* of durable task state: enums, the semantic state
+tree, ledger records, environment snapshots, validation reports and recovery
+contracts. No storage or recovery logic lives here — these are pure data
+structures (mostly immutable) so they can be serialized, versioned, hashed and
+diffed without side effects.
+
+Conventions
+-----------
+* All times are timezone-aware UTC.
+* All IDs are stable strings (``run_..``, ``action_..``, ``finding_..``).
+* Enums are ``str`` subclasses so they serialize to readable JSON.
+* State-bearing models are frozen: mutations must produce a new version via
+  ``model_copy`` — the versioning phase builds on this property.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from datetime import UTC, datetime
+from enum import StrEnum
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from continuum.security.hashing import make_id
+
+__all__ = [
+    "RunStatus",
+    "StateStatus",
+    "ActionStatus",
+    "RecoveryMode",
+    "RecoverySafety",
+    "Component",
+    "DiffKind",
+    "ApprovalStatus",
+    "PlanStepStatus",
+    "utcnow",
+    "Goal",
+    "PlanStep",
+    "Progress",
+    "Decision",
+    "Evidence",
+    "Finding",
+    "PendingWork",
+    "Approval",
+    "ExternalDependency",
+    "ModelSpecificState",
+    "ModelState",
+    "SemanticState",
+    "Action",
+    "EnvResource",
+    "EnvironmentSnapshot",
+    "ComponentValidationEntry",
+    "StateValidationResult",
+    "RecoveryContract",
+    "StateCheckpoint",
+    "DiffEntry",
+    "StateDiff",
+    "UnknownSideEffect",
+]
+
+Frozen = ConfigDict(frozen=True, extra="forbid")
+
+
+def utcnow() -> datetime:
+    return datetime.now(UTC)
+
+
+class RunStatus(StrEnum):
+    PLANNED = "planned"
+    STARTED = "started"
+    RUNNING = "running"
+    CHECKPOINTED = "checkpointed"
+    SUSPENDED = "suspended"
+    COMPLETED = "completed"
+    CRASHED = "crashed"
+    ABORTED = "aborted"
+    FAILED = "failed"
+
+
+class StateStatus(StrEnum):
+    VALID = "valid"
+    STALE = "stale"
+    CONFLICTED = "conflicted"
+    UNKNOWN = "unknown"
+    INVALID = "invalid"
+    REQUIRES_REVIEW = "requires_review"
+    EXPIRED = "expired"
+
+
+class ActionStatus(StrEnum):
+    PLANNED = "planned"
+    STARTED = "started"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    UNKNOWN = "unknown"
+    COMPENSATED = "compensated"
+    REQUIRES_REVIEW = "requires_review"
+    EXPIRED = "expired"
+
+
+class RecoveryMode(StrEnum):
+    RESUME = "resume"
+    REPAIR_AND_RESUME = "repair_and_resume"
+    ROLLBACK = "rollback"
+    WAIT = "wait"
+    REQUEST_HUMAN = "request_human"
+    REPLAN = "replan"
+    ABORT = "abort"
+
+
+class RecoverySafety(StrEnum):
+    SAFE_TO_RESUME = "safe_to_resume"
+    REQUIRES_REPAIR = "requires_repair"
+    REQUIRES_REVALIDATION = "requires_revalidation"
+    REQUIRES_HUMAN = "requires_human"
+    BLOCKED = "blocked"
+    UNSAFE = "unsafe"
+
+
+class Component(StrEnum):
+    GOAL = "goal"
+    PROGRESS = "progress"
+    PLAN = "plan"
+    DECISION = "decision"
+    FINDING = "finding"
+    EVIDENCE = "evidence"
+    PENDING_WORK = "pending_work"
+    EXTERNAL_DEPENDENCY = "external_dependency"
+    ACTION = "action"
+    MODEL = "model"
+    APPROVAL = "approval"
+    ENVIRONMENT = "environment"
+
+
+class DiffKind(StrEnum):
+    ADDED = "added"
+    REMOVED = "removed"
+    CHANGED = "changed"
+    INVALIDATED = "invalidated"
+
+
+class ApprovalStatus(StrEnum):
+    PENDING = "pending"
+    GRANTED = "granted"
+    REVOKED = "revoked"
+    EXPIRED = "expired"
+    REQUIRES_REVIEW = "requires_review"
+
+
+class PlanStepStatus(StrEnum):
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    BLOCKED = "blocked"
+    VERIFIED = "verified"
+    COMPLETED = "completed"
+
+
+class Origin(StrEnum):
+    """Where a piece of state came from — decides how much it can be trusted."""
+
+    DETERMINISTIC = "deterministic"
+    """Derived by folding recorded events. Reproducible and independently checkable."""
+
+    HUMAN = "human"
+    """Asserted by a person."""
+
+    LLM = "llm"
+    """Inferred by a model. Never authoritative; always requires review."""
+
+    IMPORTED = "imported"
+    """Loaded from a foreign checkpoint whose event history is unavailable."""
+
+
+class Provenance(BaseModel):
+    """Trace from a state component back to the event that produced it."""
+
+    model_config = Frozen
+
+    origin: Origin = Origin.DETERMINISTIC
+    source_sequence: int | None = None
+    source_event_id: str | None = None
+    extractor: str | None = None
+
+    @property
+    def reproducible(self) -> bool:
+        """True when the component can be re-derived from the event log alone."""
+        return self.origin is Origin.DETERMINISTIC and self.source_sequence is not None
+
+
+# --------------------------------------------------------------------------- #
+# Goal / plan / progress
+# --------------------------------------------------------------------------- #
+
+
+class Goal(BaseModel):
+    model_config = Frozen
+
+    description: str
+    version: int = 1
+    constraints: list[str] = Field(default_factory=list)
+
+    @field_validator("version")
+    @classmethod
+    def _version_positive(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("goal version must be >= 1")
+        return v
+
+
+class PlanStep(BaseModel):
+    model_config = Frozen
+
+    step_id: str = Field(default_factory=lambda: make_id("step"))
+    description: str
+    status: PlanStepStatus = PlanStepStatus.PENDING
+    depends_on: list[str] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)
+    provenance: Provenance = Field(default_factory=Provenance)
+
+
+class Progress(BaseModel):
+    model_config = Frozen
+
+    total: int | None = None
+    completed: int = 0
+    pending: int = 0
+    failed: int = 0
+
+    @field_validator("total", "completed", "pending", "failed")
+    @classmethod
+    def _non_negative(cls, v: int | None) -> int | None:
+        if v is not None and v < 0:
+            raise ValueError("progress counters must be non-negative")
+        return v
+
+    @model_validator(mode="after")
+    def _bounded(self) -> Progress:
+        if self.total is not None and self.completed + self.pending + self.failed > self.total:
+            raise ValueError("completed + pending + failed exceeds total")
+        return self
+
+
+# --------------------------------------------------------------------------- #
+# Semantic state components
+# --------------------------------------------------------------------------- #
+
+
+class Decision(BaseModel):
+    """A durable decision the agent made, with its evidence trail."""
+
+    model_config = Frozen
+
+    decision_id: str = Field(default_factory=lambda: make_id("decision"))
+    decision: str
+    reason: str = ""
+    evidence: list[str] = Field(default_factory=list)
+    status: StateStatus = StateStatus.VALID
+    created_at: datetime = Field(default_factory=utcnow)
+    invalidated_at: datetime | None = None
+    invalidated_reason: str | None = None
+    provenance: Provenance = Field(default_factory=Provenance)
+
+
+class Evidence(BaseModel):
+    model_config = Frozen
+
+    evidence_id: str = Field(default_factory=lambda: make_id("evidence"))
+    summary: str = ""
+    source: str | None = None
+    checksum: str | None = None
+    status: StateStatus = StateStatus.VALID
+    added_at: datetime = Field(default_factory=utcnow)
+    provenance: Provenance = Field(default_factory=Provenance)
+
+
+class Finding(BaseModel):
+    model_config = Frozen
+
+    finding_id: str = Field(default_factory=lambda: make_id("finding"))
+    claim: str
+    evidence: list[str] = Field(default_factory=list)
+    confidence: float = 1.0
+    status: StateStatus = StateStatus.VALID
+    created_at: datetime = Field(default_factory=utcnow)
+    provenance: Provenance = Field(default_factory=Provenance)
+
+    @field_validator("confidence")
+    @classmethod
+    def _confidence_unit(cls, v: float) -> float:
+        if not 0.0 <= v <= 1.0:
+            raise ValueError("confidence must be within [0, 1]")
+        return v
+
+
+class PendingWork(BaseModel):
+    model_config = Frozen
+
+    task_id: str = Field(default_factory=lambda: make_id("task"))
+    description: str
+    prerequisite: list[str] = Field(default_factory=list)
+    status: StateStatus = StateStatus.VALID
+    created_at: datetime = Field(default_factory=utcnow)
+    provenance: Provenance = Field(default_factory=Provenance)
+
+
+class Approval(BaseModel):
+    """A human approval with a lifetime; approvals can expire."""
+
+    model_config = Frozen
+
+    approval_id: str = Field(default_factory=lambda: make_id("approval"))
+    subject: str
+    status: ApprovalStatus = ApprovalStatus.PENDING
+    granted_at: datetime | None = None
+    granted_by: str | None = None
+    expires_at: datetime | None = None
+    reason: str | None = None
+
+
+class ExternalDependency(BaseModel):
+    model_config = Frozen
+
+    resource: str
+    kind: str = "resource"
+    version: str | None = None
+    checksum: str | None = None
+    status: StateStatus = StateStatus.VALID
+    metadata: Mapping[str, Any] = Field(default_factory=dict)
+    last_verified_at: datetime | None = None
+    provenance: Provenance = Field(default_factory=Provenance)
+
+
+class ModelSpecificState(BaseModel):
+    """An assumption tied to a specific model; switching models must revalidate."""
+
+    model_config = Frozen
+
+    item_id: str = Field(default_factory=lambda: make_id("model_state"))
+    description: str
+    required_validation: str = "Must be revalidated after model change."
+
+
+class ModelState(BaseModel):
+    model_config = Frozen
+
+    model: str | None = None
+    provider: str | None = None
+    fingerprint: str | None = None
+    model_specific_state: list[ModelSpecificState] = Field(default_factory=list)
+
+
+class SemanticState(BaseModel):
+    """The compact, durable representation of task state.
+
+    This is what survives crashes and context loss — NOT the transcript.
+
+    A state is a *projection* of an event prefix. ``source_sequence`` records
+    how far into the log the projection consumed, which makes the state
+    reproducible: folding the same prefix again must yield an equal state.
+    """
+
+    model_config = Frozen
+
+    run_id: str
+    goal: Goal
+    progress: Progress = Field(default_factory=Progress)
+    plan: list[PlanStep] = Field(default_factory=list)
+    decisions: list[Decision] = Field(default_factory=list)
+    findings: list[Finding] = Field(default_factory=list)
+    evidence: list[Evidence] = Field(default_factory=list)
+    pending_work: list[PendingWork] = Field(default_factory=list)
+    approvals: list[Approval] = Field(default_factory=list)
+    external_dependencies: list[ExternalDependency] = Field(default_factory=list)
+    model: ModelState | None = None
+    version: int = 0
+    source_sequence: int = 0
+    """Highest event sequence folded into this state (0 = nothing consumed)."""
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+    @field_validator("version", "source_sequence")
+    @classmethod
+    def _non_negative(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("must be >= 0")
+        return v
+
+    def next_version(self, **overrides: Any) -> SemanticState:
+        """Produce the next versioned state from this one (immutable update)."""
+        return self.model_copy(
+            update={
+                "version": self.version + 1,
+                "updated_at": utcnow(),
+                **overrides,
+            }
+        )
+
+    # -- lookups used by validation and recovery -------------------------- #
+
+    def decision(self, decision_id: str) -> Decision | None:
+        return next((d for d in self.decisions if d.decision_id == decision_id), None)
+
+    def finding(self, finding_id: str) -> Finding | None:
+        return next((f for f in self.findings if f.finding_id == finding_id), None)
+
+    def dependency(self, resource: str) -> ExternalDependency | None:
+        return next((d for d in self.external_dependencies if d.resource == resource), None)
+
+    def evidence_ids(self) -> frozenset[str]:
+        return frozenset(e.evidence_id for e in self.evidence)
+
+    def valid_decisions(self) -> tuple[Decision, ...]:
+        return tuple(d for d in self.decisions if d.status is StateStatus.VALID)
+
+    def open_work(self) -> tuple[PendingWork, ...]:
+        return tuple(w for w in self.pending_work if w.status is not StateStatus.INVALID)
+
+    def dangling_evidence(self) -> frozenset[str]:
+        """Evidence referenced by decisions or findings but absent from the registry.
+
+        A non-empty result means the state cites support it cannot produce.
+        """
+        known = self.evidence_ids()
+        cited: set[str] = set()
+        for decision in self.decisions:
+            cited.update(decision.evidence)
+        for finding in self.findings:
+            cited.update(finding.evidence)
+        return frozenset(cited - known)
+
+
+# --------------------------------------------------------------------------- #
+# Action ledger
+# --------------------------------------------------------------------------- #
+
+
+class Action(BaseModel):
+    """A record of an external side effect, for idempotent reconciliation."""
+
+    model_config = Frozen
+
+    action_id: str = Field(default_factory=lambda: make_id("action"))
+    run_id: str
+    action_type: str
+    arguments: Mapping[str, Any] = Field(default_factory=dict)
+    arguments_hash: str | None = None
+    status: ActionStatus = ActionStatus.PLANNED
+    external_id: str | None = None
+    result: Mapping[str, Any] | None = None
+    result_hash: str | None = None
+    side_effect_uncertain: bool = False
+    compensated_by: list[str] = Field(default_factory=list)
+    last_error: str | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+
+
+class UnknownSideEffect(RuntimeError):
+    """Raised when CONTINUUM cannot determine whether an external side effect occurred.
+
+    The caller must reconcile (do not blindly retry).
+    """
+
+
+# --------------------------------------------------------------------------- #
+# Environment
+# --------------------------------------------------------------------------- #
+
+
+class EnvResource(BaseModel):
+    model_config = Frozen
+
+    name: str
+    kind: str = "resource"
+    version: str | None = None
+    checksum: str | None = None
+    metadata: Mapping[str, Any] = Field(default_factory=dict)
+
+
+class EnvironmentSnapshot(BaseModel):
+    model_config = Frozen
+
+    env_id: str = Field(default_factory=lambda: make_id("env"))
+    run_id: str
+    captured_at: datetime = Field(default_factory=utcnow)
+    resources: Mapping[str, EnvResource] = Field(default_factory=dict)
+    integrity_hash: str | None = None
+
+
+# --------------------------------------------------------------------------- #
+# Validation + recovery
+# --------------------------------------------------------------------------- #
+
+
+class ComponentValidationEntry(BaseModel):
+    model_config = Frozen
+
+    component: Component
+    component_id: str | None = None
+    status: StateStatus
+    detail: str = ""
+
+
+class StateValidationResult(BaseModel):
+    model_config = Frozen
+
+    run_id: str
+    checkpoint_version: int = 0
+    statuses: list[ComponentValidationEntry] = Field(default_factory=list)
+    safe_to_resume: bool = False
+    recovery_mode: RecoveryMode | None = None
+    reason: str = ""
+    validated_at: datetime = Field(default_factory=utcnow)
+
+
+class RecoveryContract(BaseModel):
+    model_config = Frozen
+
+    run_id: str
+    checkpoint_version: int = 0
+    recovery_status: RecoverySafety
+    verified: list[str] = Field(default_factory=list)
+    invalidated: list[str] = Field(default_factory=list)
+    required_actions: list[str] = Field(default_factory=list)
+    next_allowed_action: str | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    integrity_hash: str | None = None
+
+
+# --------------------------------------------------------------------------- #
+# Checkpoints + diffs
+# --------------------------------------------------------------------------- #
+
+
+class StateCheckpoint(BaseModel):
+    model_config = Frozen
+
+    checkpoint_id: str = Field(default_factory=lambda: make_id("checkpoint"))
+    run_id: str
+    version: int = 0
+    trigger: str = "manual"
+    state: SemanticState
+    environment: EnvironmentSnapshot | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    integrity_hash: str | None = None
+
+
+class DiffEntry(BaseModel):
+    model_config = Frozen
+
+    kind: DiffKind
+    component: Component
+    component_id: str | None = None
+    detail: str = ""
+    before: Any = None
+    after: Any = None
+
+
+class StateDiff(BaseModel):
+    model_config = Frozen
+
+    run_id: str
+    from_version: int
+    to_version: int
+    entries: list[DiffEntry] = Field(default_factory=list)
