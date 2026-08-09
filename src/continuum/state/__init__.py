@@ -6,17 +6,25 @@ from continuum.state.extractor import (
     DeterministicExtractor,
     ExtractionContext,
     LLMExtractor,
+    LLMProposal,
     StateExtractor,
 )
-from continuum.state.semantic import ProjectionError, project, project_incremental
-from continuum.state.versioning import VersionChain, VersionEntry
+from continuum.state.semantic import (
+    ProjectionError,
+    ProjectionReport,
+    project,
+    project_incremental,
+)
+from continuum.state.versioning import VersionChain, VersionEntry, state_fingerprint
 
 __all__ = [
     "CompositeExtractor",
     "DeterministicExtractor",
     "ExtractionContext",
     "LLMExtractor",
+    "LLMProposal",
     "ProjectionError",
+    "ProjectionReport",
     "StateExtractor",
     "VersionChain",
     "VersionEntry",
@@ -24,4 +32,5 @@ __all__ = [
     "project",
     "project_incremental",
     "render_diff",
+    "state_fingerprint",
 ]

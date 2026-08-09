@@ -401,8 +401,14 @@ continuum/
 +-- src/
 |   +-- continuum/
 |       +-- __init__.py              Public API surface
-|       +-- models.py                Immutable data models (570 LOC)
-|       +-- events.py                Hash-chained event log (309 LOC)
+|       +-- models.py                Immutable data models
+|       +-- events.py                Hash-chained event log
+|       +-- state/
+|       |   +-- __init__.py
+|       |   +-- semantic.py          Deterministic event -> state projection
+|       |   +-- extractor.py         Pluggable extraction (LLM optional)
+|       |   +-- versioning.py        Content-addressed version chain
+|       |   +-- diff.py              Semantic diff and renderer
 |       +-- security/
 |           +-- __init__.py
 |           +-- hashing.py           Deterministic canonical hashing
@@ -411,6 +417,11 @@ continuum/
     +-- test_models.py               Model invariants and serialization
     +-- test_events.py               Chain integrity and tamper detection
     +-- test_hashing.py              Canonical hashing properties
+    +-- test_projection.py           Fold correctness, reproducibility, prefix-closure
+    +-- test_projection_edges.py     Malformed logs and partial payloads
+    +-- test_extractor.py            Extractor protocol and LLM containment
+    +-- test_versioning.py           Version chain integrity
+    +-- test_diff.py                 Semantic diff behaviour
 ```
 
 ---
@@ -512,7 +523,7 @@ mypy                      # Type check
 
 ## Contributing
 
-The project is in early development (Phase 1 complete). There are many components to build — storage engines, state validation, framework adapters, benchmark scenarios, documentation.
+The project is in early development (Phases 1–2 complete). There are many components to build — storage engines, state validation, framework adapters, benchmark scenarios, documentation.
 
 Open an issue before submitting large PRs.
 
