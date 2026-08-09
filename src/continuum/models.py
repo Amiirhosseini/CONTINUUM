@@ -24,7 +24,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from continuum.security.hashing import make_id
+from continuum.security.hashing import make_id, stable_hash
 
 __all__ = [
     "RunStatus",
@@ -48,6 +48,7 @@ __all__ = [
     "ExternalDependency",
     "ModelSpecificState",
     "ModelState",
+    "Run",
     "SemanticState",
     "Action",
     "EnvResource",
@@ -536,6 +537,22 @@ class RecoveryContract(BaseModel):
 # --------------------------------------------------------------------------- #
 
 
+class Run(BaseModel):
+    """A single long-running task, and the anchor for everything durable."""
+
+    model_config = Frozen
+
+    run_id: str = Field(default_factory=lambda: make_id("run"))
+    goal: str
+    status: RunStatus = RunStatus.STARTED
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+    metadata: Mapping[str, Any] = Field(default_factory=dict)
+
+    def touch(self, **overrides: Any) -> Run:
+        return self.model_copy(update={"updated_at": utcnow(), **overrides})
+
+
 class StateCheckpoint(BaseModel):
     model_config = Frozen
 
@@ -547,6 +564,25 @@ class StateCheckpoint(BaseModel):
     environment: EnvironmentSnapshot | None = None
     created_at: datetime = Field(default_factory=utcnow)
     integrity_hash: str | None = None
+
+    def content(self) -> dict[str, Any]:
+        """The sealed portion of the checkpoint (everything but the hash)."""
+        return self.model_dump(mode="json", exclude={"integrity_hash"})
+
+    def digest(self) -> str:
+        return stable_hash(self.content())
+
+    def sealed(self) -> StateCheckpoint:
+        """Return a copy carrying its integrity hash.
+
+        A checkpoint is the thing recovery trusts, so it is sealed the same way
+        events are: the hash is over the content, and a mismatch on read means
+        the record was changed outside CONTINUUM.
+        """
+        return self.model_copy(update={"integrity_hash": self.digest()})
+
+    def verify(self) -> bool:
+        return self.integrity_hash is not None and self.integrity_hash == self.digest()
 
 
 class DiffEntry(BaseModel):

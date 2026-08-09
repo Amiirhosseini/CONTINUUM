@@ -28,7 +28,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from continuum.models import utcnow
 from continuum.security.hashing import make_id, stable_hash
@@ -99,6 +99,34 @@ class AppendOnlyViolation(RuntimeError):
     """Raised when an operation would rewrite history."""
 
 
+def _json_native(value: Any, *, path: str = "payload") -> Any:
+    """Reject payload values that would not survive a storage round-trip.
+
+    An event's identity is its hash. If a payload holds a ``datetime``, it
+    hashes one way in memory and another way after being read back as a string,
+    which would make a perfectly valid event fail reload. Rather than allow that
+    to surface later as phantom corruption, payloads are constrained to
+    JSON-native types at construction and the caller converts explicitly.
+    """
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Mapping):
+        result: dict[str, Any] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise ValueError(
+                    f"{path}: keys must be strings, got {type(key).__name__} ({key!r})"
+                )
+            result[key] = _json_native(item, path=f"{path}.{key}")
+        return result
+    if isinstance(value, (list, tuple)):
+        return [_json_native(item, path=f"{path}[{i}]") for i, item in enumerate(value)]
+    raise ValueError(
+        f"{path}: {type(value).__name__} is not JSON-native and would not survive "
+        f"a storage round-trip; convert it first (e.g. datetime -> isoformat())"
+    )
+
+
 class Event(BaseModel):
     """An immutable, hash-chained fact about a run."""
 
@@ -113,6 +141,13 @@ class Event(BaseModel):
     causer_event_id: str | None = None
     prev_hash: str | None = None
     hash: str | None = None
+
+    @field_validator("payload", mode="before")
+    @classmethod
+    def _payload_is_json_native(cls, value: Any) -> Any:
+        if value is None:
+            return {}
+        return _json_native(value)
 
     def content(self) -> dict[str, Any]:
         """The hashed portion of the event (everything except ``hash``)."""

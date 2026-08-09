@@ -7,6 +7,23 @@ runtime (``Continuum``), storage engines, validation, action ledger and CLI
 arrive in later phases; nothing here imports an LLM provider.
 """
 
+from continuum.checkpoint import (
+    CheckpointDecision,
+    CheckpointError,
+    CheckpointManager,
+    CheckpointPolicy,
+    CheckpointTrigger,
+    ContextPressurePolicy,
+    EventPolicy,
+    HybridPolicy,
+    IntervalPolicy,
+    ManualPolicy,
+    RecoveryContext,
+    RestoredRun,
+    SemanticPolicy,
+    build_recovery_context,
+    default_policy,
+)
 from continuum.events import (
     AppendOnlyViolation,
     Event,
@@ -42,6 +59,7 @@ from continuum.models import (
     RecoveryContract,
     RecoveryMode,
     RecoverySafety,
+    Run,
     RunStatus,
     SemanticState,
     StateCheckpoint,
@@ -66,6 +84,17 @@ from continuum.state import (
     project_incremental,
     render_diff,
     state_fingerprint,
+)
+from continuum.storage import (
+    CheckpointNotFound,
+    ConcurrentWriteError,
+    CorruptedRecord,
+    RunNotFound,
+    SchemaVersionError,
+    SQLiteStorage,
+    Storage,
+    StorageError,
+    open_storage,
 )
 
 __version__ = "0.1.0"
@@ -108,6 +137,7 @@ __all__ = [
     "PlanStep",
     "Progress",
     "Provenance",
+    "Run",
     "RecoveryContract",
     "SemanticState",
     "StateCheckpoint",
@@ -130,4 +160,30 @@ __all__ = [
     "project_incremental",
     "render_diff",
     "state_fingerprint",
+    # storage
+    "CheckpointNotFound",
+    "ConcurrentWriteError",
+    "CorruptedRecord",
+    "RunNotFound",
+    "SQLiteStorage",
+    "SchemaVersionError",
+    "Storage",
+    "StorageError",
+    "open_storage",
+    # checkpointing
+    "CheckpointDecision",
+    "CheckpointError",
+    "CheckpointManager",
+    "CheckpointPolicy",
+    "CheckpointTrigger",
+    "ContextPressurePolicy",
+    "EventPolicy",
+    "HybridPolicy",
+    "IntervalPolicy",
+    "ManualPolicy",
+    "RecoveryContext",
+    "RestoredRun",
+    "SemanticPolicy",
+    "build_recovery_context",
+    "default_policy",
 ]
