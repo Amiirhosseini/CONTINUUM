@@ -116,9 +116,7 @@ def test_a_raised_action_leaves_the_side_effect_uncertain(store: SQLiteStorage) 
         raise TimeoutError("gateway did not respond after 30s")
 
     with pytest.raises(TimeoutError):
-        adapter.intercept_action(
-            "run_105", "stripe.charge", charge, arguments={"amount": 5000}
-        )
+        adapter.intercept_action("run_105", "stripe.charge", charge, arguments={"amount": 5000})
 
     ledger = ActionLedger(store, "run_105")
     pending = ledger.pending()
