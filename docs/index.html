@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CONTINUUM — Verifiable Semantic Recovery Layer for AI Agents</title>
-  <meta name="description" content="Lightweight, framework-agnostic reliability & semantic recovery layer for long-running AI agents. Externalizes verified task state to survive crashes and context loss.">
+  <meta name="description" content="Lightweight, framework-agnostic reliability & semantic recovery layer for long-running AI agents. Externalizes verified task state to survive crashes, context loss, and environment shifts.">
   <link rel="stylesheet" href="styles.css">
   <link rel="icon" type="image/png" href="assets/continuum-mark.png">
 </head>
@@ -12,12 +12,13 @@
 
   <!-- Navigation -->
   <nav class="navbar container">
-    <div class="brand">
-      <img src="assets/continuum-mark.png" alt="CONTINUUM Mark" class="brand-logo">
+    <a href="#" class="brand">
+      <img src="assets/continuum-mark.png" alt="CONTINUUM Logo" class="brand-logo">
       <span>CONTINUUM</span>
-    </div>
+    </a>
     <ul class="nav-links">
       <li><a href="#simulator">Simulator</a></li>
+      <li><a href="#diff">State Diff</a></li>
       <li><a href="#features">Features</a></li>
       <li><a href="#architecture">Architecture</a></li>
       <li><a href="#quickstart">Quickstart</a></li>
@@ -32,203 +33,248 @@
   </nav>
 
   <!-- Hero Section -->
-  <header class="hero container">
-    <div class="hero-badge">
-      <span>Phase 2 Engine Complete</span> &bull; Open Source Apache 2.0
+  <section class="hero container">
+    <div class="hero-content">
+      <div class="hero-badge">
+        <span class="pulse-dot"></span>
+        <span>Phases 1–3 Complete</span> &bull; 141 Passing Tests
+      </div>
+      <h1 class="hero-title">Agents that lose context without losing work.</h1>
+      <p class="hero-subtitle">
+        A lightweight, framework-agnostic semantic recovery layer for long-running AI agents.
+        Externalizes verified task state to survive crashes, context compaction, and environment shifts.
+      </p>
+      <div class="hero-actions">
+        <a href="#quickstart" class="btn-primary">Get Started</a>
+        <a href="#simulator" class="btn-secondary">Try Live Simulator</a>
+      </div>
     </div>
-    <h1 class="hero-title">Agents that can lose their context<br>without losing their work.</h1>
-    <p class="hero-subtitle">
-      A lightweight, framework-agnostic semantic recovery layer for long-running AI agents.
-      Externalizes verified task state to survive crashes, context compaction, and environment shifts.
-    </p>
-    <div class="hero-actions">
-      <a href="#quickstart" class="btn-primary">Get Started</a>
-      <a href="#simulator" class="btn-secondary">Try Simulator</a>
-    </div>
-  </header>
 
-  <!-- Fault Recovery Live Simulator -->
+    <div class="hero-code-window">
+      <div class="code-window-header">
+        <div class="window-dots">
+          <span class="window-dot red"></span>
+          <span class="window-dot yellow"></span>
+          <span class="window-dot green"></span>
+        </div>
+        <span class="window-title">continuum_agent.py</span>
+      </div>
+      <div class="hero-code-content">
+<span class="hl-cyan">from</span> continuum <span class="hl-cyan">import</span> Continuum
+
+<span class="hl-dim"># Initialize local SQLite storage engine</span>
+runtime = Continuum(<span class="hl-green">"sqlite:///agent.db"</span>)
+
+<span class="hl-dim"># Start a long-running run</span>
+run = runtime.start(goal=<span class="hl-green">"Analyze 10,000 documents"</span>)
+
+<span class="hl-dim"># Record progress & findings</span>
+run.record_finding(claim=<span class="hl-green">"Correlation verified"</span>)
+run.checkpoint()
+
+<span class="hl-dim"># Resume safely after process crash</span>
+recovered = runtime.resume(<span class="hl-green">"run_4821"</span>)
+status = recovered.validate()
+
+<span class="hl-cyan">if</span> status.safe:
+    recovered.continue_execution()
+      </div>
+    </div>
+  </section>
+
+  <!-- Interactive Simulator Section -->
   <section id="simulator" class="simulator-section container">
-    <div class="section-title">Interactive Fault Recovery Simulator</div>
-    <p class="section-desc">Test how CONTINUUM handles real-world agent failure scenarios in real time.</p>
-    
-    <div class="sim-grid">
-      <div class="sim-controls">
-        <h3>Failure Scenarios</h3>
-        <button class="sim-btn active" data-scenario="crash">
-          <span class="sim-btn-icon"></span>
-          Process Crash / Restart
+    <div class="section-header">
+      <h2 class="section-title">Interactive Fault Recovery Simulator</h2>
+      <p class="section-subtitle">Simulate real-world agent failures and inspect how CONTINUUM handles recovery contracts.</p>
+    </div>
+
+    <div class="sim-container">
+      <div class="sim-sidebar">
+        <div class="sim-sidebar-title">Select Failure Scenario</div>
+        <button class="sim-nav-btn active" data-scenario="crash">
+          <span>Process Crash / Restart</span>
+          <span class="sim-badge ok">RESUME</span>
         </button>
-        <button class="sim-btn" data-scenario="dataset">
-          <span class="sim-btn-icon"></span>
-          Environment Shift (Dataset v3 &rarr; v4)
+        <button class="sim-nav-btn" data-scenario="dataset">
+          <span>Environment Shift (v3 &rarr; v4)</span>
+          <span class="sim-badge warn">REPAIR</span>
         </button>
-        <button class="sim-btn" data-scenario="model">
-          <span class="sim-btn-icon"></span>
-          Model Switch (GPT-4 &rarr; Claude 3.5)
+        <button class="sim-nav-btn" data-scenario="model">
+          <span>Model Switch (GPT-4 &rarr; Claude)</span>
+          <span class="sim-badge warn">MODEL</span>
         </button>
-        <button class="sim-btn" data-scenario="sideeffect">
-          <span class="sim-btn-icon"></span>
-          Uncertain Side-Effect Guard
+        <button class="sim-nav-btn" data-scenario="sideeffect">
+          <span>Uncertain Side Effect</span>
+          <span class="sim-badge err">HUMAN</span>
         </button>
       </div>
 
-      <div class="sim-terminal">
-        <div class="term-header">
-          <div class="term-dots">
-            <span class="term-dot"></span>
-            <span class="term-dot"></span>
-            <span class="term-dot"></span>
+      <div class="sim-main">
+        <div class="sim-topbar">
+          <div class="sim-tabs">
+            <button class="sim-tab-btn active" data-tab="terminal">Terminal Output</button>
+            <button class="sim-tab-btn" data-tab="state">Semantic State JSON</button>
+            <button class="sim-tab-btn" data-tab="contract">Recovery Contract JSON</button>
           </div>
-          <span>continuum-cli v0.1.0 — bash</span>
+          <span class="hl-dim" style="font-family:var(--font-mono); font-size:0.78rem;">continuum-cli v0.1.0</span>
         </div>
-        <div class="term-output" id="simOutput">
-<span class="term-dim">$ continuum resume run_4821</span>
-
-<span class="term-highlight">CONTINUUM RECOVERY ENGINE</span>
-Run ID: run_4821
-Checkpoint Version: v17 (SHA-256: 8f3a92b1...)
-
-<span class="term-dim">--- State Audit ---</span>
-<span class="term-ok">[OK]</span> Goal: "Analyze 10,000 research documents"
-<span class="term-ok">[OK]</span> Progress: 3,421 completed, 6,579 pending
-<span class="term-ok">[OK]</span> 127 findings preserved (100% evidence verified)
-<span class="term-ok">[OK]</span> 14 decisions valid
-<span class="term-ok">[OK]</span> Action Ledger: 8 side effects verified (0 duplicated)
-
-<span class="term-dim">--- Recovery Decision ---</span>
-Status: <span class="term-ok">SAFE_TO_RESUME</span>
-Mode: RESUME
-Next permitted action: process_batch(start_index=3422)
-
-<span class="term-ok">✓ Task resumed from verified progress. Zero duplicated work.</span>
+        <div class="sim-output-area" id="simOutputArea">
+          <!-- Dynamically populated by app.js -->
         </div>
       </div>
     </div>
   </section>
 
-  <!-- Key Architectural Pillars -->
-  <section id="features" class="container">
-    <div class="section-title">Core Differentiation</div>
-    <p class="section-desc">Why CONTINUUM is built differently from traditional memory and workflow tools.</p>
+  <!-- Interactive Checkpoint Diff Engine -->
+  <section id="diff" class="diff-section container">
+    <div class="section-header">
+      <h2 class="section-title">Semantic Checkpoint Diff Engine</h2>
+      <p class="section-subtitle">Compare two checkpoints by semantic component IDs rather than text line diffs.</p>
+    </div>
+
+    <div class="diff-grid">
+      <div class="diff-column">
+        <h4>Checkpoint v16 (Previous)</h4>
+        <div class="diff-box" id="diffLeftBox"></div>
+      </div>
+      <div class="diff-column">
+        <h4>Checkpoint v17 (Current State Diff)</h4>
+        <div class="diff-box" id="diffRightBox"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features Section -->
+  <section id="features" class="features-section container">
+    <div class="section-header">
+      <h2 class="section-title">Core Differentiation</h2>
+      <p class="section-subtitle">Built from the ground up for agent execution fault tolerance.</p>
+    </div>
 
     <div class="features-grid">
       <div class="feature-card">
-        <div class="feature-icon">01</div>
+        <div class="feature-num">01 / CHECKPOINTS</div>
         <h3>Semantic Checkpoints</h3>
-        <p>Not a full conversation dump. Extracts minimal verified task state (goals, decisions, findings, evidence) into a versioned, inspectable tree.</p>
+        <p>Replaces massive raw chat dumps with a compact, inspectable tree of verified goals, decisions, findings, evidence, and pending tasks.</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">02</div>
-        <h3>Independent State Validation</h3>
-        <p>Never blindly trusts old checkpoints. Compares saved state against live environment (file hashes, dataset versions, permissions) before resuming.</p>
+        <div class="feature-num">02 / VALIDATION</div>
+        <h3>Environment Validation</h3>
+        <p>Compares stored state against the live environment before resuming. Automatically flags modified dependencies or stale decisions.</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">03</div>
+        <div class="feature-num">03 / LEDGER</div>
         <h3>Idempotent Action Ledger</h3>
-        <p>Remembers external side effects (API calls, GitHub writes). Intercepts duplicate calls on recovery and returns original cached results.</p>
+        <p>Tracks external side effects (API calls, DB writes). Intercepts duplicate executions on crash recovery and returns original cached results.</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">04</div>
-        <h3>Tamper-Evident Event Log</h3>
-        <p>Append-only SHA-256 hash-chained event log. Provides verifiable provenance and exact sequence auditing for every state component.</p>
+        <div class="feature-num">04 / EVENT LOG</div>
+        <h3>Tamper-Evident Audit Chain</h3>
+        <p>Append-only event log hash-chained with SHA-256 digests (`e1.hash &rarr; e2.prev_hash`). Provides verifiable provenance for all state components.</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">05</div>
+        <div class="feature-num">05 / CONTRACTS</div>
         <h3>Recovery Contracts</h3>
         <p>Generates deterministic machine-readable contracts specifying state validity, invalidated items, and next allowed recovery actions.</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">06</div>
+        <div class="feature-num">06 / LOCAL-FIRST</div>
         <h3>Framework-Agnostic & CPU-First</h3>
-        <p>Runs locally with SQLite and Pydantic v2. Zero external cloud dependencies, zero mandatory model downloads, zero GPU required.</p>
+        <p>Runs locally with SQLite WAL journaling and Pydantic v2. Zero mandatory cloud services, zero vector DB requirements, zero GPU dependencies.</p>
       </div>
     </div>
   </section>
 
   <!-- Architecture Section -->
   <section id="architecture" class="arch-section container">
-    <div class="section-title">Architecture</div>
-    <p class="section-desc">Hover over components to inspect internal data flow.</p>
+    <div class="section-header">
+      <h2 class="section-title">System Architecture</h2>
+      <p class="section-subtitle">Hover over any architectural component to inspect data flow responsibilities.</p>
+    </div>
 
-    <div class="arch-diagram">
-      <div class="arch-svg-container">
+    <div class="arch-container">
+      <div style="max-width:900px; margin:0 auto;">
         <svg viewBox="0 0 800 360" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:100%; height:auto;">
-          <!-- Links -->
-          <path d="M400 50 L400 90" stroke="#232D3F" stroke-width="2" marker-end="url(#arrow)"/>
-          <path d="M400 130 L180 170" stroke="#232D3F" stroke-width="2"/>
-          <path d="M400 130 L400 170" stroke="#232D3F" stroke-width="2"/>
-          <path d="M400 130 L620 170" stroke="#232D3F" stroke-width="2"/>
-          <path d="M180 210 L400 250" stroke="#232D3F" stroke-width="2"/>
-          <path d="M400 210 L400 250" stroke="#232D3F" stroke-width="2"/>
-          <path d="M620 210 L400 250" stroke="#232D3F" stroke-width="2"/>
-          <path d="M400 290 L260 330" stroke="#232D3F" stroke-width="2"/>
-          <path d="M400 290 L540 330" stroke="#232D3F" stroke-width="2"/>
+          <!-- Connectors -->
+          <path d="M400 50 L400 90" stroke="#222B3D" stroke-width="2"/>
+          <path d="M400 130 L180 170" stroke="#222B3D" stroke-width="2"/>
+          <path d="M400 130 L400 170" stroke="#222B3D" stroke-width="2"/>
+          <path d="M400 130 L620 170" stroke="#222B3D" stroke-width="2"/>
+          <path d="M180 210 L400 250" stroke="#222B3D" stroke-width="2"/>
+          <path d="M400 210 L400 250" stroke="#222B3D" stroke-width="2"/>
+          <path d="M620 210 L400 250" stroke="#222B3D" stroke-width="2"/>
+          <path d="M400 290 L260 330" stroke="#222B3D" stroke-width="2"/>
+          <path d="M400 290 L540 330" stroke="#222B3D" stroke-width="2"/>
 
           <!-- Nodes -->
           <g class="arch-node" data-node="agent" style="cursor:pointer;">
-            <rect x="300" y="10" width="200" height="40" rx="8" fill="#121721" stroke="#E06D53" stroke-width="1.5"/>
-            <text x="400" y="35" fill="#F0F4F8" font-family="Inter" font-size="14" font-weight="600" text-anchor="middle">AI AGENT ENGINE</text>
+            <rect x="300" y="10" width="200" height="40" rx="8" fill="#0E121B" stroke="#E06D53" stroke-width="1.5"/>
+            <text x="400" y="35" fill="#F8FAFC" font-family="Inter" font-size="14" font-weight="700" text-anchor="middle">AI AGENT ENGINE</text>
           </g>
 
           <g class="arch-node" data-node="agent" style="cursor:pointer;">
-            <rect x="300" y="90" width="200" height="40" rx="8" fill="#181F2C" stroke="#34445C" stroke-width="1.5"/>
-            <text x="400" y="115" fill="#F0F4F8" font-family="Inter" font-size="14" font-weight="600" text-anchor="middle">CONTINUUM SDK</text>
+            <rect x="300" y="90" width="200" height="40" rx="8" fill="#141A27" stroke="#334155" stroke-width="1.5"/>
+            <text x="400" y="115" fill="#F8FAFC" font-family="Inter" font-size="14" font-weight="700" text-anchor="middle">CONTINUUM SDK</text>
           </g>
 
           <g class="arch-node" data-node="stateEngine" style="cursor:pointer;">
-            <rect x="100" y="170" width="160" height="40" rx="6" fill="#121721" stroke="#232D3F" stroke-width="1"/>
-            <text x="180" y="195" fill="#94A3B8" font-family="Inter" font-size="13" text-anchor="middle">State Engine</text>
+            <rect x="100" y="170" width="160" height="40" rx="6" fill="#0E121B" stroke="#222B3D" stroke-width="1"/>
+            <text x="180" y="195" fill="#94A3B8" font-family="Inter" font-size="13" font-weight="600" text-anchor="middle">State Engine</text>
           </g>
 
           <g class="arch-node" data-node="ledger" style="cursor:pointer;">
-            <rect x="320" y="170" width="160" height="40" rx="6" fill="#121721" stroke="#232D3F" stroke-width="1"/>
-            <text x="400" y="195" fill="#94A3B8" font-family="Inter" font-size="13" text-anchor="middle">Action Ledger</text>
+            <rect x="320" y="170" width="160" height="40" rx="6" fill="#0E121B" stroke="#222B3D" stroke-width="1"/>
+            <text x="400" y="195" fill="#94A3B8" font-family="Inter" font-size="13" font-weight="600" text-anchor="middle">Action Ledger</text>
           </g>
 
           <g class="arch-node" data-node="evidence" style="cursor:pointer;">
-            <rect x="540" y="170" width="160" height="40" rx="6" fill="#121721" stroke="#232D3F" stroke-width="1"/>
-            <text x="620" y="195" fill="#94A3B8" font-family="Inter" font-size="13" text-anchor="middle">Evidence Registry</text>
+            <rect x="540" y="170" width="160" height="40" rx="6" fill="#0E121B" stroke="#222B3D" stroke-width="1"/>
+            <text x="620" y="195" fill="#94A3B8" font-family="Inter" font-size="13" font-weight="600" text-anchor="middle">Evidence Registry</text>
           </g>
 
           <g class="arch-node" data-node="checkpoint" style="cursor:pointer;">
-            <rect x="280" y="250" width="240" height="40" rx="8" fill="#181F2C" stroke="#E06D53" stroke-width="1.5"/>
-            <text x="400" y="275" fill="#F0F4F8" font-family="Inter" font-size="14" font-weight="600" text-anchor="middle">Semantic Checkpoint</text>
+            <rect x="280" y="250" width="240" height="40" rx="8" fill="#141A27" stroke="#E06D53" stroke-width="1.5"/>
+            <text x="400" y="275" fill="#F8FAFC" font-family="Inter" font-size="14" font-weight="700" text-anchor="middle">Semantic Checkpoint</text>
           </g>
 
           <g class="arch-node" data-node="validator" style="cursor:pointer;">
-            <rect x="170" y="315" width="180" height="35" rx="6" fill="#121721" stroke="#232D3F" stroke-width="1"/>
-            <text x="260" y="337" fill="#94A3B8" font-family="Inter" font-size="12" text-anchor="middle">Env Validator</text>
+            <rect x="170" y="315" width="180" height="35" rx="6" fill="#0E121B" stroke="#222B3D" stroke-width="1"/>
+            <text x="260" y="337" fill="#94A3B8" font-family="Inter" font-size="12" font-weight="600" text-anchor="middle">Env Validator</text>
           </g>
 
           <g class="arch-node" data-node="contract" style="cursor:pointer;">
-            <rect x="450" y="315" width="180" height="35" rx="6" fill="#121721" stroke="#232D3F" stroke-width="1"/>
-            <text x="540" y="337" fill="#94A3B8" font-family="Inter" font-size="12" text-anchor="middle">Recovery Contract</text>
+            <rect x="450" y="315" width="180" height="35" rx="6" fill="#0E121B" stroke="#222B3D" stroke-width="1"/>
+            <text x="540" y="337" fill="#94A3B8" font-family="Inter" font-size="12" font-weight="600" text-anchor="middle">Recovery Contract</text>
           </g>
         </svg>
       </div>
-      <div style="margin-top: 24px; text-align: left; background-color: #07090E; padding: 16px 24px; border-radius: 8px; border: 1px solid var(--border-color);">
-        <strong id="archInfoTitle" style="color: var(--accent-terracotta);">Hover over any architectural component above</strong>
-        <p id="archInfoDesc" style="color: var(--text-secondary); font-size: 0.9rem; margin-top: 4px;">Click or hover to inspect data flow and responsibilities.</p>
+
+      <div class="arch-info-card">
+        <div class="arch-info-title" id="archInfoTitle">Hover over any architectural component above</div>
+        <p class="arch-info-desc" id="archInfoDesc">Inspect data flow and responsibilities across the recovery pipeline.</p>
       </div>
     </div>
   </section>
 
   <!-- Quickstart Code Tabs -->
   <section id="quickstart" class="code-section container">
-    <div class="section-title">Quickstart & API</div>
-    <p class="section-desc">Simple, clean Python SDK interface for long-running agent state persistence.</p>
-
-    <div class="code-tabs">
-      <button class="tab-btn active" data-tab="sdk">Python SDK</button>
-      <button class="tab-btn" data-tab="cli">CLI Reference</button>
-      <button class="tab-btn" data-tab="extractor">State Extractor</button>
-      <button class="tab-btn" data-tab="events">Event Audit</button>
+    <div class="section-header">
+      <h2 class="section-title">Developer Quickstart</h2>
+      <p class="section-subtitle">Framework-agnostic Python library with simple, typed APIs.</p>
     </div>
 
-    <div class="code-block">
-      <button class="copy-btn" id="copyBtn">Copy</button>
-      <pre id="codeDisplay"># Python SDK Quickstart
+    <div class="code-wrapper">
+      <div class="code-tabs-header">
+        <div class="code-tabs">
+          <button class="code-tab-btn active" data-tab="sdk">Python SDK</button>
+          <button class="code-tab-btn" data-tab="cli">CLI Reference</button>
+          <button class="code-tab-btn" data-tab="extractor">State Extractor</button>
+          <button class="code-tab-btn" data-tab="events">Event Audit</button>
+        </div>
+        <button class="copy-btn" id="copyBtn">Copy Code</button>
+      </div>
+      <pre class="code-body" id="codeBody"># Python SDK Quickstart
 from continuum import Continuum
 
 # Initialize local SQLite storage
@@ -258,101 +304,114 @@ if status.safe:
 
   <!-- Benchmark Calculator -->
   <section id="calculator" class="calc-section container">
-    <div class="section-title">CONTINUUM-Bench Metric Calculator</div>
-    <p class="section-desc">Estimate token context compression and LLM cost savings for long-running agent tasks.</p>
+    <div class="section-header">
+      <h2 class="section-title">CONTINUUM-Bench Metric Calculator</h2>
+      <p class="section-subtitle">Calculate token compression and cost savings for your long-running agent workloads.</p>
+    </div>
 
-    <div class="calc-box">
-      <div class="calc-inputs">
-        <label for="turnsInput">Execution Turn Count: <span id="turnsVal">100</span> turns</label>
-        <input type="range" id="turnsInput" class="calc-slider" min="10" max="500" value="100" step="10">
+    <div class="calc-card">
+      <div>
+        <div class="calc-label">
+          <span>Execution Turns</span>
+          <span id="calcTurnsDisplay" style="color:var(--accent-terracotta); font-family:var(--font-mono);">100</span>
+        </div>
+        <input type="range" id="calcRange" class="calc-range" min="10" max="500" value="100" step="10">
 
-        <p style="color: var(--text-muted); font-size: 0.88rem; line-height: 1.5;">
-          Assumes ~1,500 tokens context growth per execution turn vs fixed 3,500 token CONTINUUM recovery state.
+        <p style="color: var(--text-muted); font-size: 0.88rem; line-height: 1.6;">
+          Assumes ~1,500 tokens context growth per execution turn vs bounded 3,500 token CONTINUUM recovery state.
         </p>
       </div>
 
-      <div class="calc-results">
-        <div class="calc-stat">
-          <div class="calc-stat-val" id="compRatioVal">42.9x</div>
-          <div class="calc-stat-lbl">Recovery Compression Ratio</div>
+      <div class="calc-stats-grid">
+        <div class="calc-stat-box">
+          <div class="calc-stat-number" id="calcRatioDisplay">42.9x</div>
+          <div class="calc-stat-label">Recovery Compression Ratio</div>
         </div>
-        <div class="calc-stat">
-          <div class="calc-stat-val" id="tokensVal">150k</div>
-          <div class="calc-stat-lbl">Raw Transcript Tokens Saved</div>
+        <div class="calc-stat-box">
+          <div class="calc-stat-number" id="calcTokensSavedDisplay">147k</div>
+          <div class="calc-stat-label">Raw Tokens Saved</div>
         </div>
-        <div class="calc-stat">
-          <div class="calc-stat-val" id="costSavedVal">$0.73</div>
-          <div class="calc-stat-lbl">Est. LLM Cost Saved per Recovery</div>
+        <div class="calc-stat-box">
+          <div class="calc-stat-number" id="calcCostSavedDisplay">$0.73</div>
+          <div class="calc-stat-label">Est. Cost Saved / Crash</div>
+        </div>
+        <div class="calc-stat-box">
+          <div class="calc-stat-number" id="calcActionsDisplay">18</div>
+          <div class="calc-stat-label">Duplicate Actions Blocked</div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- Engineering Comparison Table -->
-  <section class="container" style="padding: 64px 0;">
-    <div class="section-title">Comparison Matrix</div>
-    <p class="section-desc">An honest engineering breakdown of recovery paradigms.</p>
+  <!-- Comparison Section -->
+  <section class="comparison-section container">
+    <div class="section-header">
+      <h2 class="section-title">Comparison Matrix</h2>
+      <p class="section-subtitle">How CONTINUUM compares against standard workflow and framework approaches.</p>
+    </div>
 
-    <table class="comp-table">
-      <thead>
-        <tr>
-          <th>Feature</th>
-          <th>Raw Chat Replay</th>
-          <th>LangGraph Checkpointer</th>
-          <th>Temporal / Workflow</th>
-          <th>CONTINUUM</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>Recovery Model</td>
-          <td>Replays full prompt log</td>
-          <td>Restores state dict / msg list</td>
-          <td>Replays deterministic code steps</td>
-          <td><strong>Semantic Task State Checkpoint</strong></td>
-        </tr>
-        <tr>
-          <td>Environment Validation</td>
-          <td>None</td>
-          <td>None</td>
-          <td>None</td>
-          <td><strong>Independent pre-resume validation</strong></td>
-        </tr>
-        <tr>
-          <td>Side-Effect Prevention</td>
-          <td>Duplicate API calls</td>
-          <td>Requires custom code</td>
-          <td>Activity completion log</td>
-          <td><strong>Idempotent Action Ledger</strong></td>
-        </tr>
-        <tr>
-          <td>Token Context Overhead</td>
-          <td>$O(N)$ exploding</td>
-          <td>$O(N)$ transcript growth</td>
-          <td>N/A</td>
-          <td><strong>$O(1)$ fixed bounded context</strong></td>
-        </tr>
-        <tr>
-          <td>Audit Trail</td>
-          <td>None</td>
-          <td>None</td>
-          <td>Workflow event history</td>
-          <td><strong>Hash-chained SHA-256 event log</strong></td>
-        </tr>
-      </tbody>
-    </table>
+    <div class="comp-table-wrapper">
+      <table class="comp-table">
+        <thead>
+          <tr>
+            <th>Dimension</th>
+            <th>Raw Prompt Replay</th>
+            <th>LangGraph Checkpointer</th>
+            <th>Temporal / Workflow</th>
+            <th>CONTINUUM</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Recovery Abstraction</td>
+            <td>Full prompt re-execution</td>
+            <td>Message list / dict state dump</td>
+            <td>Deterministic step code replay</td>
+            <td><span class="comp-badge highlight">Semantic State Checkpoint</span></td>
+          </tr>
+          <tr>
+            <td>Environment Shift Check</td>
+            <td>None</td>
+            <td>None</td>
+            <td>None</td>
+            <td><span class="comp-badge highlight">Independent Pre-Resume Check</span></td>
+          </tr>
+          <tr>
+            <td>Side-Effect Prevention</td>
+            <td>Duplicate API writes</td>
+            <td>Manual application logic</td>
+            <td>Activity execution journal</td>
+            <td><span class="comp-badge highlight">Idempotent Action Ledger</span></td>
+          </tr>
+          <tr>
+            <td>Token Overhead</td>
+            <td>$O(N)$ exploding</td>
+            <td>$O(N)$ transcript growth</td>
+            <td>N/A</td>
+            <td><span class="comp-badge highlight">$O(1)$ Bounded Recovery Context</span></td>
+          </tr>
+          <tr>
+            <td>Provenance & Audit</td>
+            <td>None</td>
+            <td>None</td>
+            <td>Workflow history</td>
+            <td><span class="comp-badge highlight">SHA-256 Hash-Chained Log</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </section>
 
   <!-- Footer -->
   <footer>
     <div class="container footer-flex">
       <div>
-        <strong>CONTINUUM</strong> &bull; Released under Apache License 2.0
+        <strong style="color:var(--text-primary);">CONTINUUM</strong> &bull; Open Source Apache 2.0 License
       </div>
       <div>
-        <a href="https://github.com/Cyrax321/CONTINUUM" target="_blank" rel="noopener">GitHub</a> &bull;
-        <a href="https://github.com/Cyrax321/CONTINUUM/blob/main/CHANGELOG.md" target="_blank" rel="noopener">Changelog</a> &bull;
-        <a href="https://github.com/Cyrax321/CONTINUUM/blob/main/LICENSE" target="_blank" rel="noopener">License</a>
+        <a href="https://github.com/Cyrax321/CONTINUUM" target="_blank" rel="noopener" style="margin-right: 16px;">GitHub Repository</a>
+        <a href="https://github.com/Cyrax321/CONTINUUM/blob/main/CHANGELOG.md" target="_blank" rel="noopener" style="margin-right: 16px;">Changelog</a>
+        <a href="https://cyrax321.github.io/CONTINUUM/" target="_blank" rel="noopener">GitHub Pages</a>
       </div>
     </div>
   </footer>

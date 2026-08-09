@@ -1,131 +1,345 @@
-// CONTINUUM Website Interactive Script
+// CONTINUUM — Interactive Application Logic
 
 document.addEventListener('DOMContentLoaded', () => {
   initSimulator();
-  initCodeTabs();
+  initDiffViewer();
   initCalculator();
-  initArchInteractivity();
+  initCodeTabs();
+  initArchTooltips();
 });
 
 // ---------------------------------------------------------------------------
-// 1. Live Fault Recovery Simulator
+// 1. Live Fault Recovery Simulator Engine
 // ---------------------------------------------------------------------------
-const scenarios = {
+const scenarioData = {
   crash: {
-    title: "Process Crash / Restart",
-    output: `<span class="term-dim">$ continuum resume run_4821</span>
+    badgeClass: "ok",
+    badgeText: "RESUME [SAFE]",
+    terminal: `<span class="hl-dim">$ continuum resume run_4821</span>
 
-<span class="term-highlight">CONTINUUM RECOVERY ENGINE</span>
+<span class="hl-bold">CONTINUUM RECOVERY ENGINE v0.1.0</span>
 Run ID: run_4821
 Checkpoint Version: v17 (SHA-256: 8f3a92b1...)
+Event Log Chain Audit: <span class="hl-green">INTEGRITY_VERIFIED (102/102 events trusted)</span>
 
-<span class="term-dim">--- State Audit ---</span>
-<span class="term-ok">[OK]</span> Goal: "Analyze 10,000 research documents"
-<span class="term-ok">[OK]</span> Progress: 3,421 completed, 6,579 pending
-<span class="term-ok">[OK]</span> 127 findings preserved (100% evidence verified)
-<span class="term-ok">[OK]</span> 14 decisions valid
-<span class="term-ok">[OK]</span> Action Ledger: 8 side effects verified (0 duplicated)
+<span class="hl-dim">--- State Audit ---</span>
+<span class="hl-green">[VALID]</span> Goal: "Analyze 10,000 research documents"
+<span class="hl-green">[VALID]</span> Progress: 3,421 completed, 6,579 pending
+<span class="hl-green">[VALID]</span> 127 findings preserved (100% evidence verified)
+<span class="hl-green">[VALID]</span> 14 decisions valid
+<span class="hl-green">[VALID]</span> Action Ledger: 8 side effects verified (0 duplicated)
 
-<span class="term-dim">--- Recovery Decision ---</span>
-Status: <span class="term-ok">SAFE_TO_RESUME</span>
+<span class="hl-dim">--- Recovery Decision ---</span>
+Recovery Safety: <span class="hl-green">SAFE_TO_RESUME</span>
 Mode: RESUME
 Next permitted action: process_batch(start_index=3422)
 
-<span class="term-ok">✓ Task resumed from verified progress. Zero duplicated work.</span>`
+<span class="hl-green">✓ Task resumed from verified progress. Zero duplicated work.</span>`,
+
+    stateJson: `{
+  "run_id": "run_4821",
+  "goal": {
+    "description": "Analyze 10,000 research documents",
+    "version": 1
+  },
+  "progress": { "completed": 3421, "pending": 6579, "failed": 0 },
+  "decisions": [
+    {
+      "decision_id": "dec_014",
+      "decision": "Include peer-reviewed meta-analyses",
+      "status": "valid",
+      "evidence": ["ev_088", "ev_089"]
+    }
+  ],
+  "findings_count": 127,
+  "source_sequence": 102
+}`,
+
+    contractJson: `{
+  "run_id": "run_4821",
+  "recovery_status": "safe_to_resume",
+  "verified": ["goal", "progress", "decisions", "evidence"],
+  "invalidated": [],
+  "required_actions": [],
+  "next_allowed_action": "process_batch(3422)"
+}`
   },
 
   dataset: {
-    title: "Environment Shift (Dataset v3 -> v4)",
-    output: `<span class="term-dim">$ continuum resume run_4821</span>
+    badgeClass: "warn",
+    badgeText: "REPAIR_AND_RESUME",
+    terminal: `<span class="hl-dim">$ continuum resume run_4821</span>
 
-<span class="term-highlight">CONTINUUM RECOVERY ENGINE</span>
+<span class="hl-bold">CONTINUUM RECOVERY ENGINE v0.1.0</span>
 Run ID: run_4821
 Checkpoint Version: v17
 
-<span class="term-dim">--- Environment Snapshot Audit ---</span>
-<span class="term-ok">[OK]</span> Goal & Progress verified
-<span class="term-err">[FAIL] Dependency Mismatch</span>: Resource 'dataset' changed from v3 -> v4
-<span class="term-warn">[STALE]</span> 4 findings tied to dataset v3 marked REQUIRES_REVALIDATION
-<span class="term-warn">[INVALIDATED]</span> Decision #7 ('Only subset A analyzed') invalidated
+<span class="hl-dim">--- Environment Snapshot Audit ---</span>
+<span class="hl-green">[VALID]</span> Goal & Progress verified
+<span class="hl-red">[FAIL] Resource Mismatch</span>: Dependency 'dataset' changed from version 'v3' -> 'v4'
+<span class="hl-amber">[STALE]</span> 4 findings tied to dataset v3 marked REQUIRES_REVALIDATION
+<span class="hl-red">[INVALIDATED]</span> Decision #7 ('Only subset A analyzed') marked INVALID
 
 <span class="term-dim">--- Recovery Contract Generated ---</span>
-Recovery Status: <span class="term-warn">REQUIRES_REPAIR</span>
+Recovery Safety: <span class="hl-amber">REQUIRES_REPAIR</span>
 Mode: REPAIR_AND_RESUME
-Invalidated: ["dataset_v3", "decision_7"]
-Required Action: "Revalidate experiments 14-17 against dataset v4"
+Invalidated Components: ["dataset_v3", "decision_7"]
+Required Actions: ["revalidate experiments 14-17 against dataset v4"]
 Next Allowed Action: dataset_revalidation
 
-<span class="term-warn">⚠ State validation caught environment shift. Unsafe replay prevented.</span>`
+<span class="hl-amber">⚠ Environment shift detected. Unsafe replay prevented by contract.</span>`,
+
+    stateJson: `{
+  "run_id": "run_4821",
+  "external_dependencies": [
+    {
+      "resource": "dataset",
+      "version": "v4",
+      "status": "conflicted",
+      "metadata": { "previous_version": "v3" }
+    }
+  ],
+  "decisions": [
+    {
+      "decision_id": "dec_007",
+      "decision": "Only subset A analyzed",
+      "status": "invalidated",
+      "invalidated_reason": "Dependency dataset updated v3 -> v4"
+    }
+  ]
+}`,
+
+    contractJson: `{
+  "run_id": "run_4821",
+  "recovery_status": "requires_repair",
+  "verified": ["goal", "completed_documents_1_to_3400"],
+  "invalidated": ["dataset_v3", "decision_7"],
+  "required_actions": ["revalidate_experiments_14_to_17"],
+  "next_allowed_action": "dataset_revalidation"
+}`
   },
 
   model: {
-    title: "Model Switch (GPT-4 -> Claude 3.5)",
-    output: `<span class="term-dim">$ continuum resume run_4821 --model claude-3-5-sonnet</span>
+    badgeClass: "warn",
+    badgeText: "MODEL TRANSITION",
+    terminal: `<span class="hl-dim">$ continuum resume run_4821 --model claude-3-5-sonnet</span>
 
-<span class="term-highlight">CONTINUUM RECOVERY ENGINE</span>
+<span class="hl-bold">CONTINUUM RECOVERY ENGINE v0.1.0</span>
 Run ID: run_4821
 Checkpoint Version: v17
 
-<span class="term-dim">--- Model Transition Audit ---</span>
+<span class="hl-dim">--- Model Transition Audit ---</span>
 Previous Model: gpt-4o (provider: openai)
 Target Model: claude-3-5-sonnet (provider: anthropic)
 
-<span class="term-warn">[MODEL_SPECIFIC_STATE]</span> Item 'prompt_formatting_v1' requires re-eval
-<span class="term-ok">[OK]</span> Task Goal, Verified Progress, Findings, and Evidence preserved
-<span class="term-ok">[OK]</span> Bounded recovery context reconstructed (4,200 tokens vs 182,000 original)
+<span class="hl-amber">[MODEL_SPECIFIC_STATE]</span> Assumption 'prompt_format_v1' requires re-eval
+<span class="hl-green">[VALID]</span> Task Goal, Verified Progress, Findings, and Evidence preserved
+<span class="hl-cyan">[RECONSTRUCTION]</span> Bounded recovery context reconstructed (3,800 tokens vs 182,000 transcript)
 
-<span class="term-dim">--- Recovery Decision ---</span>
-Status: <span class="term-ok">SAFE_TO_RESUME</span>
+<span class="hl-dim">--- Recovery Decision ---</span>
+Recovery Safety: <span class="hl-green">SAFE_TO_RESUME</span>
 Mode: RESUME (Framework-Agnostic Context Transferred)
 
-<span class="term-ok">✓ Switched models safely without replaying prompt history.</span>`
+<span class="hl-green">✓ Switched models safely without replaying full prompt transcript.</span>`,
+
+    stateJson: `{
+  "run_id": "run_4821",
+  "model": {
+    "model": "claude-3-5-sonnet",
+    "provider": "anthropic",
+    "model_specific_state": [
+      {
+        "item_id": "model_state_001",
+        "description": "GPT-4 prompt formatting assumption",
+        "required_validation": "Must be revalidated after model change"
+      }
+    ]
+  }
+}`,
+
+    contractJson: `{
+  "run_id": "run_4821",
+  "recovery_status": "safe_to_resume",
+  "verified": ["goal", "progress", "evidence"],
+  "invalidated": ["model_specific_state_001"],
+  "required_actions": ["reevaluate_prompt_format"],
+  "next_allowed_action": "continue_execution"
+}`
   },
 
   sideeffect: {
-    title: "Uncertain Side-Effect Guard",
-    output: `<span class="term-dim">$ continuum resume run_4821</span>
+    badgeClass: "err",
+    badgeText: "HUMAN REVIEW",
+    terminal: `<span class="hl-dim">$ continuum resume run_4821</span>
 
-<span class="term-highlight">CONTINUUM ACTION LEDGER RECONCILIATION</span>
+<span class="hl-bold">CONTINUUM ACTION LEDGER RECONCILIATION</span>
 Run ID: run_4821
 Last Action: action_812 ("github.create_issue")
 
-<span class="term-err">[UNKNOWN_SIDE_EFFECT]</span> Process terminated during API write.
-Action state: STARTED (completion unconfirmed by server ack).
+<span class="hl-red">[UNKNOWN_SIDE_EFFECT]</span> Process killed during external write call.
+Action status: STARTED (completion unconfirmed by server ack).
 
-<span class="term-dim">--- Reconciliation Guard ---</span>
+<span class="hl-dim">--- Reconciliation Guard ---</span>
 Action ID: action_812
 Arguments Hash: e3b0c442...
 Outcome: UNCERTAIN
 
-Status: <span class="term-warn">REQUIRES_HUMAN</span>
-Action: Execution halted to prevent double-posting issue.
+Recovery Safety: <span class="hl-red">REQUIRES_HUMAN</span>
+Mode: REQUEST_HUMAN
+Action: Execution halted to prevent duplicate issue creation.
 
-<span class="term-err">❌ Automatic retry blocked to protect external system idempotency.</span>`
+<span class="hl-red">❌ Automatic retry blocked to protect external system idempotency.</span>`,
+
+    stateJson: `{
+  "action_id": "action_812",
+  "action_type": "github.create_issue",
+  "arguments_hash": "e3b0c442...",
+  "status": "started",
+  "side_effect_uncertain": true
+}`,
+
+    contractJson: `{
+  "run_id": "run_4821",
+  "recovery_status": "requires_human",
+  "verified": ["prior_actions_1_to_811"],
+  "invalidated": [],
+  "required_actions": ["human_reconcile_action_812"],
+  "next_allowed_action": null
+}`
   }
 };
 
+let currentScenario = 'crash';
+let currentTab = 'terminal';
+
 function initSimulator() {
-  const simOutput = document.getElementById('simOutput');
-  const buttons = document.querySelectorAll('.sim-btn');
+  const navBtns = document.querySelectorAll('.sim-nav-btn');
+  const tabBtns = document.querySelectorAll('.sim-tab-btn');
 
-  if (!simOutput || !buttons.length) return;
+  if (!navBtns.length) return;
 
-  buttons.forEach(btn => {
+  navBtns.forEach(btn => {
     btn.addEventListener('click', () => {
       const scenarioKey = btn.getAttribute('data-scenario');
-      const data = scenarios[scenarioKey];
-      if (!data) return;
+      if (!scenarioData[scenarioKey]) return;
 
-      buttons.forEach(b => b.classList.remove('active'));
+      navBtns.forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
 
-      simOutput.innerHTML = data.output;
+      currentScenario = scenarioKey;
+      renderSimulatorOutput();
     });
   });
+
+  tabBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tabKey = btn.getAttribute('data-tab');
+      tabBtns.forEach(t => t.classList.remove('active'));
+      btn.classList.add('active');
+
+      currentTab = tabKey;
+      renderSimulatorOutput();
+    });
+  });
+
+  renderSimulatorOutput();
+}
+
+function renderSimulatorOutput() {
+  const outputEl = document.getElementById('simOutputArea');
+  if (!outputEl) return;
+
+  const data = scenarioData[currentScenario];
+  if (!data) return;
+
+  if (currentTab === 'terminal') {
+    outputEl.innerHTML = data.terminal;
+  } else if (currentTab === 'state') {
+    outputEl.textContent = data.stateJson;
+  } else if (currentTab === 'contract') {
+    outputEl.textContent = data.contractJson;
+  }
 }
 
 // ---------------------------------------------------------------------------
-// 2. Code Snippet Tabs
+// 2. Interactive Checkpoint Diff Engine
+// ---------------------------------------------------------------------------
+const diffLeftState = `{
+  "checkpoint_id": "chk_v16",
+  "version": 16,
+  "progress": { "completed": 3400, "pending": 6600 },
+  "external_dependencies": [
+    { "resource": "dataset", "version": "v3" }
+  ],
+  "decisions": [
+    { "id": "dec_007", "decision": "Subset A filter", "status": "valid" }
+  ]
+}`;
+
+const diffRightState = `{
+  "checkpoint_id": "chk_v17",
+  "version": 17,
+  "progress": { "completed": 3421, "pending": 6579 },
+  "external_dependencies": [
+    <span class="diff-mod">~ "resource": "dataset", "version": "v4" (CHANGED)</span>
+  ],
+  "decisions": [
+    <span class="diff-del">- { "id": "dec_007", "status": "invalidated" } (INVALIDATED)</span>,
+    <span class="diff-add">+ { "id": "dec_014", "decision": "Peer review filter", "status": "valid" }</span>
+  ],
+  "findings": [
+    <span class="diff-add">+ { "id": "finding_127", "claim": "Correlation verified", "confidence": 0.94 }</span>
+  ]
+}`;
+
+function initDiffViewer() {
+  const leftEl = document.getElementById('diffLeftBox');
+  const rightEl = document.getElementById('diffRightBox');
+
+  if (leftEl && rightEl) {
+    leftEl.textContent = diffLeftState;
+    rightEl.innerHTML = diffRightState;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 3. Real-Time CONTINUUM-Bench Metric Calculator
+// ---------------------------------------------------------------------------
+function initCalculator() {
+  const rangeInput = document.getElementById('calcRange');
+  const turnsDisplay = document.getElementById('calcTurnsDisplay');
+  const ratioDisplay = document.getElementById('calcRatioDisplay');
+  const tokensSavedDisplay = document.getElementById('calcTokensSavedDisplay');
+  const costSavedDisplay = document.getElementById('calcCostSavedDisplay');
+  const actionsDisplay = document.getElementById('calcActionsDisplay');
+
+  if (!rangeInput || !turnsDisplay) return;
+
+  function calculate() {
+    const turns = parseInt(rangeInput.value, 10);
+    turnsDisplay.textContent = turns;
+
+    // Est. 1,500 tokens context growth per execution turn vs 3,500 fixed recovery state
+    const rawTokens = turns * 1500;
+    const recoveryTokens = 3500;
+
+    const ratio = (rawTokens / recoveryTokens).toFixed(1);
+    const tokensSaved = Math.round((rawTokens - recoveryTokens) / 1000);
+    const costSaved = ((rawTokens - recoveryTokens) / 1000000 * 5.0).toFixed(2);
+    const actionsPrevented = Math.round(turns * 0.18);
+
+    ratioDisplay.textContent = `${ratio}x`;
+    tokensSavedDisplay.textContent = `${tokensSaved}k`;
+    costSavedDisplay.textContent = `$${costSaved}`;
+    actionsDisplay.textContent = actionsPrevented;
+  }
+
+  rangeInput.addEventListener('input', calculate);
+  calculate();
+}
+
+// ---------------------------------------------------------------------------
+// 4. Quickstart Code Tabs & Copy
 // ---------------------------------------------------------------------------
 const codeSnippets = {
   sdk: `# Python SDK Quickstart
@@ -159,8 +373,8 @@ if status.safe:
 # Initialize database
 continuum init
 
-# Start a run
-continuum run --goal "Analyze documents"
+# Start a new run
+continuum run --goal "Analyze 10,000 documents"
 
 # Create a checkpoint
 continuum checkpoint
@@ -207,11 +421,11 @@ print(f"Trusted through sequence: {report.trusted_through['run_4821']}")`
 };
 
 function initCodeTabs() {
-  const tabs = document.querySelectorAll('.tab-btn');
-  const codeDisplay = document.getElementById('codeDisplay');
+  const tabs = document.querySelectorAll('.code-tab-btn');
+  const codeBody = document.getElementById('codeBody');
   const copyBtn = document.getElementById('copyBtn');
 
-  if (!tabs.length || !codeDisplay) return;
+  if (!tabs.length || !codeBody) return;
 
   tabs.forEach(tab => {
     tab.addEventListener('click', () => {
@@ -221,93 +435,59 @@ function initCodeTabs() {
       tabs.forEach(t => t.classList.remove('active'));
       tab.classList.add('active');
 
-      codeDisplay.textContent = codeSnippets[tabKey];
+      codeBody.textContent = codeSnippets[tabKey];
     });
   });
 
   if (copyBtn) {
     copyBtn.addEventListener('click', () => {
-      navigator.clipboard.writeText(codeDisplay.textContent).then(() => {
-        const origText = copyBtn.textContent;
+      navigator.clipboard.writeText(codeBody.textContent).then(() => {
+        const originalText = copyBtn.textContent;
         copyBtn.textContent = 'Copied!';
-        setTimeout(() => copyBtn.textContent = origText, 2000);
+        setTimeout(() => copyBtn.textContent = originalText, 2000);
       });
     });
   }
 }
 
 // ---------------------------------------------------------------------------
-// 3. Benchmark Compression Calculator
+// 5. Architecture Hover Tooltips
 // ---------------------------------------------------------------------------
-function initCalculator() {
-  const turnsInput = document.getElementById('turnsInput');
-  const turnsVal = document.getElementById('turnsVal');
-  const tokensVal = document.getElementById('tokensVal');
-  const compRatioVal = document.getElementById('compRatioVal');
-  const costSavedVal = document.getElementById('costSavedVal');
-
-  if (!turnsInput || !turnsVal) return;
-
-  function updateCalc() {
-    const turns = parseInt(turnsInput.value, 10);
-    turnsVal.textContent = turns.toLocaleString();
-
-    // Est context growth: ~1,500 tokens per turn
-    const rawTokens = turns * 1500;
-    // CONTINUUM semantic checkpoint: ~3,500 tokens fixed
-    const recoveryTokens = 3500;
-
-    const ratio = (rawTokens / recoveryTokens).toFixed(1);
-    // Est cost at $5 per 1M tokens (GPT-4o blend)
-    const costSaved = ((rawTokens - recoveryTokens) / 1000000 * 5.0).toFixed(2);
-
-    tokensVal.textContent = (rawTokens / 1000).toFixed(0) + 'k';
-    compRatioVal.textContent = `${ratio}x`;
-    costSavedVal.textContent = `$${costSaved}`;
-  }
-
-  turnsInput.addEventListener('input', updateCalc);
-  updateCalc();
-}
-
-// ---------------------------------------------------------------------------
-// 4. Interactive Architecture Hover Tooltips
-// ---------------------------------------------------------------------------
-function initArchInteractivity() {
+function initArchTooltips() {
   const nodes = document.querySelectorAll('.arch-node');
-  const infoTitle = document.getElementById('archInfoTitle');
-  const infoDesc = document.getElementById('archInfoDesc');
+  const titleEl = document.getElementById('archInfoTitle');
+  const descEl = document.getElementById('archInfoDesc');
 
-  if (!nodes.length || !infoTitle) return;
+  if (!nodes.length || !titleEl) return;
 
   const nodeInfo = {
     agent: {
       title: "AI Agent Engine",
-      desc: "Any agent framework (LangGraph, OpenAI SDK, custom agent). Interacts exclusively through the lightweight CONTINUUM SDK."
+      desc: "Any agent framework (LangGraph, OpenAI SDK, custom python agent). Interacts exclusively through the lightweight CONTINUUM SDK."
     },
     stateEngine: {
       title: "State Projection Engine",
-      desc: "Folds the event log into a compact, versioned SemanticState tree (goals, findings, evidence, decisions)."
+      desc: "Folds the append-only event log into a compact, versioned SemanticState tree (goals, findings, evidence, decisions)."
     },
     ledger: {
       title: "Idempotent Action Ledger",
-      desc: "Tracks external API calls and side-effects. Prevents double-execution on crash recovery."
+      desc: "Tracks external API calls and side-effects. Intercepts duplicate calls on recovery and returns original cached results."
     },
     evidence: {
       title: "Evidence Registry",
-      desc: "Maintains checksums and source references for all claims asserted by the agent."
+      desc: "Maintains checksums and source references for all claims and decisions asserted by the agent."
     },
     checkpoint: {
       title: "Semantic Checkpoint",
-      desc: "The minimal verified task snapshot. Replaces massive raw conversation dumps."
+      desc: "The minimal verified task snapshot. Replaces massive raw conversation dumps with versioned structured state."
     },
     validator: {
       title: "Environment Validator",
-      desc: "Compares checkpoint against live environment (file hashes, dataset versions, permissions) before resuming."
+      desc: "Compares saved checkpoint against live environment (file hashes, dataset versions, permissions) before resuming."
     },
     contract: {
       title: "Recovery Contract",
-      desc: "Machine-readable contract stipulating state validity, invalidated items, and next allowed actions."
+      desc: "Deterministic machine-readable contract stipulating state validity, invalidated items, and next allowed recovery actions."
     }
   };
 
@@ -316,8 +496,8 @@ function initArchInteractivity() {
       const key = node.getAttribute('data-node');
       const info = nodeInfo[key];
       if (info) {
-        infoTitle.textContent = info.title;
-        infoDesc.textContent = info.desc;
+        titleEl.textContent = info.title;
+        descEl.textContent = info.desc;
       }
     });
   });
