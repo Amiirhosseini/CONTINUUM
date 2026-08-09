@@ -6,6 +6,47 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added — Phase 8: command-line interface
+
+- `continuum` CLI covering `init`, `runs`, `inspect`, `history`, `events`, `diff`, `validate`,
+  `resume`, `checkpoint`, `verify`, `actions`, `show-contract`, `replay` and `benchmark`.
+- **Built on `argparse` from the standard library, not `click`.** The moment you most need to
+  inspect a broken run is the worst possible moment to discover your diagnostic tool cannot import
+  its dependencies. The `cli` extra was removed from `pyproject.toml`; no extra is required.
+- **Exit codes carry the verdict.** `continuum resume "$RUN" && ./start-agent.sh` must never launch
+  an agent onto stale state, so only a verified-safe run exits 0. Distinct codes (`10` repair,
+  `20` human, `30` unsafe, `2` not found, `3` corrupted, `4` not implemented) let automation react
+  proportionately without parsing text. An unclassified mode falls through to `UNSAFE`, never `OK`.
+- Read-only commands are genuinely read-only, asserted by a parametrised test that snapshots event
+  count and version list around all nine of them.
+- `--json` on every command for machine consumption; text and JSON are never mixed on one stream.
+- `--env NAME=VERSION` declares the current environment. Omitting it yields `None`, which the
+  validator treats as *unverified* rather than *unchanged* — not checking must not resemble
+  checking and finding nothing wrong.
+- `benchmark` exits `4` and states plainly that no numbers are published because none have been
+  measured.
+- 48 new tests (473 total), including real-subprocess invocation and a shell-pipeline test proving
+  `&&` short-circuits on unsafe state.
+
+### Fixed
+
+- **`verify` and `actions` exited 0 for a run that does not exist.** An absent run has a trivially
+  valid (empty) event chain and no recorded actions, so `continuum verify $TYPO && deploy` reported
+  a clean bill of health for a name nobody had ever written to — precisely the failure the
+  exit-code contract exists to prevent. All eight run-scoped commands now check existence first and
+  report `NOT_FOUND` consistently. Found by driving the installed binary by hand; the test suite
+  had not covered it.
+- `replay` on a missing run reported "the log never recorded RUN_STARTED", diagnosing the wrong
+  problem.
+- `RunNotFound` and `CheckpointNotFound` inherit from `KeyError`, whose `__str__` applies `repr()`
+  to the message, so users saw `error: "no such run: 'ghost'"` — quoted twice.
+- CLI output was written to a block-buffered stdout while hints went to stderr, so when piped the
+  hint could appear *before* the report it referred to. Output is now flushed at each emit.
+- `render_diff` duplicated the field name for progress counters (`completed: completed: 1 → 50`).
+- A weak test: `test_every_recovery_mode_maps_to_a_code` iterated only *known* modes, so it never
+  reached the unmapped-mode fallback it claimed to protect. Mutation testing caught that defaulting
+  the fallback to `OK` went undetected; the replacement exercises an unclassified mode directly.
+
 ### Added — Phase 7: recovery engine
 
 - `RecoveryEngine` (`continuum.recovery.engine`) reducing three independent signals — validation

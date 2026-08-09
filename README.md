@@ -306,19 +306,63 @@ if status.safe:
     run.continue_execution()
 ```
 
-### CLI — planned (Phase 8)
+### CLI
+
+Standard library only — a recovery tool must not fail to import when you most need it.
 
 ```bash
-continuum init                              # Initialize storage
-continuum run                               # Start a new run
-continuum checkpoint                        # Create semantic checkpoint
-continuum resume <run_id>                   # Resume from checkpoint
-continuum inspect <run_id> --version 17     # Inspect state at version
-continuum diff checkpoint_a checkpoint_b    # Diff two checkpoints
-continuum validate <run_id>                 # Validate current state
-continuum history <run_id>                  # View state version history
-continuum replay <run_id>                   # Replay event log
-continuum benchmark                         # Run benchmark suite
+continuum init                                   # create storage
+continuum runs                                   # list runs
+continuum inspect <run_id> [--version 17]        # semantic state, now or at a version
+continuum history <run_id>                       # version and checkpoint history
+continuum events <run_id> [--after N --upto M]   # raw event log
+continuum diff <run_id> <from> <to>              # semantic diff between versions
+continuum validate <run_id> --env dataset=v4     # validate. read-only
+continuum resume <run_id> --env dataset=v4       # recovery decision + contract
+continuum checkpoint <run_id>                    # force a checkpoint. mutates
+continuum verify <run_id>                        # re-audit the event hash chain
+continuum actions <run_id>                       # external side effects
+continuum show-contract <run_id>                 # the machine-readable contract
+continuum replay <run_id> [--upto N]             # re-derive state from events
+```
+
+Every command accepts `--json`. `inspect`, `history`, `events`, `diff`, `validate`, `resume`,
+`verify`, `actions`, `show-contract` and `replay` never write, so they are safe against a live
+database while an agent is mid-run.
+
+#### Exit codes are a safety contract
+
+```bash
+continuum resume "$RUN" && ./start-agent.sh
+```
+
+That line must never launch an agent onto stale state, so **only a verified-safe run exits 0**:
+
+| Code | Meaning |
+|:--|:--|
+| `0` | verified safe to resume |
+| `10` | recoverable, but repairs are required first |
+| `20` | a human must decide (typically an unreconciled side effect) |
+| `30` | not safe to resume |
+| `2` / `3` / `4` | not found / integrity failure / not implemented |
+
+A recovery mode nobody has classified falls through to *unsafe*, never to `0`.
+
+```text
+$ continuum resume run_4821 --env dataset=v4
+
+Recovery decision: REQUEST_HUMAN
+  because 1 external side effect(s) have unknown outcomes
+
+Repairs required:
+  1. [auto]  reconcile_action action_cda6e307 — github.create_issue was interrupted
+  2. [auto]  revalidate_dependency dataset — v3 -> v4
+  3. [auto]  rederive_evidence paper_128 — source 'dataset' changed
+  4. [auto]  rederive_finding finding_17 — rests on changed evidence: paper_128
+
+Next permitted action: reconcile_action:action_cda6e307...
+$ echo $?
+20
 ```
 
 ### State Diff
@@ -757,6 +801,10 @@ continuum/
 |       |   +-- engine.py            Decide how a run may resume
 |       |   +-- planner.py           Ordered repair steps
 |       |   +-- contract.py          Sealed, gated next action
+|       +-- cli/
+|       |   +-- __init__.py
+|       |   +-- main.py              argparse CLI, read-only by default
+|       |   +-- exitcodes.py         Exit codes as a safety contract
 |       +-- security/
 |           +-- __init__.py
 |           +-- hashing.py           Deterministic canonical hashing
@@ -782,6 +830,7 @@ continuum/
     +-- test_reconciliation.py       Strategies + real-subprocess crash tests
     +-- test_recovery_engine.py      Decision precedence and contract gating
     +-- test_recovery_planner.py     Repair ordering and determinism
+    +-- test_cli.py                  Exit-code contract and read-only guarantees
 ```
 
 ---
@@ -831,7 +880,7 @@ No benchmark results are claimed. The harness is being built. Results will be pu
 |   5   | State validation                  | Complete    |
 |   6   | Action ledger + Idempotency       | Complete    |
 |   7   | Recovery engine                   | Complete    |
-|   8   | CLI                               | Planned     |
+|   8   | CLI                               | Complete    |
 |   9   | Crash recovery examples           | Planned     |
 |  10   | Environment snapshots and diffs   | Complete    |
 |  11   | Framework adapters                | Planned     |
@@ -883,7 +932,7 @@ mypy                      # Type check
 
 ## Contributing
 
-The project is in early development (Phases 1–7 and 10 complete). There are many components to build — storage engines, state validation, framework adapters, benchmark scenarios, documentation.
+The project is in early development (Phases 1–8 and 10 complete). There are many components to build — storage engines, state validation, framework adapters, benchmark scenarios, documentation.
 
 Open an issue before submitting large PRs.
 

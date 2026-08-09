@@ -38,7 +38,11 @@ dev = [
     "ruff>=0.9",
     "mypy>=1.13",
 ]
-cli = ["click>=8.1"]
+# The CLI uses only the standard library: a recovery tool must not fail to
+# import when you most need it. No extra is required.
+
+[project.scripts]
+continuum = "continuum.cli.main:main"
 
 [project.urls]
 Homepage = "https://github.com/continuum-agent/continuum"

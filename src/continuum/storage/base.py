@@ -53,15 +53,31 @@ class StorageError(RuntimeError):
 
 
 class RunNotFound(StorageError, KeyError):
-    """The requested run does not exist."""
+    """The requested run does not exist.
+
+    Subclasses ``KeyError`` so ``except KeyError`` still catches it, but
+    overrides ``__str__``: ``KeyError.__str__`` applies ``repr()`` to its
+    message, which would surface to CLI users as ``"no such run: 'ghost'"``
+    — quoted twice.
+    """
 
     def __init__(self, run_id: str) -> None:
         super().__init__(f"no such run: {run_id!r}")
         self.run_id = run_id
 
+    def __str__(self) -> str:
+        return f"no such run: {self.run_id!r}"
+
 
 class CheckpointNotFound(StorageError, KeyError):
-    """The requested checkpoint or version does not exist."""
+    """The requested checkpoint or version does not exist.
+
+    Overrides ``__str__`` for the same reason as ``RunNotFound``: inherited
+    ``KeyError`` formatting would double-quote the message.
+    """
+
+    def __str__(self) -> str:
+        return str(self.args[0]) if self.args else self.__class__.__name__
 
 
 class ConcurrentWriteError(StorageError):

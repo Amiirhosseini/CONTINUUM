@@ -302,6 +302,16 @@ def test_a_globally_scoped_action_deduplicates_across_runs(
     assert not ledger.claim("send_welcome_email", {"to": "x@y.z"}, scoped_to_run=False).fresh
 
 
+def test_a_resolver_that_declines_falls_back_to_refusing(
+    ledger: ActionLedger,
+) -> None:
+    """A resolver returning None must not be read as 'safe to proceed'."""
+    ledger.claim("github.create_issue", ISSUE)
+
+    with pytest.raises(UnknownSideEffect):
+        ledger.claim("github.create_issue", ISSUE, on_unknown=lambda action: None)
+
+
 def test_a_malformed_action_event_is_skipped_not_fatal(
     ledger: ActionLedger, store: SQLiteStorage
 ) -> None:

@@ -236,5 +236,10 @@ def render_diff(diff: StateDiff) -> str:
     for entry in diff.entries:
         label = entry.component.value.replace("_", " ")
         identifier = f" {entry.component_id}" if entry.component_id else ""
-        lines.append(f"{_SIGILS[entry.kind]} {label}{identifier}: {entry.detail}")
+        # The detail already names the field for entries whose id *is* the
+        # field (progress counters), so avoid "completed: completed: 1 → 50".
+        detail = entry.detail
+        if entry.component_id and detail.startswith(f"{entry.component_id}: "):
+            detail = detail[len(entry.component_id) + 2 :]
+        lines.append(f"{_SIGILS[entry.kind]} {label}{identifier}: {detail}")
     return "\n".join(lines)

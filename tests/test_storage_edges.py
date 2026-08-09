@@ -171,6 +171,17 @@ def test_a_corrupted_run_row_is_caught_when_listing(tmp_path: Path) -> None:
 # --- URLs ------------------------------------------------------------------- #
 
 
+def test_not_found_errors_read_cleanly_despite_inheriting_keyerror() -> None:
+    """KeyError.__str__ repr-wraps its message; these must not."""
+    from continuum.storage import CheckpointNotFound, RunNotFound
+
+    assert str(RunNotFound("ghost")) == "no such run: 'ghost'"
+    assert str(CheckpointNotFound("run 'r' has no version 9")) == "run 'r' has no version 9"
+    assert str(CheckpointNotFound()) == "CheckpointNotFound"
+    # still catchable as a KeyError by callers that expect one
+    assert isinstance(RunNotFound("ghost"), KeyError)
+
+
 def test_an_absolute_path_is_not_mangled_into_a_relative_one() -> None:
     from continuum.storage.sqlite import _resolve_path
 
