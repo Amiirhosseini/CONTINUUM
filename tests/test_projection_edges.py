@@ -202,6 +202,19 @@ def test_open_work_excludes_only_invalidated_tasks() -> None:
     assert {w.task_id for w in state.open_work()} == {"t1", "t3"}
 
 
+def test_a_decision_citing_a_finding_is_not_a_dangling_reference() -> None:
+    """Decisions legitimately cite findings, not only raw evidence. Flagging
+    that would fire a false alarm on every well-formed reasoning chain."""
+    state = SemanticState(
+        run_id="run_1",
+        goal=Goal(description="g"),
+        evidence=[Evidence(evidence_id="paper_128")],
+        findings=[Finding(finding_id="finding_17", claim="c", evidence=["paper_128"])],
+        decisions=[Decision(decision_id="d1", decision="x", evidence=["finding_17"])],
+    )
+    assert state.dangling_evidence() == frozenset()
+
+
 def test_evidence_cited_by_a_decision_is_tracked_as_dangling() -> None:
     state = SemanticState(
         run_id="run_1",

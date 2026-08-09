@@ -24,6 +24,18 @@ from continuum.checkpoint import (
     build_recovery_context,
     default_policy,
 )
+from continuum.environment import (
+    CallableProvider,
+    EnvironmentDiff,
+    EnvironmentProvider,
+    FileProvider,
+    ResourceChange,
+    ResourceDelta,
+    StaticProvider,
+    ValueProvider,
+    capture_environment,
+    diff_environments,
+)
 from continuum.events import (
     AppendOnlyViolation,
     Event,
@@ -85,6 +97,7 @@ from continuum.state import (
     render_diff,
     state_fingerprint,
 )
+from continuum.state.validator import StateValidator, ValidationOutcome, validate_state
 from continuum.storage import (
     CheckpointNotFound,
     ConcurrentWriteError,
@@ -186,4 +199,18 @@ __all__ = [
     "SemanticPolicy",
     "build_recovery_context",
     "default_policy",
+    # environment + validation
+    "CallableProvider",
+    "EnvironmentDiff",
+    "EnvironmentProvider",
+    "FileProvider",
+    "ResourceChange",
+    "ResourceDelta",
+    "StateValidator",
+    "StaticProvider",
+    "ValidationOutcome",
+    "ValueProvider",
+    "capture_environment",
+    "diff_environments",
+    "validate_state",
 ]

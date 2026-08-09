@@ -420,11 +420,15 @@ class SemanticState(BaseModel):
         return tuple(w for w in self.pending_work if w.status is not StateStatus.INVALID)
 
     def dangling_evidence(self) -> frozenset[str]:
-        """Evidence referenced by decisions or findings but absent from the registry.
+        """Support cited by decisions or findings that the state cannot produce.
 
-        A non-empty result means the state cites support it cannot produce.
+        A decision may cite either raw evidence or a finding derived from it —
+        both are legitimate provenance. Only references matching neither are
+        dangling. Treating a cited finding as missing evidence would raise a
+        false alarm on every well-formed reasoning chain, and false alarms are
+        how real ones get ignored.
         """
-        known = self.evidence_ids()
+        known = self.evidence_ids() | frozenset(f.finding_id for f in self.findings)
         cited: set[str] = set()
         for decision in self.decisions:
             cited.update(decision.evidence)
