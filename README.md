@@ -1,8 +1,6 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/CONTINUUM-Semantic_Recovery-000000?style=for-the-badge&labelColor=0D1117&color=58A6FF" alt="CONTINUUM" />
+  <img src="docs/assets/logo.png" alt="CONTINUUM Logo" width="480" />
 </p>
-
-<h1 align="center">CONTINUUM</h1>
 
 <p align="center">
   <strong>Agents that can lose their context without losing their work.</strong>
