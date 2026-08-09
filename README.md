@@ -16,7 +16,7 @@
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.11+" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache_2.0-blue?style=flat-square" alt="License" /></a>
   <a href="https://pydantic.dev"><img src="https://img.shields.io/badge/pydantic-v2-E92063?style=flat-square&logo=pydantic&logoColor=white" alt="Pydantic v2" /></a>
-  <a href="website/index.html"><img src="https://img.shields.io/badge/website-live_demo-E06D53?style=flat-square" alt="Website Demo" /></a>
+  <a href="https://cyrax321.github.io/CONTINUUM/"><img src="https://img.shields.io/badge/website-live_demo-E06D53?style=flat-square" alt="Website Demo" /></a>
 </p>
 
 ---
@@ -345,9 +345,9 @@ Two properties make this safe to recover from, and both are tested:
 Together with the log's `trusted_through`, a run whose tail was tampered with can still be recovered up to its last verified event:
 
 ```python
-report  = log.verify("run_4821")
+report = log.verify("run_4821")
 trusted = report.trusted_through["run_4821"]
-state   = project("run_4821", log.events("run_4821"), upto=trusted)
+state = project("run_4821", log.events("run_4821"), upto=trusted)
 ```
 
 Unknown event types are counted, not fatal — a newer writer's vocabulary must never render a run unrecoverable.
@@ -359,6 +359,7 @@ Extraction is pluggable through a single protocol:
 ```python
 class StateExtractor(Protocol):
     name: str
+
     def extract(self, context: ExtractionContext) -> SemanticState: ...
 ```
 
@@ -374,9 +375,9 @@ Every accepted mutation appends a version. Versions are content-addressed and li
 
 ```python
 chain = VersionChain("run_4821")
-chain.commit(state, reason="milestone")   # -> VersionEntry(version=0)
-chain.commit(state, reason="timer")       # -> None: semantically unchanged
-chain.verify()                            # recompute fingerprints, re-walk links
+chain.commit(state, reason="milestone")  # -> VersionEntry(version=0)
+chain.commit(state, reason="timer")  # -> None: semantically unchanged
+chain.verify()  # recompute fingerprints, re-walk links
 ```
 
 `commit` returns `None` when nothing meaningful changed, so timer-driven checkpoint policies cannot inflate history with noise. Fingerprints ignore bookkeeping fields — a state means the same thing regardless of when it was projected.
