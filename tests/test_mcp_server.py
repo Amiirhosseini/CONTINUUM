@@ -1,0 +1,701 @@
+"""MCP server tests, driven through the real tool-dispatch path.
+
+Tools are invoked via ``server.call_tool`` rather than by calling the Python
+functions directly, so argument coercion and result serialisation are exercised
+the same way an MCP client would exercise them.
+
+The behaviour that matters most is the last section: the server must never hand
+back a "proceed" signal for an action whose outcome is unknown. Everything else
+is plumbing by comparison.
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Iterator
+from typing import Any
+
+import pytest
+
+from continuum.actions.ledger import ActionLedger
+from continuum.events import EventType
+from continuum.mcp.server import DEFAULT_DB, build_server, resolve_database
+from continuum.models import ActionStatus, RecoveryMode, Run
+from continuum.storage import SQLiteStorage
+
+
+@pytest.fixture
+def server_ctx() -> Iterator[tuple[Any, Any]]:
+    storage = SQLiteStorage(":memory:")
+    server, ctx = build_server(storage=storage)
+    yield server, ctx
+    ctx.close()
+
+
+async def call(server: Any, name: str, **arguments: Any) -> dict[str, Any]:
+    """Invoke a tool the way a client would and parse its JSON result."""
+    result = await server.call_tool(name, arguments)
+    assert result.content, f"{name} returned no content"
+    return json.loads(result.content[0].text)
+
+
+async def seed_run(server: Any, run_id: str = "run_1", completed: int = 20) -> None:
+    await call(
+        server,
+        "continuum_record_progress",
+        run_id=run_id,
+        completed=completed,
+        total=100,
+        goal="Analyze 100 documents",
+    )
+
+
+# --- registration ----------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_every_tool_is_registered(server_ctx: tuple[Any, Any]) -> None:
+    server, _ = server_ctx
+    names = {t.name for t in await server.list_tools()}
+    assert names == {
+        "continuum_record_progress",
+        "continuum_checkpoint",
+        "continuum_validate",
+        "continuum_resume",
+        "continuum_intercept_action",
+        "continuum_complete_action",
+        "continuum_fail_action",
+        "continuum_reconcile_action",
+        "continuum_list_actions",
+    }
+
+
+@pytest.mark.asyncio
+async def test_read_only_tools_are_annotated_as_such(server_ctx: tuple[Any, Any]) -> None:
+    """Clients use this hint to decide what is safe to call unprompted."""
+    server, _ = server_ctx
+    hints = {t.name: t.annotations.read_only_hint for t in await server.list_tools()}
+    assert hints["continuum_validate"] is True
+    assert hints["continuum_resume"] is True
+    assert hints["continuum_list_actions"] is True
+    assert hints["continuum_checkpoint"] is False
+    assert hints["continuum_intercept_action"] is False
+
+
+@pytest.mark.asyncio
+async def test_tools_describe_when_they_matter(server_ctx: tuple[Any, Any]) -> None:
+    """An LLM picks tools from descriptions; vague ones get called wrongly."""
+    server, _ = server_ctx
+    described = {t.name: (t.description or "") for t in await server.list_tools()}
+    assert "before resuming" in described["continuum_resume"].lower()
+    assert "read-only" in described["continuum_validate"].lower()
+    assert "do not repeat" in described["continuum_intercept_action"].lower()
+
+
+# --- progress and checkpointing --------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_record_progress_creates_the_run_on_first_call(
+    server_ctx: tuple[Any, Any],
+) -> None:
+    server, ctx = server_ctx
+    payload = await call(
+        server,
+        "continuum_record_progress",
+        run_id="run_1",
+        completed=10,
+        total=100,
+        goal="Analyze 100 documents",
+    )
+    assert payload["completed"] == 10
+    assert payload["pending"] == 90
+    assert ctx.storage.get_run("run_1").goal == "Analyze 100 documents"
+
+
+@pytest.mark.asyncio
+async def test_progress_accumulates_across_calls(server_ctx: tuple[Any, Any]) -> None:
+    server, _ = server_ctx
+    await seed_run(server, completed=20)
+    payload = await call(
+        server, "continuum_record_progress", run_id="run_1", completed=55, total=100
+    )
+    assert payload["completed"] == 55
+    assert payload["pending"] == 45
+
+
+@pytest.mark.asyncio
+async def test_recording_progress_for_an_unknown_run_without_a_goal_fails(
+    server_ctx: tuple[Any, Any],
+) -> None:
+    """Silently inventing a run for a typo'd id would scatter work across
+    phantom runs, so the error surfaces to the caller instead."""
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    server, _ = server_ctx
+    with pytest.raises(ToolError, match="no such run"):
+        await server.call_tool("continuum_record_progress", {"run_id": "ghost", "completed": 1})
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_returns_a_sealed_record(server_ctx: tuple[Any, Any]) -> None:
+    server, ctx = server_ctx
+    await seed_run(server)
+    payload = await call(
+        server,
+        "continuum_checkpoint",
+        run_id="run_1",
+        reason="milestone",
+        env={"dataset": "v3"},
+    )
+    assert payload["version"] == 0
+    assert payload["integrity_hash"]
+    assert payload["completed"] == 20
+
+    stored = ctx.storage.get_checkpoint(payload["checkpoint_id"])
+    assert stored.verify()
+
+
+@pytest.mark.asyncio
+async def test_successive_checkpoints_increment_the_version(
+    server_ctx: tuple[Any, Any],
+) -> None:
+    server, _ = server_ctx
+    await seed_run(server, completed=20)
+    first = await call(server, "continuum_checkpoint", run_id="run_1")
+    await call(server, "continuum_record_progress", run_id="run_1", completed=40, total=100)
+    second = await call(server, "continuum_checkpoint", run_id="run_1")
+    assert (first["version"], second["version"]) == (0, 1)
+
+
+# --- validation and recovery ------------------------------------------------ #
+
+
+@pytest.mark.asyncio
+async def test_validate_reports_a_clean_run_as_safe(server_ctx: tuple[Any, Any]) -> None:
+    server, _ = server_ctx
+    await seed_run(server)
+    await call(server, "continuum_checkpoint", run_id="run_1", env={"dataset": "v3"})
+
+    payload = await call(server, "continuum_validate", run_id="run_1", env={"dataset": "v3"})
+    assert payload["safe"] is True
+    assert payload["mode"] == RecoveryMode.RESUME.value
+    assert payload["environment_changes"] == []
+
+
+@pytest.mark.asyncio
+async def test_validate_flags_a_changed_dependency(server_ctx: tuple[Any, Any]) -> None:
+    server, ctx = server_ctx
+    await seed_run(server)
+    ctx.storage.append_event(
+        "run_1", EventType.DEPENDENCY_DECLARED, {"resource": "dataset", "version": "v3"}
+    )
+    await call(server, "continuum_checkpoint", run_id="run_1", env={"dataset": "v3"})
+
+    payload = await call(server, "continuum_validate", run_id="run_1", env={"dataset": "v4"})
+    assert payload["safe"] is False
+    assert any("v3 -> v4" in c for c in payload["environment_changes"])
+    assert any(
+        e["component"] == "external_dependency" and e["status"] == "conflicted"
+        for e in payload["components"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_validate_does_not_mutate_the_run(server_ctx: tuple[Any, Any]) -> None:
+    """Read-only must mean read-only; clients may call it speculatively."""
+    server, ctx = server_ctx
+    await seed_run(server)
+    await call(server, "continuum_checkpoint", run_id="run_1", env={"dataset": "v3"})
+    before = (ctx.storage.last_sequence("run_1"), list(ctx.storage.list_versions("run_1")))
+
+    await call(server, "continuum_validate", run_id="run_1", env={"dataset": "v4"})
+    await call(server, "continuum_resume", run_id="run_1", env={"dataset": "v4"})
+
+    after = (ctx.storage.last_sequence("run_1"), list(ctx.storage.list_versions("run_1")))
+    assert before == after
+
+
+@pytest.mark.asyncio
+async def test_resume_returns_a_contract_and_next_action(
+    server_ctx: tuple[Any, Any],
+) -> None:
+    server, ctx = server_ctx
+    await seed_run(server)
+    ctx.storage.append_event(
+        "run_1", EventType.DEPENDENCY_DECLARED, {"resource": "dataset", "version": "v3"}
+    )
+    await call(server, "continuum_checkpoint", run_id="run_1", env={"dataset": "v3"})
+
+    payload = await call(server, "continuum_resume", run_id="run_1", env={"dataset": "v4"})
+    assert payload["mode"] == RecoveryMode.REPAIR_AND_RESUME.value
+    assert payload["safe"] is False
+    assert payload["next_allowed_action"].startswith("revalidate_dependency:")
+    assert payload["contract"]["integrity_hash"]
+    assert payload["repairs"]
+    assert payload["progress"]["completed"] == 20
+
+
+@pytest.mark.asyncio
+async def test_resume_on_an_intact_run_says_proceed(server_ctx: tuple[Any, Any]) -> None:
+    server, _ = server_ctx
+    await seed_run(server)
+    await call(server, "continuum_checkpoint", run_id="run_1", env={"dataset": "v3"})
+
+    payload = await call(server, "continuum_resume", run_id="run_1", env={"dataset": "v3"})
+    assert payload["mode"] == RecoveryMode.RESUME.value
+    assert payload["safe"] is True
+    assert payload["next_allowed_action"] is None
+
+
+# --- the core guarantee: never say "proceed" on an uncertain effect --------- #
+
+
+@pytest.mark.asyncio
+async def test_a_first_claim_is_permitted(server_ctx: tuple[Any, Any]) -> None:
+    server, _ = server_ctx
+    await seed_run(server)
+    payload = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="github.create_issue",
+        arguments={"title": "Bug"},
+    )
+    assert payload["proceed"] is True
+    assert payload["action_key"]
+
+
+@pytest.mark.asyncio
+async def test_a_completed_action_is_never_repeated(server_ctx: tuple[Any, Any]) -> None:
+    server, _ = server_ctx
+    await seed_run(server)
+    args = {"title": "Bug"}
+
+    first = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="github.create_issue",
+        arguments=args,
+    )
+    await call(
+        server,
+        "continuum_complete_action",
+        run_id="run_1",
+        action_key=first["action_key"],
+        external_id="481",
+        result={"url": "/issues/481"},
+    )
+
+    second = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="github.create_issue",
+        arguments=args,
+    )
+    assert second["proceed"] is False
+    assert second["external_id"] == "481"
+    assert second["previous_result"] == {"url": "/issues/481"}
+    assert "do not repeat" in second["guidance"].lower()
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_outcome_refuses_to_grant_proceed(
+    server_ctx: tuple[Any, Any],
+) -> None:
+    """The guarantee this server exists to preserve.
+
+    A claim left in flight (crash, or a client that never reported back) means
+    the side effect may or may not have happened. The server must refuse to
+    authorise a retry rather than risk duplicating it.
+    """
+    server, ctx = server_ctx
+    await seed_run(server)
+    args = {"title": "Bug"}
+
+    first = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="github.create_issue",
+        arguments=args,
+    )
+    assert first["proceed"] is True  # claimed, then the client vanishes
+
+    second = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="github.create_issue",
+        arguments=args,
+    )
+    assert second["proceed"] is False
+    assert second["status"] == ActionStatus.UNKNOWN.value
+    assert "do not retry" in second["guidance"].lower()
+
+    pending = ActionLedger(ctx.storage, "run_1").pending()
+    assert len(pending) == 1
+    assert pending[0].side_effect_uncertain
+
+
+@pytest.mark.asyncio
+async def test_a_started_action_blocks_resume(server_ctx: tuple[Any, Any]) -> None:
+    """An unreported claim must stop the agent, not just the retry."""
+    server, _ = server_ctx
+    await seed_run(server)
+    await call(server, "continuum_checkpoint", run_id="run_1", env={"dataset": "v3"})
+    await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="github.create_issue",
+        arguments={"title": "Bug"},
+    )
+
+    payload = await call(server, "continuum_resume", run_id="run_1", env={"dataset": "v3"})
+    assert payload["safe"] is False
+    assert payload["mode"] == RecoveryMode.REQUEST_HUMAN.value
+    assert payload["uncertain_actions"]
+    assert payload["next_allowed_action"].startswith("reconcile_action:")
+
+
+@pytest.mark.asyncio
+async def test_a_timeout_is_recorded_as_uncertain_by_default(
+    server_ctx: tuple[Any, Any],
+) -> None:
+    """certain defaults to False: a timeout is not proof nothing happened."""
+    server, _ = server_ctx
+    await seed_run(server)
+    claim = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="stripe.charge",
+        arguments={"amount": 5000},
+    )
+    payload = await call(
+        server,
+        "continuum_fail_action",
+        run_id="run_1",
+        action_key=claim["action_key"],
+        error="timeout after 30s",
+    )
+    assert payload["status"] == ActionStatus.UNKNOWN.value
+    assert payload["side_effect_uncertain"] is True
+
+
+@pytest.mark.asyncio
+async def test_a_definite_failure_frees_the_action_for_retry(
+    server_ctx: tuple[Any, Any],
+) -> None:
+    server, _ = server_ctx
+    await seed_run(server)
+    args = {"amount": 5000}
+    claim = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="stripe.charge",
+        arguments=args,
+    )
+    payload = await call(
+        server,
+        "continuum_fail_action",
+        run_id="run_1",
+        action_key=claim["action_key"],
+        error="400 invalid card",
+        certain=True,
+    )
+    assert payload["status"] == ActionStatus.FAILED.value
+
+    retry = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="stripe.charge",
+        arguments=args,
+    )
+    assert retry["proceed"] is True
+
+
+@pytest.mark.asyncio
+async def test_reconciling_as_occurred_prevents_any_repeat(
+    server_ctx: tuple[Any, Any],
+) -> None:
+    server, _ = server_ctx
+    await seed_run(server)
+    args = {"title": "Bug"}
+    claim = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="github.create_issue",
+        arguments=args,
+    )
+    await call(
+        server,
+        "continuum_fail_action",
+        run_id="run_1",
+        action_key=claim["action_key"],
+        error="connection lost",
+    )
+    await call(
+        server,
+        "continuum_reconcile_action",
+        run_id="run_1",
+        action_key=claim["action_key"],
+        occurred=True,
+        external_id="481",
+    )
+
+    repeat = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="github.create_issue",
+        arguments=args,
+    )
+    assert repeat["proceed"] is False
+    assert repeat["external_id"] == "481"
+
+
+@pytest.mark.asyncio
+async def test_reconciling_as_absent_permits_a_retry(server_ctx: tuple[Any, Any]) -> None:
+    server, _ = server_ctx
+    await seed_run(server)
+    args = {"title": "Bug"}
+    claim = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="github.create_issue",
+        arguments=args,
+    )
+    await call(
+        server,
+        "continuum_fail_action",
+        run_id="run_1",
+        action_key=claim["action_key"],
+        error="connection lost",
+    )
+    await call(
+        server,
+        "continuum_reconcile_action",
+        run_id="run_1",
+        action_key=claim["action_key"],
+        occurred=False,
+        note="no matching issue",
+    )
+
+    retry = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="github.create_issue",
+        arguments=args,
+    )
+    assert retry["proceed"] is True
+
+
+@pytest.mark.asyncio
+async def test_different_arguments_are_different_actions(
+    server_ctx: tuple[Any, Any],
+) -> None:
+    server, _ = server_ctx
+    await seed_run(server)
+    first = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="github.create_issue",
+        arguments={"title": "Bug A"},
+    )
+    await call(
+        server,
+        "continuum_complete_action",
+        run_id="run_1",
+        action_key=first["action_key"],
+        external_id="1",
+    )
+    second = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="github.create_issue",
+        arguments={"title": "Bug B"},
+    )
+    assert second["proceed"] is True
+
+
+@pytest.mark.asyncio
+async def test_list_actions_surfaces_unresolved_outcomes(
+    server_ctx: tuple[Any, Any],
+) -> None:
+    server, _ = server_ctx
+    await seed_run(server)
+    done = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="a.do",
+        arguments={"n": 1},
+    )
+    await call(server, "continuum_complete_action", run_id="run_1", action_key=done["action_key"])
+    await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="b.do",
+        arguments={"n": 2},
+    )
+
+    payload = await call(server, "continuum_list_actions", run_id="run_1")
+    assert len(payload["actions"]) == 2
+    assert payload["unresolved"] == 1
+
+
+# --- storage configuration --------------------------------------------------- #
+
+
+def test_the_database_defaults_to_the_working_directory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CONTINUUM_DB", raising=False)
+    assert resolve_database() == DEFAULT_DB
+
+
+def test_an_env_var_overrides_the_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CONTINUUM_DB", "/tmp/from-env.db")
+    assert resolve_database() == "/tmp/from-env.db"
+
+
+def test_an_explicit_argument_wins_over_the_env_var(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CONTINUUM_DB", "/tmp/from-env.db")
+    assert resolve_database("/tmp/explicit.db") == "/tmp/explicit.db"
+
+
+@pytest.mark.asyncio
+async def test_state_persists_across_server_restarts(tmp_path: Any) -> None:
+    """A restarted MCP server must see the previous session's work."""
+    path = str(tmp_path / "agent.db")
+
+    server, ctx = build_server(path)
+    await call(
+        server,
+        "continuum_record_progress",
+        run_id="run_1",
+        completed=42,
+        total=100,
+        goal="Analyze",
+    )
+    claim = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="github.create_issue",
+        arguments={"title": "Bug"},
+    )
+    await call(
+        server,
+        "continuum_complete_action",
+        run_id="run_1",
+        action_key=claim["action_key"],
+        external_id="481",
+    )
+    ctx.close()
+
+    server2, ctx2 = build_server(path)
+    repeat = await call(
+        server2,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="github.create_issue",
+        arguments={"title": "Bug"},
+    )
+    assert repeat["proceed"] is False
+    assert repeat["external_id"] == "481"
+
+    actions = await call(server2, "continuum_list_actions", run_id="run_1")
+    assert actions["unresolved"] == 0
+    ctx2.close()
+
+
+@pytest.mark.asyncio
+async def test_an_existing_run_is_reused_not_recreated(
+    server_ctx: tuple[Any, Any],
+) -> None:
+    server, ctx = server_ctx
+    ctx.storage.create_run(Run(run_id="run_1", goal="Existing goal"))
+    await call(server, "continuum_record_progress", run_id="run_1", completed=5, goal="Ignored")
+    assert ctx.storage.get_run("run_1").goal == "Existing goal"
+
+
+@pytest.mark.asyncio
+async def test_a_run_missing_run_started_is_backfilled(
+    server_ctx: tuple[Any, Any],
+) -> None:
+    """A row created through the storage API has no events; the log gets one."""
+    server, ctx = server_ctx
+    ctx.storage.create_run(Run(run_id="bare", goal="Created directly"))
+    assert ctx.storage.read_events("bare") == []
+
+    payload = await call(server, "continuum_record_progress", run_id="bare", completed=3)
+
+    events = ctx.storage.read_events("bare")
+    assert events[0].type is EventType.RUN_STARTED
+    assert events[0].payload["goal"] == "Created directly"
+    assert payload["completed"] == 3
+
+
+@pytest.mark.asyncio
+async def test_a_log_not_beginning_with_run_started_is_refused(
+    server_ctx: tuple[Any, Any],
+) -> None:
+    """Backfilling behind existing history would misorder the run.
+
+    If some other writer appends before RUN_STARTED, inserting the start event
+    afterwards would place the run's beginning *after* events that supposedly
+    preceded it. The resulting projection would be wrong in a way nothing
+    downstream can detect, so this raises instead — naming the problem beats
+    silently producing bad state.
+    """
+    from continuum.mcp.server import MalformedRunLog
+
+    server, ctx = server_ctx
+    ctx.storage.create_run(Run(run_id="odd", goal="Out of order"))
+    ctx.storage.append_event("odd", EventType.TOOL_CALLED, {"tool": "search"})
+
+    with pytest.raises(MalformedRunLog, match="does not begin with RUN_STARTED"):
+        ctx.ensure_run("odd")
+
+    # surfaced to the MCP caller rather than swallowed
+    with pytest.raises(Exception, match="RUN_STARTED"):
+        await server.call_tool("continuum_record_progress", {"run_id": "odd", "completed": 1})
+
+    # nothing was written by the refused call
+    assert [e.type for e in ctx.storage.read_events("odd")] == [EventType.TOOL_CALLED]
+
+
+@pytest.mark.asyncio
+async def test_backfill_is_not_repeated_on_later_calls(
+    server_ctx: tuple[Any, Any],
+) -> None:
+    """Exactly one RUN_STARTED, however many tools are called."""
+    server, ctx = server_ctx
+    await seed_run(server, completed=5)
+    await call(server, "continuum_record_progress", run_id="run_1", completed=10, total=100)
+    await call(server, "continuum_checkpoint", run_id="run_1")
+    await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="a.do",
+        arguments={"n": 1},
+    )
+
+    starts = [e for e in ctx.storage.read_events("run_1") if e.type is EventType.RUN_STARTED]
+    assert len(starts) == 1

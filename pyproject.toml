@@ -37,12 +37,17 @@ dev = [
     "hypothesis>=6.0",
     "ruff>=0.9",
     "mypy>=1.13",
+    "mcp>=2.0",
 ]
+# The MCP server is optional: the core library and CLI never import it, so
+# installing CONTINUUM does not pull in a server stack you may not want.
+mcp = ["mcp>=2.0"]
 # The CLI uses only the standard library: a recovery tool must not fail to
 # import when you most need it. No extra is required.
 
 [project.scripts]
 continuum = "continuum.cli.main:main"
+continuum-mcp = "continuum.mcp.server:main"
 
 [project.urls]
 Homepage = "https://github.com/continuum-agent/continuum"
@@ -82,6 +87,10 @@ warn_required_dynamic_aliases = true
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-q"
+# The MCP server's tools are async; without this, pytest silently skips them
+# as "not natively supported" rather than failing, which would let the whole
+# suite pass while testing nothing.
+asyncio_mode = "auto"
 
 [tool.coverage.run]
 source = ["continuum"]
