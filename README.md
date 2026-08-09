@@ -297,6 +297,7 @@ continuum diff checkpoint_a checkpoint_b
 
 ### Data Model (Phase 1 — Complete)
 
+
 Built on immutable, frozen Pydantic v2 models with cryptographic hash chains:
 
 ```
@@ -325,7 +326,59 @@ e3.prev_hash = e2.hash       e3.hash = H(content(e3))
 
 Tamper detection built in. `EventLog.verify()` recomputes every digest and re-walks the chain, localizing damage.
 
-18 event types covering the full lifecycle: `RUN_STARTED`, `TOOL_CALLED`, `DECISION_CREATED`, `STATE_CHECKPOINTED`, `ENVIRONMENT_CHANGED`, `RECOVERY_STARTED`, `ACTION_RECONCILED`, and more.
+29 event types covering the full lifecycle: `RUN_STARTED`, `TOOL_CALLED`, `DECISION_CREATED`, `STATE_CHECKPOINTED`, `ENVIRONMENT_CHANGED`, `RECOVERY_STARTED`, `ACTION_RECONCILED`, and more.
+
+### Semantic State Projection (Phase 2 — Complete)
+
+State is not stored and mutated. It is *projected* from the event log by a pure fold:
+
+```
+state = reduce(apply, events, empty_state)
+```
+
+Two properties make this safe to recover from, and both are tested:
+
+- **Reproducibility** — folding the same prefix twice yields an equal state. Timestamps come from the events, never from `now()`.
+- **Prefix-closure** — `project(events, upto=n)` equals the state that existed after event `n`.
+
+Together with the log's `trusted_through`, a run whose tail was tampered with can still be recovered up to its last verified event:
+
+```python
+report  = log.verify("run_4821")
+trusted = report.trusted_through["run_4821"]
+state   = project("run_4821", log.events("run_4821"), upto=trusted)
+```
+
+Unknown event types are counted, not fatal — a newer writer's vocabulary must never render a run unrecoverable.
+
+### State Extraction
+
+Extraction is pluggable through a single protocol:
+
+```python
+class StateExtractor(Protocol):
+    name: str
+    def extract(self, context: ExtractionContext) -> SemanticState: ...
+```
+
+`DeterministicExtractor` is the default and the only one required. It folds the event log — no model, no network, no clock.
+
+`LLMExtractor` is optional and deliberately constrained. The caller supplies the callable; CONTINUUM has no provider dependency, no API key handling, no network default. The model may only **add** components, never modify or delete recorded facts. Everything it produces is tagged `Origin.LLM` and forced to `REQUIRES_REVIEW`. If it raises, extraction degrades to the deterministic result — losing an optional enrichment must never cost a recovery.
+
+The deterministic layer is authoritative. The model is an advisor.
+
+### State Versioning
+
+Every accepted mutation appends a version. Versions are content-addressed and linked, so history can be audited exactly like the event log:
+
+```python
+chain = VersionChain("run_4821")
+chain.commit(state, reason="milestone")   # -> VersionEntry(version=0)
+chain.commit(state, reason="timer")       # -> None: semantically unchanged
+chain.verify()                            # recompute fingerprints, re-walk links
+```
+
+`commit` returns `None` when nothing meaningful changed, so timer-driven checkpoint policies cannot inflate history with noise. Fingerprints ignore bookkeeping fields — a state means the same thing regardless of when it was projected.
 
 ### Security
 
@@ -401,7 +454,7 @@ No benchmark results are claimed. The harness is being built. Results will be pu
 | Phase | Component                         | Status      |
 |:-----:|:----------------------------------|:------------|
 |   1   | Data models + Event system        | Complete    |
-|   2   | Semantic state representation     | In progress |
+|   2   | Semantic state representation     | Complete    |
 |   3   | SQLite persistence                | Planned     |
 |   4   | Checkpoint creation               | Planned     |
 |   5   | State validation                  | Planned     |
