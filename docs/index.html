@@ -192,61 +192,83 @@ status = recovered.validate()
   <section id="architecture" class="arch-section container">
     <div class="section-header">
       <h2 class="section-title">System Architecture</h2>
-      <p class="section-subtitle">Hover over any architectural component to inspect data flow responsibilities.</p>
+      <p class="section-subtitle">Real-time data flow animation. Hover over any node to inspect component contracts.</p>
     </div>
 
     <div class="arch-container">
-      <div style="max-width:900px; margin:0 auto;">
+      <div class="arch-controls-bar">
+        <button class="arch-flow-btn active" id="btnToggleFlow">
+          <span class="pulse-dot"></span> Live Data Flow Animation
+        </button>
+        <span class="hl-dim" style="font-family:var(--font-mono); font-size:0.8rem;">State Checkpoint Pipeline</span>
+      </div>
+
+      <div style="max-width:900px; margin:0 auto; position:relative;">
         <svg viewBox="0 0 800 360" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:100%; height:auto;">
-          <!-- Connectors -->
-          <path d="M400 50 L400 90" stroke="#222B3D" stroke-width="2"/>
-          <path d="M400 130 L180 170" stroke="#222B3D" stroke-width="2"/>
-          <path d="M400 130 L400 170" stroke="#222B3D" stroke-width="2"/>
-          <path d="M400 130 L620 170" stroke="#222B3D" stroke-width="2"/>
-          <path d="M180 210 L400 250" stroke="#222B3D" stroke-width="2"/>
-          <path d="M400 210 L400 250" stroke="#222B3D" stroke-width="2"/>
-          <path d="M620 210 L400 250" stroke="#222B3D" stroke-width="2"/>
-          <path d="M400 290 L260 330" stroke="#222B3D" stroke-width="2"/>
-          <path d="M400 290 L540 330" stroke="#222B3D" stroke-width="2"/>
+          <!-- Precision Connector Paths -->
+          <g class="arch-connectors">
+            <path class="arch-line" d="M400 50 L400 90"/>
+            <path class="arch-line" d="M400 130 L180 170"/>
+            <path class="arch-line" d="M400 130 L400 170"/>
+            <path class="arch-line" d="M400 130 L620 170"/>
+            <path class="arch-line" d="M180 210 L400 250"/>
+            <path class="arch-line" d="M400 210 L400 250"/>
+            <path class="arch-line" d="M620 210 L400 250"/>
+            <path class="arch-line" d="M400 290 L260 330"/>
+            <path class="arch-line" d="M400 290 L540 330"/>
+          </g>
+
+          <!-- Subtle Packet Pulse Dots -->
+          <g class="arch-pulses">
+            <circle class="pulse-particle p-top" r="3"/>
+            <circle class="pulse-particle p-mid1" r="3"/>
+            <circle class="pulse-particle p-mid2" r="3"/>
+            <circle class="pulse-particle p-mid3" r="3"/>
+            <circle class="pulse-particle p-bot1" r="3"/>
+            <circle class="pulse-particle p-bot2" r="3"/>
+            <circle class="pulse-particle p-bot3" r="3"/>
+            <circle class="pulse-particle p-end1" r="3"/>
+            <circle class="pulse-particle p-end2" r="3"/>
+          </g>
 
           <!-- Nodes -->
           <g class="arch-node" data-node="agent" style="cursor:pointer;">
-            <rect x="300" y="10" width="200" height="40" rx="8" fill="#0E121B" stroke="#E06D53" stroke-width="1.5"/>
+            <rect x="300" y="10" width="200" height="40" rx="8" class="node-rect" fill="#0E121B" stroke="#E06D53" stroke-width="1.5"/>
             <text x="400" y="35" fill="#F8FAFC" font-family="Inter" font-size="14" font-weight="700" text-anchor="middle">AI AGENT ENGINE</text>
           </g>
 
           <g class="arch-node" data-node="agent" style="cursor:pointer;">
-            <rect x="300" y="90" width="200" height="40" rx="8" fill="#141A27" stroke="#334155" stroke-width="1.5"/>
+            <rect x="300" y="90" width="200" height="40" rx="8" class="node-rect" fill="#141A27" stroke="#334155" stroke-width="1.5"/>
             <text x="400" y="115" fill="#F8FAFC" font-family="Inter" font-size="14" font-weight="700" text-anchor="middle">CONTINUUM SDK</text>
           </g>
 
           <g class="arch-node" data-node="stateEngine" style="cursor:pointer;">
-            <rect x="100" y="170" width="160" height="40" rx="6" fill="#0E121B" stroke="#222B3D" stroke-width="1"/>
+            <rect x="100" y="170" width="160" height="40" rx="6" class="node-rect" fill="#0E121B" stroke="#222B3D" stroke-width="1"/>
             <text x="180" y="195" fill="#94A3B8" font-family="Inter" font-size="13" font-weight="600" text-anchor="middle">State Engine</text>
           </g>
 
           <g class="arch-node" data-node="ledger" style="cursor:pointer;">
-            <rect x="320" y="170" width="160" height="40" rx="6" fill="#0E121B" stroke="#222B3D" stroke-width="1"/>
+            <rect x="320" y="170" width="160" height="40" rx="6" class="node-rect" fill="#0E121B" stroke="#222B3D" stroke-width="1"/>
             <text x="400" y="195" fill="#94A3B8" font-family="Inter" font-size="13" font-weight="600" text-anchor="middle">Action Ledger</text>
           </g>
 
           <g class="arch-node" data-node="evidence" style="cursor:pointer;">
-            <rect x="540" y="170" width="160" height="40" rx="6" fill="#0E121B" stroke="#222B3D" stroke-width="1"/>
+            <rect x="540" y="170" width="160" height="40" rx="6" class="node-rect" fill="#0E121B" stroke="#222B3D" stroke-width="1"/>
             <text x="620" y="195" fill="#94A3B8" font-family="Inter" font-size="13" font-weight="600" text-anchor="middle">Evidence Registry</text>
           </g>
 
           <g class="arch-node" data-node="checkpoint" style="cursor:pointer;">
-            <rect x="280" y="250" width="240" height="40" rx="8" fill="#141A27" stroke="#E06D53" stroke-width="1.5"/>
+            <rect x="280" y="250" width="240" height="40" rx="8" class="node-rect glow-node" fill="#141A27" stroke="#E06D53" stroke-width="1.5"/>
             <text x="400" y="275" fill="#F8FAFC" font-family="Inter" font-size="14" font-weight="700" text-anchor="middle">Semantic Checkpoint</text>
           </g>
 
           <g class="arch-node" data-node="validator" style="cursor:pointer;">
-            <rect x="170" y="315" width="180" height="35" rx="6" fill="#0E121B" stroke="#222B3D" stroke-width="1"/>
+            <rect x="170" y="315" width="180" height="35" rx="6" class="node-rect" fill="#0E121B" stroke="#222B3D" stroke-width="1"/>
             <text x="260" y="337" fill="#94A3B8" font-family="Inter" font-size="12" font-weight="600" text-anchor="middle">Env Validator</text>
           </g>
 
           <g class="arch-node" data-node="contract" style="cursor:pointer;">
-            <rect x="450" y="315" width="180" height="35" rx="6" fill="#0E121B" stroke="#222B3D" stroke-width="1"/>
+            <rect x="450" y="315" width="180" height="35" rx="6" class="node-rect" fill="#0E121B" stroke="#222B3D" stroke-width="1"/>
             <text x="540" y="337" fill="#94A3B8" font-family="Inter" font-size="12" font-weight="600" text-anchor="middle">Recovery Contract</text>
           </g>
         </svg>
@@ -304,42 +326,188 @@ if status.safe:
     </div>
   </section>
 
-  <!-- Benchmark Calculator -->
+  <!-- Benchmark & ROI Calculator -->
   <section id="calculator" class="calc-section container">
     <div class="section-header">
-      <h2 class="section-title">CONTINUUM-Bench Metric Calculator</h2>
-      <p class="section-subtitle">Calculate token compression and cost savings for your long-running agent workloads.</p>
+      <h2 class="section-title">CONTINUUM-Bench ROI & Recovery Calculator</h2>
+      <p class="section-subtitle">Real-time mathematical estimation of token compression, dollar cost savings, and fault prevention for production agent workloads.</p>
     </div>
 
     <div class="calc-card">
-      <div>
-        <div class="calc-label">
-          <span>Execution Turns</span>
-          <span id="calcTurnsDisplay" style="color:var(--accent-terracotta); font-family:var(--font-mono);">100</span>
+      <div class="calc-inputs-col">
+        <div class="calc-input-group">
+          <div class="calc-label">
+            <span>Active Agent Runs / Day</span>
+            <span id="calcAgentsDisplay" class="calc-val-badge">50 runs</span>
+          </div>
+          <input type="range" id="calcAgentsRange" class="calc-range" min="5" max="500" value="50" step="5">
         </div>
-        <input type="range" id="calcRange" class="calc-range" min="10" max="500" value="100" step="10">
 
-        <p style="color: var(--text-muted); font-size: 0.88rem; line-height: 1.6;">
-          Assumes ~1,500 tokens context growth per execution turn vs bounded 3,500 token CONTINUUM recovery state.
-        </p>
+        <div class="calc-input-group">
+          <div class="calc-label">
+            <span>Avg. Steps / Turns Per Task</span>
+            <span id="calcTurnsDisplay" class="calc-val-badge">120 turns</span>
+          </div>
+          <input type="range" id="calcTurnsRange" class="calc-range" min="10" max="500" value="120" step="10">
+        </div>
+
+        <div class="calc-input-group">
+          <div class="calc-label">
+            <span>Target LLM Model</span>
+            <span id="calcModelDisplay" class="calc-val-badge">Claude 3.5 Sonnet</span>
+          </div>
+          
+          <!-- Custom Dark Mode Model Selector Component -->
+          <div class="custom-select-wrapper" id="customModelWrapper">
+            <button class="custom-select-trigger" id="customModelTrigger" type="button">
+              <span id="customModelSelectedLabel">GPT-5.6 Sol ($4.50 in / $18.00 out)</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="select-chevron"><path d="M6 9l6 6 6-6"/></svg>
+            </button>
+            
+            <div class="custom-select-dropdown" id="customModelDropdown">
+              <div class="select-group-header">OpenAI (2026 Gen)</div>
+              <div class="select-option active" data-in="4.50" data-out="18.00" data-name="GPT-5.6 Sol">
+                <span>GPT-5.6 Sol</span> <span class="opt-price">$4.50 in / $18.00 out</span>
+              </div>
+              <div class="select-option" data-in="8.00" data-out="32.00" data-name="GPT-5.4 Pro">
+                <span>GPT-5.4 Pro</span> <span class="opt-price">$8.00 in / $32.00 out</span>
+              </div>
+              <div class="select-option" data-in="2.00" data-out="8.00" data-name="GPT-5.3 Codex">
+                <span>GPT-5.3 Codex</span> <span class="opt-price">$2.00 in / $8.00 out</span>
+              </div>
+              <div class="select-option" data-in="0.12" data-out="0.48" data-name="GPT-4.1 mini">
+                <span>GPT-4.1 mini</span> <span class="opt-price">$0.12 in / $0.48 out</span>
+              </div>
+              <div class="select-option" data-in="10.00" data-out="40.00" data-name="o3 Deep Reasoning">
+                <span>o3 Deep Reasoning</span> <span class="opt-price">$10.00 in / $40.00 out</span>
+              </div>
+
+              <div class="select-group-header">Google (2026 Gen)</div>
+              <div class="select-option" data-in="1.50" data-out="7.50" data-name="Gemini 3.6 Flash">
+                <span>Gemini 3.6 Flash</span> <span class="opt-price">$1.50 in / $7.50 out</span>
+              </div>
+              <div class="select-option" data-in="3.00" data-out="18.00" data-name="Gemini 3.5 Flash Cyber">
+                <span>Gemini 3.5 Flash Cyber</span> <span class="opt-price">$3.00 in / $18.00 out</span>
+              </div>
+              <div class="select-option" data-in="7.00" data-out="21.00" data-name="Gemini 3 Pro">
+                <span>Gemini 3 Pro</span> <span class="opt-price">$7.00 in / $21.00 out</span>
+              </div>
+              <div class="select-option" data-in="15.00" data-out="60.00" data-name="Gemini 3 Ultra">
+                <span>Gemini 3 Ultra</span> <span class="opt-price">$15.00 in / $60.00 out</span>
+              </div>
+
+              <div class="select-group-header">Anthropic (2026 Gen)</div>
+              <div class="select-option" data-in="5.00" data-out="25.00" data-name="Claude Opus 5">
+                <span>Claude Opus 5</span> <span class="opt-price">$5.00 in / $25.00 out</span>
+              </div>
+              <div class="select-option" data-in="3.00" data-out="15.00" data-name="Claude 3.5 Sonnet (Upgraded)">
+                <span>Claude 3.5 Sonnet (Upgraded)</span> <span class="opt-price">$3.00 in / $15.00 out</span>
+              </div>
+              <div class="select-option" data-in="2.50" data-out="12.50" data-name="Claude Code Engine">
+                <span>Claude Code Engine</span> <span class="opt-price">$2.50 in / $12.50 out</span>
+              </div>
+              <div class="select-option" data-in="0.80" data-out="4.00" data-name="Claude 3.5 Haiku">
+                <span>Claude 3.5 Haiku</span> <span class="opt-price">$0.80 in / $4.00 out</span>
+              </div>
+
+              <div class="select-group-header">DeepSeek (2026 Gen)</div>
+              <div class="select-option" data-in="0.10" data-out="0.20" data-name="DeepSeek-V4-Flash">
+                <span>DeepSeek-V4-Flash</span> <span class="opt-price">$0.10 in / $0.20 out</span>
+              </div>
+              <div class="select-option" data-in="0.55" data-out="2.19" data-name="DeepSeek-R1-Turbo">
+                <span>DeepSeek-R1-Turbo</span> <span class="opt-price">$0.55 in / $2.19 out</span>
+              </div>
+
+              <div class="select-group-header">xAI & Frontier (2026 Gen)</div>
+              <div class="select-option" data-in="2.00" data-out="10.00" data-name="Grok 4.5">
+                <span>Grok 4.5</span> <span class="opt-price">$2.00 in / $10.00 out</span>
+              </div>
+              <div class="select-option" data-in="3.00" data-out="15.00" data-name="Kimi K3 (Moonshot)">
+                <span>Kimi K3 (Moonshot)</span> <span class="opt-price">$3.00 in / $15.00 out</span>
+              </div>
+              <div class="select-option" data-in="1.20" data-out="4.80" data-name="MAI Thinking One (Microsoft)">
+                <span>MAI Thinking One</span> <span class="opt-price">$1.20 in / $4.80 out</span>
+              </div>
+              <div class="select-option" data-in="1.00" data-out="3.00" data-name="Qwen3.8 Max (Alibaba)">
+                <span>Qwen3.8 Max</span> <span class="opt-price">$1.00 in / $3.00 out</span>
+              </div>
+              <div class="select-option" data-in="0.30" data-out="0.90" data-name="Mistral Codestral v2">
+                <span>Mistral Codestral v2</span> <span class="opt-price">$0.30 in / $0.90 out</span>
+              </div>
+
+              <div class="select-group-header">Custom Specification</div>
+              <div class="select-option" data-in="custom" data-out="custom" data-name="Custom Model">
+                <span>Enter Custom Token Rate...</span> <span class="opt-price">$/1M</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Hidden input for selected model value -->
+          <input type="hidden" id="calcModelSelect" value="7.20">
+
+          <!-- Custom Price Input Field (Shown when Custom is selected) -->
+          <div id="customPriceInputContainer" style="display:none; margin-top:10px;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-size:0.82rem; color:var(--text-muted); font-weight:600;">$/1M Tokens:</span>
+              <input type="number" id="customPriceInput" class="calc-custom-input" value="3.00" step="0.10" min="0.01">
+            </div>
+          </div>
+        </div>
+
+        <div class="calc-input-group">
+          <div class="calc-label">
+            <span>Process Failure / Crash Rate</span>
+            <span id="calcCrashDisplay" class="calc-val-badge">5% failure</span>
+          </div>
+          <input type="range" id="calcCrashRange" class="calc-range" min="1" max="25" value="5" step="1">
+        </div>
+
+        <button id="btnToggleFormula" class="calc-formula-btn">
+          <span>&fnof;</span> View Transparent Formula Breakdown
+        </button>
       </div>
 
-      <div class="calc-stats-grid">
-        <div class="calc-stat-box">
-          <div class="calc-stat-number" id="calcRatioDisplay">42.9x</div>
-          <div class="calc-stat-label">Recovery Compression Ratio</div>
+      <div class="calc-results-col">
+        <div class="calc-stats-grid">
+          <div class="calc-stat-box primary">
+            <div class="calc-stat-number" id="calcCostSavedDisplay">$2,014</div>
+            <div class="calc-stat-label">Est. Monthly Token Cost Saved</div>
+          </div>
+          <div class="calc-stat-box">
+            <div class="calc-stat-number" id="calcRatioDisplay">51.4x</div>
+            <div class="calc-stat-label">Context Compression Ratio</div>
+          </div>
+          <div class="calc-stat-box">
+            <div class="calc-stat-number" id="calcTokensSavedDisplay">671M</div>
+            <div class="calc-stat-label">Monthly Tokens Prevented</div>
+          </div>
+          <div class="calc-stat-box">
+            <div class="calc-stat-number" id="calcActionsDisplay">113</div>
+            <div class="calc-stat-label">Duplicate Actions Blocked / Mo</div>
+          </div>
+          <div class="calc-stat-box">
+            <div class="calc-stat-number" id="calcHoursDisplay">38 hrs</div>
+            <div class="calc-stat-label">Dev Debugging Saved / Mo</div>
+          </div>
+          <div class="calc-stat-box">
+            <div class="calc-stat-number" id="calcSpeedupDisplay">120x</div>
+            <div class="calc-stat-label">Recovery Speedup vs Replay</div>
+          </div>
         </div>
-        <div class="calc-stat-box">
-          <div class="calc-stat-number" id="calcTokensSavedDisplay">147k</div>
-          <div class="calc-stat-label">Raw Tokens Saved</div>
+
+        <div id="formulaBox" class="calc-formula-box" style="display:none;">
+          <div style="color:var(--accent-terracotta); font-weight:700; margin-bottom:6px;">Calculation Methodology:</div>
+          <ul style="color:var(--text-secondary); font-size:0.8rem; line-height:1.5; padding-left:16px;">
+            <li><strong>Raw Replay Context</strong>: Turns &times; 1,500 tokens/turn (naive prompt replay).</li>
+            <li><strong>CONTINUUM State Context</strong>: 3,500 tokens fixed bounded recovery state.</li>
+            <li><strong>Monthly Savings</strong>: (Runs/day &times; 30 &times; Crash Rate) &times; (0.5 &times; Turns &times; 1500 &minus; 3500) &times; (Price / 1M).</li>
+            <li><strong>Duplicate Side Effects</strong>: Monthly Crashes &times; 1.5 external tool calls.</li>
+          </ul>
         </div>
-        <div class="calc-stat-box">
-          <div class="calc-stat-number" id="calcCostSavedDisplay">$0.73</div>
-          <div class="calc-stat-label">Est. Cost Saved / Crash</div>
-        </div>
-        <div class="calc-stat-box">
-          <div class="calc-stat-number" id="calcActionsDisplay">18</div>
-          <div class="calc-stat-label">Duplicate Actions Blocked</div>
+
+        <div class="calc-cta-box">
+          <div class="calc-cta-text">Protect your production agent workloads</div>
+          <a href="#quickstart" class="btn-primary" style="padding:8px 18px; font-size:0.88rem;">Install CONTINUUM &rarr;</a>
         </div>
       </div>
     </div>
@@ -405,15 +573,56 @@ if status.safe:
   </section>
 
   <!-- Footer -->
-  <footer>
-    <div class="container footer-flex">
-      <div>
-        <strong style="color:var(--text-primary);">CONTINUUM</strong> &bull; Open Source Apache 2.0 License
+  <footer class="footer-wrapper">
+    <div class="footer-container container">
+      <div class="footer-main">
+        <div class="footer-brand-col">
+          <a href="#" class="brand" style="text-decoration:none;">
+            <img src="assets/continuum-mark.png" alt="CONTINUUM Logo" class="brand-logo">
+            <span>CONTINUUM</span>
+          </a>
+          <p class="footer-tagline">Verifiable semantic recovery layer for long-running AI agents.</p>
+          <div class="footer-badge">
+            <span class="pulse-dot"></span> Open Source &bull; Apache 2.0 License
+          </div>
+        </div>
+
+        <div class="footer-links-grid">
+          <div class="footer-col">
+            <div class="footer-col-title">Product</div>
+            <ul class="footer-links-list">
+              <li><a href="#simulator">Recovery Simulator</a></li>
+              <li><a href="#diff">Semantic State Diff</a></li>
+              <li><a href="#features">Core Features</a></li>
+              <li><a href="#architecture">System Architecture</a></li>
+            </ul>
+          </div>
+
+          <div class="footer-col">
+            <div class="footer-col-title">Benchmarks</div>
+            <ul class="footer-links-list">
+              <li><a href="#calculator">ROI Calculator</a></li>
+              <li><a href="#quickstart">Quickstart SDK</a></li>
+              <li><a href="https://github.com/Cyrax321/CONTINUUM" target="_blank" rel="noopener">CONTINUUM-Bench</a></li>
+            </ul>
+          </div>
+
+          <div class="footer-col">
+            <div class="footer-col-title">Resources</div>
+            <ul class="footer-links-list">
+              <li><a href="https://github.com/Cyrax321/CONTINUUM" target="_blank" rel="noopener">GitHub Repository</a></li>
+              <li><a href="https://github.com/Cyrax321/CONTINUUM/blob/main/CHANGELOG.md" target="_blank" rel="noopener">Changelog</a></li>
+              <li><a href="https://github.com/Cyrax321/CONTINUUM/blob/main/LICENSE" target="_blank" rel="noopener">Apache 2.0 License</a></li>
+            </ul>
+          </div>
+        </div>
       </div>
-      <div>
-        <a href="https://github.com/Cyrax321/CONTINUUM" target="_blank" rel="noopener" style="margin-right: 16px;">GitHub Repository</a>
-        <a href="https://github.com/Cyrax321/CONTINUUM/blob/main/CHANGELOG.md" target="_blank" rel="noopener" style="margin-right: 16px;">Changelog</a>
-        <a href="https://cyrax321.github.io/CONTINUUM/" target="_blank" rel="noopener">GitHub Pages</a>
+
+      <div class="footer-bottom">
+        <div>&copy; 2026 CONTINUUM Project. Open-source under Apache-2.0.</div>
+        <div style="font-family:var(--font-mono); font-size:0.8rem; color:var(--text-muted);">
+          v0.1.0 &bull; Verified Recovery Engine
+        </div>
       </div>
     </div>
   </footer>

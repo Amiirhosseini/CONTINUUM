@@ -302,40 +302,170 @@ function initDiffViewer() {
   }
 }
 
-// ---------------------------------------------------------------------------
-// 3. Real-Time CONTINUUM-Bench Metric Calculator
-// ---------------------------------------------------------------------------
 function initCalculator() {
-  const rangeInput = document.getElementById('calcRange');
+  const agentsRange = document.getElementById('calcAgentsRange');
+  const turnsRange = document.getElementById('calcTurnsRange');
+  const hiddenModelSelect = document.getElementById('calcModelSelect');
+  const crashRange = document.getElementById('calcCrashRange');
+
+  const agentsDisplay = document.getElementById('calcAgentsDisplay');
   const turnsDisplay = document.getElementById('calcTurnsDisplay');
+  const modelDisplay = document.getElementById('calcModelDisplay');
+  const crashDisplay = document.getElementById('calcCrashDisplay');
+
+  const costSavedDisplay = document.getElementById('calcCostSavedDisplay');
   const ratioDisplay = document.getElementById('calcRatioDisplay');
   const tokensSavedDisplay = document.getElementById('calcTokensSavedDisplay');
-  const costSavedDisplay = document.getElementById('calcCostSavedDisplay');
   const actionsDisplay = document.getElementById('calcActionsDisplay');
+  const hoursDisplay = document.getElementById('calcHoursDisplay');
+  const speedupDisplay = document.getElementById('calcSpeedupDisplay');
 
-  if (!rangeInput || !turnsDisplay) return;
+  if (!agentsRange || !turnsRange || !hiddenModelSelect || !crashRange) return;
 
-  function calculate() {
-    const turns = parseInt(rangeInput.value, 10);
-    turnsDisplay.textContent = turns;
+  const btnToggleFormula = document.getElementById('btnToggleFormula');
+  const formulaBox = document.getElementById('formulaBox');
 
-    // Est. 1,500 tokens context growth per execution turn vs 3,500 fixed recovery state
-    const rawTokens = turns * 1500;
-    const recoveryTokens = 3500;
-
-    const ratio = (rawTokens / recoveryTokens).toFixed(1);
-    const tokensSaved = Math.round((rawTokens - recoveryTokens) / 1000);
-    const costSaved = ((rawTokens - recoveryTokens) / 1000000 * 5.0).toFixed(2);
-    const actionsPrevented = Math.round(turns * 0.18);
-
-    ratioDisplay.textContent = `${ratio}x`;
-    tokensSavedDisplay.textContent = `${tokensSaved}k`;
-    costSavedDisplay.textContent = `$${costSaved}`;
-    actionsDisplay.textContent = actionsPrevented;
+  if (btnToggleFormula && formulaBox) {
+    btnToggleFormula.addEventListener('click', () => {
+      const isHidden = formulaBox.style.display === 'none';
+      formulaBox.style.display = isHidden ? 'block' : 'none';
+      btnToggleFormula.classList.toggle('active');
+    });
   }
 
-  rangeInput.addEventListener('input', calculate);
-  calculate();
+  function update() {
+    const agents = parseInt(agentsRange.value, 10);
+    const turns = parseInt(turnsRange.value, 10);
+    const costPerM = parseFloat(hiddenModelSelect.value) || 3.0;
+    const crashRate = parseInt(crashRange.value, 10) / 100.0;
+
+    agentsDisplay.textContent = `${agents} runs/day`;
+    turnsDisplay.textContent = `${turns} turns`;
+    
+    // Model display badge
+    const activeOpt = document.querySelector('.select-option.active');
+    const modelName = activeOpt ? activeOpt.getAttribute('data-name') : 'Custom Model';
+    modelDisplay.textContent = modelName;
+    crashDisplay.textContent = `${Math.round(crashRate * 100)}% failure`;
+
+    // Monthly runs = agents * 30 days
+    const monthlyRuns = agents * 30;
+    const monthlyCrashes = Math.max(1, Math.round(monthlyRuns * crashRate));
+
+    // Raw transcript tokens per turn = ~1,500 tokens.
+    // On crash, naive replay d...
+    const rawReplayTokensPerCrash = 0.5 * turns * 1500;
+    const recoveryTokens = 3500;
+
+    // Net tokens saved per crash recovery
+    const netTokensSavedPerCrash = Math.max(0, rawReplayTokensPerCrash - recoveryTokens);
+    const totalTokensSavedMo = netTokensSavedPerCrash * monthlyCrashes;
+
+    // Context compression ratio
+    const ratio = ((turns * 1500) / recoveryTokens).toFixed(1);
+
+    // Dollar cost saved per month
+    const dollarsSavedMo = (totalTokensSavedMo / 1000000) * costPerM;
+
+    // Duplicate side effects prevented = avg 1.5 external tool calls per crash
+    const duplicateActions = Math.round(monthlyCrashes * 1.5);
+
+    // Developer hours saved debugging corrupt state (0.5 hrs / crash)
+    const hoursSaved = Math.round(monthlyCrashes * 0.5);
+
+    // Speedup factor
+    const speedup = Math.round((turns * 0.4) / 0.4);
+
+    // Render formatted numbers
+    costSavedDisplay.textContent = `$${Math.round(dollarsSavedMo).toLocaleString()}`;
+    ratioDisplay.textContent = `${ratio}x`;
+
+    if (totalTokensSavedMo >= 1000000000) {
+      tokensSavedDisplay.textContent = `${(totalTokensSavedMo / 1000000000).toFixed(1)}B`;
+    } else if (totalTokensSavedMo >= 1000000) {
+      tokensSavedDisplay.textContent = `${(totalTokensSavedMo / 1000000).toFixed(1)}M`;
+    } else {
+      tokensSavedDisplay.textContent = `${Math.round(totalTokensSavedMo / 1000)}k`;
+    }
+
+    actionsDisplay.textContent = duplicateActions.toLocaleString();
+    hoursDisplay.textContent = `${hoursSaved} hrs`;
+    speedupDisplay.textContent = `${speedup}x`;
+  }
+
+  // Initialize custom dropdown component
+  initCustomModelSelector(update);
+
+  [agentsRange, turnsRange, crashRange].forEach(input => {
+    input.addEventListener('input', update);
+    input.addEventListener('change', update);
+  });
+
+  update();
+}
+
+function initCustomModelSelector(onModelChange) {
+  const wrapper = document.getElementById('customModelWrapper');
+  const trigger = document.getElementById('customModelTrigger');
+  const dropdown = document.getElementById('customModelDropdown');
+  const label = document.getElementById('customModelSelectedLabel');
+  const hiddenInput = document.getElementById('calcModelSelect');
+  const customPriceContainer = document.getElementById('customPriceInputContainer');
+  const customPriceInput = document.getElementById('customPriceInput');
+
+  if (!wrapper || !trigger || !dropdown) return;
+
+  trigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    wrapper.classList.toggle('open');
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!wrapper.contains(e.target)) {
+      wrapper.classList.remove('open');
+    }
+  });
+
+  const options = dropdown.querySelectorAll('.select-option');
+  options.forEach(opt => {
+    opt.addEventListener('click', () => {
+      options.forEach(o => o.classList.remove('active'));
+      opt.classList.add('active');
+
+      const inVal = opt.getAttribute('data-in');
+      const outVal = opt.getAttribute('data-out');
+      const name = opt.getAttribute('data-name');
+
+      if (inVal === 'custom') {
+        customPriceContainer.style.display = 'block';
+        const customVal = parseFloat(customPriceInput.value) || 3.0;
+        hiddenInput.value = customVal;
+        label.textContent = `${name} ($${customVal.toFixed(2)} / 1M)`;
+      } else {
+        customPriceContainer.style.display = 'none';
+        const priceIn = parseFloat(inVal);
+        const priceOut = parseFloat(outVal);
+        // Blended token cost (80% input, 20% output)
+        const blended = priceIn * 0.8 + priceOut * 0.2;
+        hiddenInput.value = blended;
+        label.textContent = `${name} ($${priceIn.toFixed(2)} in / $${priceOut.toFixed(2)} out)`;
+      }
+
+      wrapper.classList.remove('open');
+      if (onModelChange) onModelChange();
+    });
+  });
+
+  if (customPriceInput) {
+    ['input', 'change'].forEach(evtName => {
+      customPriceInput.addEventListener(evtName, () => {
+        const val = parseFloat(customPriceInput.value) || 0.1;
+        hiddenInput.value = val;
+        label.textContent = `Custom Model ($${val.toFixed(2)} / 1M)`;
+        if (onModelChange) onModelChange();
+      });
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -457,6 +587,20 @@ function initArchTooltips() {
   const nodes = document.querySelectorAll('.arch-node');
   const titleEl = document.getElementById('archInfoTitle');
   const descEl = document.getElementById('archInfoDesc');
+  const btnToggleFlow = document.getElementById('btnToggleFlow');
+  const flowsGroup = document.querySelector('.arch-pulses');
+
+  if (btnToggleFlow && flowsGroup) {
+    btnToggleFlow.addEventListener('click', () => {
+      flowsGroup.classList.toggle('paused');
+      btnToggleFlow.classList.toggle('active');
+      if (flowsGroup.classList.contains('paused')) {
+        btnToggleFlow.innerHTML = '<span>▶</span> Resume Flow Animation';
+      } else {
+        btnToggleFlow.innerHTML = '<span class="pulse-dot"></span> Live Data Flow Animation';
+      }
+    });
+  }
 
   if (!nodes.length || !titleEl) return;
 
