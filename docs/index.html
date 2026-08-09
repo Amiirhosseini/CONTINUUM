@@ -168,35 +168,51 @@ status = recovered.validate()
           <tbody>
             <tr>
               <td>
-                <strong>Context Window Overflow</strong>
-                <div class="td-sub">Tasks exceeding 50+ turns hit context limits</div>
+                <div class="td-title">Context Window Overflow</div>
+                <div class="td-sub">Tasks exceeding 50+ turns hit token context limits</div>
               </td>
-              <td><span class="status-badge error">Summarizer drops key variables & causes hallucinations</span></td>
-              <td><span class="status-badge success">Bounded ~3.5k token semantic state invariant tree</span></td>
+              <td>
+                <div class="status-badge error">Summarizer drops key variables &amp; causes hallucinations</div>
+              </td>
+              <td>
+                <div class="status-badge success">Bounded ~3.5k token semantic state invariant tree</div>
+              </td>
             </tr>
             <tr>
               <td>
-                <strong>Process Crashes & OOMs</strong>
+                <div class="td-title">Process Crashes &amp; OOMs</div>
                 <div class="td-sub">Network drops or pod restarts mid-execution</div>
               </td>
-              <td><span class="status-badge error">Task dies entirely; requires full turn-1 restart</span></td>
-              <td><span class="status-badge success">Instant &lt;0.5s state resumption without re-running LLM</span></td>
+              <td>
+                <div class="status-badge error">Task dies entirely; requires full turn-1 restart</div>
+              </td>
+              <td>
+                <div class="status-badge success">Instant &lt;0.5s state resumption without re-running LLM</div>
+              </td>
             </tr>
             <tr>
               <td>
-                <strong>Duplicate External Side Effects</strong>
+                <div class="td-title">Duplicate External Side Effects</div>
                 <div class="td-sub">Replaying past tool calls and API writes</div>
               </td>
-              <td><span class="status-badge error">Accidentally executes Stripe charges or DB updates twice</span></td>
-              <td><span class="status-badge success">Idempotent Action Ledger blocks duplicate side effects</span></td>
+              <td>
+                <div class="status-badge error">Accidentally executes Stripe charges or DB updates twice</div>
+              </td>
+              <td>
+                <div class="status-badge success">Idempotent Action Ledger blocks duplicate side effects</div>
+              </td>
             </tr>
             <tr>
               <td>
-                <strong>Stale Environment State</strong>
+                <div class="td-title">Stale Environment State</div>
                 <div class="td-sub">Files or schema altered during process downtime</div>
               </td>
-              <td><span class="status-badge error">Blindly resumes on corrupted or modified files</span></td>
-              <td><span class="status-badge success">Environment Contract verifies sha256 hashes before resume</span></td>
+              <td>
+                <div class="status-badge error">Blindly resumes on corrupted or modified files</div>
+              </td>
+              <td>
+                <div class="status-badge success">Environment Contract verifies sha256 hashes before resume</div>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -213,46 +229,50 @@ status = recovered.validate()
 
     <div class="usecases-grid">
       <div class="usecase-card">
-        <div class="usecase-icon">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 18l6-6-6-6M8 6l-6 6 6 6"/></svg>
+        <div class="usecase-header">
+          <span class="usecase-tag">SOFTWARE ENGINEERING</span>
+          <span class="usecase-metric">Resumes at Step 85 (&lt;0.5s)</span>
         </div>
-        <h3 class="usecase-title">Autonomous Software Engineers</h3>
-        <p class="usecase-desc">Agent refactoring a 50-file codebase across 120 turns. On turn 85, a rate-limit error drops the session.</p>
-        <div class="usecase-impact">
-          <strong>CONTINUUM Impact:</strong> Resumes at step 85 with exact git diffs and pending task queue intact without re-reading files.
+        <h3 class="usecase-title">Autonomous Code Refactoring</h3>
+        <p class="usecase-desc">Agent refactoring a 50-file codebase across 120 turns. On turn 85, a rate-limit error or process crash drops the worker pod.</p>
+        <div class="usecase-footer">
+          <span class="footer-label">CONTINUUM Solution:</span> Rebuilds active task scope and git diffs without re-reading or re-analyzing 50 files.
         </div>
       </div>
 
       <div class="usecase-card">
-        <div class="usecase-icon">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+        <div class="usecase-header">
+          <span class="usecase-tag">FINANCIAL & OPS</span>
+          <span class="usecase-metric">Zero Duplicate Tool Writes</span>
         </div>
-        <h3 class="usecase-title">Financial & Ops Automation</h3>
+        <h3 class="usecase-title">Payment & Invoice Processing</h3>
         <p class="usecase-desc">Agent processing 500 vendor invoices by triggering external accounting API writes and bank wire transfers.</p>
-        <div class="usecase-impact">
-          <strong>CONTINUUM Impact:</strong> Action Ledger guarantees no wire transfer or invoice payment is ever executed twice on crash.
+        <div class="usecase-impact-text">
+          <span class="footer-label">CONTINUUM Solution:</span> Idempotent Action Ledger guarantees no wire transfer or API payment is executed twice on crash.
         </div>
       </div>
 
       <div class="usecase-card">
-        <div class="usecase-icon">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <div class="usecase-header">
+          <span class="usecase-tag">DATA & RESEARCH</span>
+          <span class="usecase-metric">7.5 Hours Work Saved</span>
         </div>
-        <h3 class="usecase-title">Multi-Agent Research Pipelines</h3>
+        <h3 class="usecase-title">Multi-Agent Scraper Swarms</h3>
         <p class="usecase-desc">Swarm of web scraper and synthesis agents running overnight for 8+ continuous execution hours.</p>
-        <div class="usecase-impact">
-          <strong>CONTINUUM Impact:</strong> Periodic semantic snapshots ensure an overnight server restart recovers 7.5 hours of research in under 0.5s.
+        <div class="usecase-impact-text">
+          <span class="footer-label">CONTINUUM Solution:</span> Periodic semantic snapshots recover 7.5 hours of research state in under 0.5s on pod restart.
         </div>
       </div>
 
       <div class="usecase-card">
-        <div class="usecase-icon">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <div class="usecase-header">
+          <span class="usecase-tag">HUMAN-IN-THE-LOOP</span>
+          <span class="usecase-metric">Zero Token Idle Overhead</span>
         </div>
-        <h3 class="usecase-title">Human-in-the-Loop Workflows</h3>
-        <p class="usecase-desc">Long-running customer support case requiring human manager sign-off 3 days later.</p>
-        <div class="usecase-impact">
-          <strong>CONTINUUM Impact:</strong> Cold storage checkpointing allows the agent process to sleep for 3 days and wake up with zero token overhead.
+        <h3 class="usecase-title">Multi-Day Approval Pipelines</h3>
+        <p class="usecase-desc">Long-running customer support case requiring human manager sign-off 3 days after initial execution.</p>
+        <div class="usecase-impact-text">
+          <span class="footer-label">CONTINUUM Solution:</span> Cold storage checkpointing lets agent process sleep for 3 days and wake up with zero idle context cost.
         </div>
       </div>
     </div>

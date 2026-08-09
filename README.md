@@ -81,7 +81,7 @@ CONTINUUM separates **LLM context** (temporary) from **durable task state** (per
 
 > Not published to PyPI yet. Install from a clone: `uv venv && uv pip install -e ".[dev]"`
 
-What runs today (Phases 1–5): record events, project state, checkpoint, survive a crash, and refuse to resume on stale state.
+What runs today (Phases 1–6): record events, project state, checkpoint, survive a crash, refuse to resume on stale state, and never duplicate an external side effect.
 
 ```python
 from continuum import EventType, Run, SQLiteStorage, project
@@ -579,6 +579,74 @@ Safe to resume: yes
 
 **Model switches are never assumed safe.** State produced under one model that carries model-specific assumptions is marked `STALE` when another model takes over, and requires revalidation.
 
+### Action Ledger (Phase 6 — Complete)
+
+Storage gives durability for *state*. It cannot give exactly-once semantics for effects on other systems, because the effect and the record of it are two separate writes with a gap between them. The ledger makes that gap observable instead of invisible.
+
+```python
+from continuum import ActionLedger, UnknownSideEffect
+
+ledger = ActionLedger(store, "run_4821")
+
+outcome = ledger.claim("github.create_issue", {"title": "Bug report"})
+if outcome.fresh:
+    issue = github.create_issue(...)
+    ledger.complete(outcome.key, external_id=issue.id, result={"url": issue.url})
+else:
+    issue_id = outcome.external_id  # already done — previous result returned
+```
+
+**Every crash interleaving is accounted for:**
+
+| Crash lands | Ledger state on recovery | Behaviour |
+|:--|:--|:--|
+| before the claim | nothing recorded | retry is safe |
+| between claim and effect | `STARTED`, no result | **outcome unknown** |
+| between effect and record | `STARTED`, no result | **outcome unknown** |
+| after recording | `COMPLETED` | repeat returns stored result |
+
+The middle two are indistinguishable from the ledger alone — which is exactly why they must not be resolved by assumption. `claim` raises `UnknownSideEffect` and requires a reconciler:
+
+```python
+from continuum import ProbeReconciler, Resolution, reconcile_pending
+
+reconcile_pending(
+    ledger,
+    ProbeReconciler(
+        lambda action: Resolution(occurred=True, external_id=find_issue(action)),
+    ),
+)
+```
+
+`ProbeReconciler` asks the external system and is the only strategy that produces evidence. `AssumeNotOccurredReconciler` retries, and requires you to assert `idempotent=True` explicitly so nobody reaches for it by reflex. `ManualReconciler` escalates.
+
+There is deliberately **no `AssumeOccurred` strategy**. Assuming success without evidence silently drops work, and a dropped side effect is invisible — nothing in the system will ever contradict it. A probe that raises is treated as "could not determine", never as evidence of absence: an unreachable API tells you nothing about whether your earlier request landed.
+
+This is honest **at-least-once with mandatory reconciliation**, not exactly-once. The gap is documented rather than marketed away.
+
+Verified with real subprocesses — a worker that creates a GitHub issue then dies with `os._exit(9)` before recording it:
+
+```text
+=== RECOVERY ===
+checkpoint v2: 60/100 docs, replayed 11 events
+uncertain side effects: 1 -> ['github.create_issue']
+refused blind retry (UNKNOWN_SIDE_EFFECT)
+reconciled: confirmed as performed: github.create_issue
+
+[!!] external dependency dataset: conflicted — v3 -> v4
+[!!] evidence paper_128: stale — source 'dataset' changed
+[!!] finding finding_17: stale — rests on changed evidence: paper_128
+[ok] progress: valid — 60 completed
+
+repeat claim -> fresh=False, external_id=481
+completed 100/100 | events verified: True
+
+=== external system ===
+issue count: 1
+```
+
+Sixty documents not reprocessed, one dataset change detected and propagated, and **exactly one issue created** despite the crash.
+
 ### Security
 
 - **Deterministic canonical hashing** — sorted keys, UTC-normalized timestamps, enum-by-value serialization, rejection of non-finite floats
@@ -622,6 +690,11 @@ continuum/
 |       |   +-- __init__.py
 |       |   +-- snapshot.py          Pluggable environment capture
 |       |   +-- diff.py              Conservative snapshot comparison
+|       +-- actions/
+|       |   +-- __init__.py
+|       |   +-- idempotency.py       Content-derived action identity
+|       |   +-- ledger.py            Durable record of side effects
+|       |   +-- reconciliation.py    Resolving uncertain outcomes
 |       +-- security/
 |           +-- __init__.py
 |           +-- hashing.py           Deterministic canonical hashing
@@ -643,6 +716,8 @@ continuum/
     +-- test_recovery_context.py     Bounded context and truncation safety
     +-- test_environment.py          Capture, diffing, unverifiable resources
     +-- test_validator.py            Validation and staleness propagation
+    +-- test_action_ledger.py        Idempotency and the crash gap
+    +-- test_reconciliation.py       Strategies + real-subprocess crash tests
 ```
 
 ---
@@ -690,7 +765,7 @@ No benchmark results are claimed. The harness is being built. Results will be pu
 |   3   | SQLite persistence                | Complete    |
 |   4   | Checkpoint creation               | Complete    |
 |   5   | State validation                  | Complete    |
-|   6   | Action ledger + Idempotency       | Planned     |
+|   6   | Action ledger + Idempotency       | Complete    |
 |   7   | Recovery engine                   | Planned     |
 |   8   | CLI                               | Planned     |
 |   9   | Crash recovery examples           | Planned     |
@@ -744,7 +819,7 @@ mypy                      # Type check
 
 ## Contributing
 
-The project is in early development (Phases 1–5 and 10 complete). There are many components to build — storage engines, state validation, framework adapters, benchmark scenarios, documentation.
+The project is in early development (Phases 1–6 and 10 complete). There are many components to build — storage engines, state validation, framework adapters, benchmark scenarios, documentation.
 
 Open an issue before submitting large PRs.
 

@@ -6,6 +6,37 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added — Phase 6: action ledger and idempotency
+
+- Idempotency keys (`continuum.actions.idempotency`) derived from action type plus canonically
+  hashed arguments, so argument order never matters but a changed value always does. `scope`
+  separates runs; `volatile` excludes fields like retry counters that would otherwise make every
+  retry look like a new action. Nothing is excluded by default — collapsing two genuinely different
+  operations into one would silently skip real work.
+- `ActionLedger` (`continuum.actions.ledger`) implementing claim -> perform -> complete, stored as
+  events so it inherits the log's ordering, durability and tamper-evidence. A repeat claim for a
+  completed action returns the stored result and external id instead of performing it again.
+- **`UnknownSideEffect` instead of a guess.** When a crash lands between the effect and its record,
+  the ledger cannot tell whether it happened, and neither retrying nor skipping is safe by default.
+  It raises and requires reconciliation. Every crash interleaving is enumerated in the module
+  docstring.
+- A timeout is treated as uncertainty, not absence: `fail(..., certain=False)` records `UNKNOWN`
+  rather than `FAILED`, because a request that timed out may still have been processed.
+- Reconciliation strategies (`continuum.actions.reconciliation`): `ProbeReconciler` (ask the
+  external system — the only strategy producing evidence), `AssumeNotOccurredReconciler` (requires
+  explicitly asserting `idempotent=True`), and `ManualReconciler` (escalates). A probe that raises
+  is treated as "could not determine", never as evidence of absence. There is deliberately no
+  `AssumeOccurred` strategy: assuming success without evidence silently drops work, and a dropped
+  side effect is invisible.
+- Per-action-type reconciler mapping, so a file upload can be retried while a payment escalates.
+- 46 new tests (375 total), including three real-subprocess tests that crash after performing a
+  side effect and assert the external system ends with exactly one record. 100% line coverage.
+
+### Fixed
+
+- `SQLiteStorage` now closes its connection on finalisation, so a dropped handle does not leak a
+  file descriptor. Documented as a safety net, not a substitute for `close()`.
+
 ### Added — Phase 5: state validation
 
 - Environment capture (`continuum.environment.snapshot`): pluggable `EnvironmentProvider` with

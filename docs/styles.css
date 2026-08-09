@@ -573,7 +573,7 @@ body {
   background-color: var(--bg-surface);
   border: 1px solid var(--border-card);
   border-radius: var(--radius-xl);
-  padding: 32px;
+  padding: 32px 40px;
   box-shadow: var(--shadow-card);
 }
 
@@ -586,51 +586,66 @@ body {
   width: 100%;
   border-collapse: collapse;
   text-align: left;
+  table-layout: fixed;
 }
 
 .matrix-table th {
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   font-weight: 700;
   color: var(--text-primary);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 16px;
+  letter-spacing: 0.06em;
+  padding: 16px 20px 20px 20px;
   border-bottom: 1px solid var(--border-subtle);
 }
 
+.matrix-table th:nth-child(1) { width: 34%; }
+.matrix-table th:nth-child(2) { width: 33%; }
+.matrix-table th:nth-child(3) { width: 33%; }
+
 .matrix-table td {
-  padding: 18px 16px;
+  padding: 24px 20px;
   border-bottom: 1px solid var(--border-subtle);
-  vertical-align: middle;
+  vertical-align: top;
+}
+
+.matrix-table tr:last-child td {
+  border-bottom: none;
+}
+
+.td-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 4px;
 }
 
 .td-sub {
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   color: var(--text-muted);
   font-weight: 400;
-  margin-top: 2px;
+  line-height: 1.4;
 }
 
 .status-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border-radius: var(--radius-sm);
-  font-size: 0.82rem;
-  font-weight: 600;
+  display: block;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  font-size: 0.85rem;
+  font-weight: 500;
+  line-height: 1.5;
 }
 
 .status-badge.error {
-  background-color: rgba(239, 68, 68, 0.1);
-  color: #EF4444;
-  border: 1px solid rgba(239, 68, 68, 0.25);
+  background-color: rgba(239, 68, 68, 0.08);
+  color: #FCA5A5;
+  border: 1px solid rgba(239, 68, 68, 0.2);
 }
 
 .status-badge.success {
-  background-color: rgba(16, 185, 129, 0.1);
-  color: #10B981;
-  border: 1px solid rgba(16, 185, 129, 0.25);
+  background-color: rgba(16, 185, 129, 0.08);
+  color: #6EE7B7;
+  border: 1px solid rgba(16, 185, 129, 0.2);
 }
 
 /* Use Cases Section */
@@ -649,8 +664,11 @@ body {
   background-color: var(--bg-surface);
   border: 1px solid var(--border-card);
   border-radius: var(--radius-lg);
-  padding: 32px;
-  transition: all 0.2s ease;
+  padding: 28px 32px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transition: border-color 0.2s ease, transform 0.2s ease;
 }
 
 .usecase-card:hover {
@@ -658,41 +676,61 @@ body {
   transform: translateY(-2px);
 }
 
-.usecase-icon {
-  width: 44px;
-  height: 44px;
-  background-color: var(--bg-code);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+.usecase-header {
   display: flex;
+  justify-content: space-between;
   align-items: center;
-  justify-content: center;
+  margin-bottom: 14px;
+}
+
+.usecase-tag {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 700;
   color: var(--accent-terracotta);
-  margin-bottom: 20px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.usecase-metric {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  background-color: var(--bg-code);
+  padding: 4px 10px;
+  border-radius: 100px;
+  border: 1px solid var(--border-subtle);
 }
 
 .usecase-title {
   font-size: 1.15rem;
   font-weight: 700;
   color: var(--text-primary);
-  margin-bottom: 10px;
+  margin-bottom: 8px;
+  letter-spacing: -0.01em;
 }
 
 .usecase-desc {
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   color: var(--text-secondary);
   line-height: 1.6;
-  margin-bottom: 16px;
+  margin-bottom: 20px;
 }
 
-.usecase-impact {
-  background-color: var(--bg-code);
-  border-left: 3px solid var(--accent-terracotta);
-  padding: 12px 16px;
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+.usecase-footer,
+.usecase-impact-text {
+  border-top: 1px dashed var(--border-subtle);
+  padding-top: 14px;
   font-size: 0.85rem;
   color: var(--text-primary);
   line-height: 1.5;
+}
+
+.footer-label {
+  color: var(--accent-terracotta);
+  font-weight: 700;
+  margin-right: 4px;
 }
 
 /* Architecture Section */
