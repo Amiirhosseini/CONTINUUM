@@ -13,9 +13,13 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from mcp import types as mcp_types
+from mcp.server.mcpserver.context import Context
+from mcp.server.mcpserver.exceptions import ToolError
 
 from continuum.actions.ledger import ActionLedger
 from continuum.checkpoint import CheckpointManager
@@ -39,6 +43,16 @@ async def call(server: Any, name: str, **arguments: Any) -> dict[str, Any]:
     result = await server.call_tool(name, arguments)
     assert result.content, f"{name} returned no content"
     return json.loads(result.content[0].text)
+
+
+def mcp_client_context(server: Any, client_name: str) -> Context[Any, Any]:
+    params = mcp_types.InitializeRequestParams(
+        protocol_version="2026-03-26",
+        capabilities=mcp_types.ClientCapabilities(),
+        client_info=mcp_types.Implementation(name=client_name, version="1.0.0"),
+    )
+    request_context = SimpleNamespace(session=SimpleNamespace(client_params=params))
+    return Context(request_context=request_context, mcp_server=server)
 
 
 async def seed_run(server: Any, run_id: str = "run_1", completed: int = 20) -> None:
@@ -94,6 +108,43 @@ async def test_tools_describe_when_they_matter(server_ctx: tuple[Any, Any]) -> N
     assert "do not repeat" in described["continuum_intercept_action"].lower()
 
 
+@pytest.mark.asyncio
+async def test_unauthorized_clients_are_blocked_from_mutating_tools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CONTINUUM_MCP_MUTATING_CLIENTS", "Claude Code")
+    server, ctx = build_server(storage=SQLiteStorage(":memory:"))
+    with pytest.raises(ToolError, match="not authorized"):
+        await server.call_tool(
+            "continuum_record_progress",
+            {"run_id": "run_1", "completed": 1, "goal": "Analyze"},
+            context=mcp_client_context(server, "Gemini CLI"),
+        )
+    ctx.close()
+
+
+@pytest.mark.asyncio
+async def test_authorized_clients_can_mutate_while_others_stay_read_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CONTINUUM_MCP_MUTATING_CLIENTS", "Claude Code")
+    server, ctx = build_server(storage=SQLiteStorage(":memory:"))
+    payload = await server.call_tool(
+        "continuum_record_progress",
+        {"run_id": "run_1", "completed": 1, "goal": "Analyze"},
+        context=mcp_client_context(server, "Claude Code"),
+    )
+    assert payload.is_error is False
+
+    read_only = await server.call_tool(
+        "continuum_list_actions",
+        {"run_id": "run_1"},
+        context=mcp_client_context(server, "Gemini CLI"),
+    )
+    assert read_only.is_error is False
+    ctx.close()
+
+
 # --- progress and checkpointing --------------------------------------------- #
 
 
@@ -132,8 +183,6 @@ async def test_recording_progress_for_an_unknown_run_without_a_goal_fails(
 ) -> None:
     """Silently inventing a run for a typo'd id would scatter work across
     phantom runs, so the error surfaces to the caller instead."""
-    from mcp.server.mcpserver.exceptions import ToolError
-
     server, _ = server_ctx
     with pytest.raises(ToolError, match="no such run"):
         await server.call_tool("continuum_record_progress", {"run_id": "ghost", "completed": 1})

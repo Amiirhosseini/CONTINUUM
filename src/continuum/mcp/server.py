@@ -34,6 +34,8 @@ from collections.abc import Mapping
 from typing import Any
 
 from mcp.server import MCPServer
+from mcp.server.mcpserver.context import Context
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
 from continuum.actions.ledger import ActionLedger
@@ -56,6 +58,7 @@ __all__ = ["build_server", "ContinuumMCP", "MalformedRunLog", "DEFAULT_DB", "mai
 
 DEFAULT_DB = "continuum.db"
 _DB_ENV_VAR = "CONTINUUM_DB"
+_MUTATING_CLIENTS_ENV_VAR = "CONTINUUM_MCP_MUTATING_CLIENTS"
 
 #: Everything written through this server is asserted by a remote agent about
 #: its own work. Nothing here is independently verified, so it is recorded as
@@ -99,6 +102,13 @@ class ContinuumMCP:
         self.database = resolve_database(database)
         self.storage: Storage = storage or SQLiteStorage(self.database)
         self.adapter = GenericAgentAdapter(self.storage)
+        self.allowed_mutating_clients = frozenset(
+            client
+            for client in (
+                name.strip() for name in os.environ.get(_MUTATING_CLIENTS_ENV_VAR, "").split(",")
+            )
+            if client
+        )
 
     def close(self) -> None:
         self.storage.close()
@@ -153,6 +163,29 @@ class ContinuumMCP:
     def ledger(self, run_id: str) -> ActionLedger:
         return ActionLedger(self.storage, run_id)
 
+    def require_mutating_tool_authorization(
+        self,
+        tool_name: str,
+        mcp_context: Context[Any, Any] | None,
+    ) -> None:
+        """Allow mutating tools only for configured MCP clients."""
+        if mcp_context is None:
+            return
+        try:
+            params = mcp_context.session.client_params
+        except ValueError:
+            return
+        client_name = params.client_info.name if params and params.client_info else None
+        if client_name in self.allowed_mutating_clients:
+            return
+
+        allowed = ", ".join(sorted(self.allowed_mutating_clients)) or "(none configured)"
+        caller = client_name or "<unknown>"
+        raise ToolError(
+            f"{tool_name} is mutating and not authorized for MCP client {caller!r}. "
+            f"Allowed mutating clients: {allowed}. Configure {_MUTATING_CLIENTS_ENV_VAR}."
+        )
+
 
 def build_server(
     database: str | None = None,
@@ -196,8 +229,10 @@ def build_server(
         total: int | None = None,
         goal: str | None = None,
         failed: int = 0,
+        mcp_context: Context[Any, Any] | None = None,
     ) -> str:
         """Record progress for a run."""
+        ctx.require_mutating_tool_authorization("continuum_record_progress", mcp_context)
         ctx.ensure_run(run_id, goal)
         payload: dict[str, Any] = {"completed": completed, "failed": failed}
         if total is not None:
@@ -233,8 +268,10 @@ def build_server(
         run_id: str,
         reason: str = "",
         env: dict[str, str] | None = None,
+        mcp_context: Context[Any, Any] | None = None,
     ) -> str:
         """Create a semantic checkpoint."""
+        ctx.require_mutating_tool_authorization("continuum_checkpoint", mcp_context)
         ctx.ensure_run(run_id)
         state = project(run_id, ctx.storage.read_events(run_id))
         checkpoint = ctx.adapter.capture_state(
@@ -379,8 +416,10 @@ def build_server(
         action_type: str,
         arguments: dict[str, Any] | None = None,
         scoped_to_run: bool = True,
+        mcp_context: Context[Any, Any] | None = None,
     ) -> str:
         """Claim an action in the ledger and report whether to proceed."""
+        ctx.require_mutating_tool_authorization("continuum_intercept_action", mcp_context)
         ctx.ensure_run(run_id)
         ledger = ctx.ledger(run_id)
         try:
@@ -445,8 +484,10 @@ def build_server(
         action_key: str,
         external_id: str | None = None,
         result: dict[str, Any] | None = None,
+        mcp_context: Context[Any, Any] | None = None,
     ) -> str:
         """Mark a claimed action as completed."""
+        ctx.require_mutating_tool_authorization("continuum_complete_action", mcp_context)
         action = ctx.ledger(run_id).complete(action_key, external_id=external_id, result=result)
         return _json(
             {
@@ -474,8 +515,10 @@ def build_server(
         action_key: str,
         error: str,
         certain: bool = False,
+        mcp_context: Context[Any, Any] | None = None,
     ) -> str:
         """Mark a claimed action as failed or uncertain."""
+        ctx.require_mutating_tool_authorization("continuum_fail_action", mcp_context)
         action = ctx.ledger(run_id).fail(action_key, error, certain=certain)
         return _json(
             {
@@ -502,8 +545,10 @@ def build_server(
         occurred: bool,
         external_id: str | None = None,
         note: str = "",
+        mcp_context: Context[Any, Any] | None = None,
     ) -> str:
         """Resolve an uncertain action using external evidence."""
+        ctx.require_mutating_tool_authorization("continuum_reconcile_action", mcp_context)
         action = ctx.ledger(run_id).reconcile(
             action_key, occurred=occurred, external_id=external_id, note=note
         )
