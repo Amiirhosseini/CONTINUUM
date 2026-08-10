@@ -41,6 +41,8 @@ CONTINUUM investigates a narrower, harder question:
 
 This is not a generic agent framework. Not a memory system. Not a workflow engine.
 
+CONTINUUM's differentiator is three-part: **semantic checkpointing** (a compact, versioned representation of what the agent actually needs to continue, not a conversation dump), **independent environment revalidation** (every checkpoint component is verified against the current environment before resume, with staleness propagating through the dependency graph), and **provenance-aware state** (every fact traces back to its origin, so agent-reported progress is never self-certifying).
+
 ---
 
 ## How It Works
@@ -79,7 +81,17 @@ CONTINUUM separates **LLM context** (temporary) from **durable task state** (per
 
 ## Quick Start
 
-> Not published to PyPI yet. Install from a clone: `uv venv && uv pip install -e ".[dev]"`
+> Not published to PyPI yet. Install from a clone:
+>
+> ```bash
+> uv venv
+> uv pip install -e ".[dev]"    # library, CLI, and test tooling
+> uv pip install -e ".[mcp]"    # adds the MCP server (optional)
+> ```
+>
+> Two entrypoints are installed: `continuum` (the CLI) and `continuum-mcp`
+> (the MCP server). The core library and CLI use only the standard library —
+> the `mcp` extra is required solely for the server.
 
 What runs today (Phases 1–7): record events, project state, checkpoint, survive a crash, validate against the current environment, never duplicate an external side effect, and decide how it is safe to resume.
 
@@ -109,6 +121,28 @@ print(store.verify_events("run_4821").ok)  # True — chain intact after the cra
 for i, doc in enumerate(documents[state.progress.completed :], state.progress.completed):
     ...
 ```
+
+### Run the proof yourself
+
+Two scripts are the primary evidence, both verified end to end rather than
+described:
+
+```bash
+python examples/crash_recovery_agent.py   # real process kill, real side effect
+python scripts/mcp_smoke.py               # real subprocess, real JSON-RPC traffic
+```
+
+`crash_recovery_agent.py` starts a run, performs an external side effect, then
+terminates the process with `os._exit(9)` — no cleanup, no flush — while the
+dataset it depends on changes underneath it. It restarts, detects the change,
+refuses to resume until the uncertain side effect is reconciled, and finishes
+with the work not repeated and the side effect not duplicated.
+
+`mcp_smoke.py` drives the MCP server as a subprocess over stdio and prints every
+JSON-RPC frame as it crosses the wire. It asserts, rather than reports, that the
+same action intercepted twice returns `proceed: false` with the prior result.
+
+Both exit non-zero if their guarantees fail.
 
 ### The API this is being built toward
 
@@ -153,6 +187,58 @@ Next permitted action: dataset_revalidation
 The goal: zero duplicated work, zero duplicated side effects, verified safe recovery. Crash recovery
 with zero duplicated work is [demonstrated below](#durable-storage-phase-3--complete) against the
 storage layer that exists today; side-effect deduplication needs the action ledger in Phase 6.
+
+---
+
+## MCP Integration
+
+CONTINUUM ships an MCP server so an agent can record progress, checkpoint, and
+route external side effects through the ledger without embedding the library.
+
+```bash
+uv pip install -e ".[mcp]"
+CONTINUUM_MCP_MUTATING_CLIENTS=your-client-name continuum-mcp
+```
+
+Nine tools over stdio. Three are read-only (`validate`, `resume`,
+`list_actions`); six mutate (`record_progress`, `checkpoint`,
+`intercept_action`, `complete_action`, `fail_action`, `reconcile_action`).
+
+**Side effects are two-phase.** A Python callable cannot cross the MCP
+boundary, so the server cannot perform the effect itself:
+
+1. `continuum_intercept_action` claims the ledger entry and answers *may I?*
+2. the caller performs the effect
+3. `continuum_complete_action` records the outcome
+
+Between 1 and 3 the ledger holds a `STARTED` record. A caller that crashes or
+never reports back leaves the action uncertain, and recovery refuses to resume
+until it is reconciled. That is intended: an unreported effect is
+indistinguishable from a completed one.
+
+**Mutating tools deny by default.** Callers are matched against an allowlist
+from `CONTINUUM_MCP_MUTATING_CLIENTS` (or `CONTINUUM_MCP_ALLOW`), or
+`.continuum/mcp-policy.json`. An unconfigured server is read-only. Read-only
+tools stay open to everyone, so asking "is this safe to resume?" never requires
+permission.
+
+**Agent-reported state is never self-certifying.** Everything written through
+MCP is recorded with `Origin.EXTERNAL_AGENT` provenance, and the validator marks
+it `REQUIRES_REVIEW`. An agent can report 9,999 of 10,000 documents complete and
+CONTINUUM will still refuse to call the run safe to resume.
+
+### Authentication is not implemented
+
+`clientInfo` is asserted by the client during the initialize handshake and
+never verified. A caller that wants to be seen as `claude-code` simply says so.
+
+This is **authorization by declared identity, not authentication**. It keeps
+honestly-named coexisting agents out of each other's runs — the situation this
+project has actually been in, with several clients pointed at one database. It
+does not defend against a deliberately impersonating local process, which in any
+case can read and write the SQLite file directly.
+
+Tracked as [#1](https://github.com/Cyrax321/CONTINUUM/issues/1).
 
 ---
 
@@ -835,9 +921,14 @@ continuum/
 
 ---
 
-## CONTINUUM-Bench
+## CONTINUUM-Bench (design, not implemented)
 
-Benchmark suite for evaluating long-running agent recovery under controlled failures.
+**No benchmark harness exists.** Nothing in this section has been built or
+measured, and `continuum benchmark` exits `4` saying so. The scenarios and
+metrics below are a specification for future work, recorded so the intended
+measurements are stated before any results are produced.
+
+Design for evaluating long-running agent recovery under controlled failures.
 
 ### Scenarios
 
@@ -864,8 +955,6 @@ Benchmark suite for evaluating long-running agent recovery under controlled fail
 | Duplicate Side Effects       | External actions accidentally repeated                         |
 | Recovery Latency             | Time from crash to safe continuation                           |
 | State Validation Accuracy    | Proportion of stale states correctly detected                  |
-
-No benchmark results are claimed. The harness is being built. Results will be published after experimental measurement.
 
 ---
 
@@ -929,6 +1018,14 @@ mypy                      # Type check
 ```
 
 ---
+
+## Known Limitations
+
+- **MCP caller authentication** — `clientInfo` is asserted by the client during the handshake and never verified. The authorization layer distinguishes honestly-named callers; it does not defend against a deliberately impersonating local process. Tracked as [#1](https://github.com/Cyrax321/CONTINUUM/issues/1).
+- **CI Node deprecation** — the workflows pin `actions/checkout@v4` and `actions/setup-python@v5` on Node 20, which GitHub is forcing onto Node 24. Works today; becomes a hard failure on GitHub's schedule. [#2](https://github.com/Cyrax321/CONTINUUM/issues/2).
+- **Unbuilt components** — the benchmark suite (Phase 12), cloud API (Phase 13), and dashboard (Phase 14) do not exist. `continuum benchmark` exits `4` saying so. Framework adapters for OpenAI Agents SDK and LangGraph are planned, not built.
+
+For a full account of what is verified, what is believed, and what is neither, see [STATUS.md](STATUS.md).
 
 ## Contributing
 
