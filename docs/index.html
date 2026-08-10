@@ -11,9 +11,7 @@
 <body>
 
   <div class="scroll-progress" id="scrollProgress"></div>
-
-  <!-- HERO -->
-  <section class="hero-canvas" id="top">
+  <div class="global-background">
     <div class="clouds">
       <div class="cloud cloud-1"></div>
       <div class="cloud cloud-2"></div>
@@ -21,7 +19,10 @@
       <div class="cloud cloud-4"></div>
       <div class="cloud cloud-5"></div>
     </div>
+  </div>
 
+  <!-- HERO -->
+  <section class="hero-canvas" id="top">
     <div class="top-bar">
       <div class="top-bar-left">
         <div class="top-logo"></div>
@@ -106,13 +107,6 @@
 
   <!-- WHY SWITCH -->
   <section class="switch-section" id="why-switch">
-    <div class="switch-clouds">
-      <div class="switch-cloud sc-1"></div>
-      <div class="switch-cloud sc-2"></div>
-      <div class="switch-cloud sc-3"></div>
-      <div class="switch-cloud sc-4"></div>
-    </div>
-
     <div class="switch-content">
       <div class="switch-intro">
         <p class="handwritten-label">why teams switch</p>
@@ -215,53 +209,15 @@
       <div class="features-label">EXPLORE THE CAPABILITIES</div>
 
       <div class="features-list">
-        <div class="feat-item">
-          <div class="feat-check"></div>
-          <div class="feat-content">
-            <h4 class="feat-title">Semantic Checkpoints</h4>
-            <p class="feat-desc">Not a conversation dump. A compact, versioned tree of verified goals, decisions, findings, evidence, and pending tasks.</p>
-          </div>
-        </div>
-        <div class="feat-item">
-          <div class="feat-check"></div>
-          <div class="feat-content">
-            <h4 class="feat-title">Environment Validation</h4>
-            <p class="feat-desc">Every checkpoint component checked against the live environment. Staleness propagates: dependency, evidence, finding, decision.</p>
-          </div>
-        </div>
-        <div class="feat-item">
-          <div class="feat-check"></div>
-          <div class="feat-content">
-            <h4 class="feat-title">Idempotent Action Ledger</h4>
-            <p class="feat-desc">7 action states. Two-phase claim/complete protocol. Raises UnknownSideEffect on interrupted actions rather than guessing.</p>
-          </div>
-        </div>
-        <div class="feat-item">
-          <div class="feat-check"></div>
-          <div class="feat-content">
-            <h4 class="feat-title">Hash-Chained Events</h4>
-            <p class="feat-desc">Append-only event log with SHA-256 digests. verify() reports trusted_through for partial tamper recovery.</p>
-          </div>
-        </div>
-        <div class="feat-item">
-          <div class="feat-check"></div>
-          <div class="feat-content">
-            <h4 class="feat-title">Recovery Contracts</h4>
-            <p class="feat-desc">Deterministic, sealed with integrity hash. Names exactly one next permitted action, preventing agents from skipping steps.</p>
-          </div>
-        </div>
-        <div class="feat-item">
-          <div class="feat-check"></div>
-          <div class="feat-content">
-            <h4 class="feat-title">Provenance Tracking</h4>
-            <p class="feat-desc">Every state component traces to its origin event. Agent-reported state tagged EXTERNAL_AGENT and marked REQUIRES_REVIEW.</p>
-          </div>
-        </div>
+        <div class="feat-item"><div class="feat-check"></div><div class="feat-content"><h4 class="feat-title">Semantic Checkpoints</h4><p class="feat-desc">Not a conversation dump. A compact, versioned tree of verified goals, decisions, findings, evidence, and pending tasks.</p></div></div>
+        <div class="feat-item"><div class="feat-check"></div><div class="feat-content"><h4 class="feat-title">Environment Validation</h4><p class="feat-desc">Every checkpoint component checked against the live environment. Staleness propagates through the dependency graph.</p></div></div>
+        <div class="feat-item"><div class="feat-check"></div><div class="feat-content"><h4 class="feat-title">Idempotent Action Ledger</h4><p class="feat-desc">7 action states. Two-phase claim/complete protocol. Raises UnknownSideEffect rather than guessing.</p></div></div>
+        <div class="feat-item"><div class="feat-check"></div><div class="feat-content"><h4 class="feat-title">Hash-Chained Events</h4><p class="feat-desc">Append-only event log with SHA-256 digests. verify() reports trusted_through for partial tamper recovery.</p></div></div>
+        <div class="feat-item"><div class="feat-check"></div><div class="feat-content"><h4 class="feat-title">Recovery Contracts</h4><p class="feat-desc">Deterministic, sealed with integrity hash. Names exactly one next permitted action.</p></div></div>
+        <div class="feat-item"><div class="feat-check"></div><div class="feat-content"><h4 class="feat-title">Provenance Tracking</h4><p class="feat-desc">Every state component traces to its origin event. Agent-reported state marked REQUIRES_REVIEW.</p></div></div>
       </div>
 
-      <div class="features-advanced-divider">
-        <span class="advanced-pill">ADVANCED RECOVERY</span>
-      </div>
+      <div class="features-advanced-divider"><span class="advanced-pill">ADVANCED RECOVERY</span></div>
 
       <div class="features-advanced">
         <div class="adv-item"><span class="adv-check"></span> Tamper recovery</div>
