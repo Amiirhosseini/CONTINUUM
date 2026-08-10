@@ -646,3 +646,58 @@ function initArchTooltips() {
     });
   });
 }
+
+// ---------------------------------------------------------------------------
+// 6. Scroll Animations & UI Enhancements
+// ---------------------------------------------------------------------------
+document.addEventListener('DOMContentLoaded', () => {
+  initScrollEffects();
+});
+
+function initScrollEffects() {
+  // Scroll progress bar
+  const progressBar = document.getElementById('scrollProgress');
+  const backToTop = document.getElementById('backToTop');
+  const navbar = document.querySelector('.navbar-wrapper');
+
+  window.addEventListener('scroll', () => {
+    const scrollTop = window.scrollY;
+    const docHeight = document.documentElement.scrollHeight - window.innerHeight;
+    const progress = docHeight > 0 ? (scrollTop / docHeight) * 100 : 0;
+    if (progressBar) progressBar.style.width = progress + '%';
+
+    // Navbar scrolled state
+    if (navbar) {
+      if (scrollTop > 20) navbar.classList.add('scrolled');
+      else navbar.classList.remove('scrolled');
+    }
+
+    // Back to top visibility
+    if (backToTop) {
+      if (scrollTop > 600) backToTop.classList.add('visible');
+      else backToTop.classList.remove('visible');
+    }
+  }, { passive: true });
+
+  // Back to top click
+  if (backToTop) {
+    backToTop.addEventListener('click', () => {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  }
+
+  // Scroll reveal animations
+  const reveals = document.querySelectorAll('.reveal');
+  if (!reveals.length) return;
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+
+  reveals.forEach(el => observer.observe(el));
+}

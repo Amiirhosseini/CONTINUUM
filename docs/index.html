@@ -10,6 +10,14 @@
 </head>
 <body>
 
+  <!-- Scroll Progress -->
+  <div class="scroll-progress" id="scrollProgress"></div>
+
+  <!-- Back to Top -->
+  <button class="back-to-top" id="backToTop" aria-label="Back to top">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 15l-6-6-6 6"/></svg>
+  </button>
+
   <!-- Navigation -->
   <header class="navbar-wrapper">
     <nav class="navbar container">
@@ -40,7 +48,7 @@
     <div class="hero-content">
       <div class="hero-badge">
         <span class="pulse-dot"></span>
-        <span>Phases 1–3 Complete</span> &bull; 141 Passing Tests
+        <span>Phases 1–8 & 10 Complete</span> &bull; 607 Passing Tests
       </div>
       <h1 class="hero-title">Agents that lose context without losing work.</h1>
       <p class="hero-subtitle">
@@ -86,7 +94,7 @@ status = recovered.validate()
   </section>
 
   <!-- Interactive Simulator Section -->
-  <section id="simulator" class="simulator-section container">
+  <section id="simulator" class="simulator-section container reveal">
     <div class="section-header">
       <h2 class="section-title">Interactive Fault Recovery Simulator</h2>
       <p class="section-subtitle">Simulate real-world agent failures and inspect how CONTINUUM handles recovery contracts.</p>
@@ -130,7 +138,7 @@ status = recovered.validate()
   </section>
 
   <!-- Interactive Checkpoint Diff Engine -->
-  <section id="diff" class="diff-section container">
+  <section id="diff" class="diff-section container reveal">
     <div class="section-header">
       <h2 class="section-title">Semantic Checkpoint Diff Engine</h2>
       <p class="section-subtitle">Compare two checkpoints by semantic component IDs rather than text line diffs.</p>
@@ -149,7 +157,7 @@ status = recovered.validate()
   </section>
 
   <!-- Problem vs Solution Matrix -->
-  <section id="problems" class="problem-section container">
+  <section id="problems" class="problem-section container reveal">
     <div class="section-header">
       <h2 class="section-title">Why Production Agents Crash & Fail</h2>
       <p class="section-subtitle">Comparing naive prompt transcript replays vs verifiable semantic recovery.</p>
@@ -221,7 +229,7 @@ status = recovered.validate()
   </section>
 
   <!-- Real-World Use Cases Section -->
-  <section id="use-cases" class="usecases-section container">
+  <section id="use-cases" class="usecases-section container reveal">
     <div class="section-header">
       <h2 class="section-title">Production Use Cases</h2>
       <p class="section-subtitle">Architected for mission-critical autonomous agent workloads.</p>
@@ -279,7 +287,7 @@ status = recovered.validate()
   </section>
 
   <!-- Features Section -->
-  <section id="features" class="features-section container">
+  <section id="features" class="features-section container reveal">
     <div class="section-header">
       <h2 class="section-title">Core Differentiation</h2>
       <p class="section-subtitle">Built from the ground up for agent execution fault tolerance.</p>
@@ -320,7 +328,7 @@ status = recovered.validate()
   </section>
 
   <!-- Architecture Section -->
-  <section id="architecture" class="arch-section container">
+  <section id="architecture" class="arch-section container reveal">
     <div class="section-header">
       <h2 class="section-title">System Architecture</h2>
       <p class="section-subtitle">Real-time data flow animation. Hover over any node to inspect component contracts.</p>
@@ -413,7 +421,7 @@ status = recovered.validate()
   </section>
 
   <!-- Quickstart Code Tabs -->
-  <section id="quickstart" class="code-section container">
+  <section id="quickstart" class="code-section container reveal">
     <div class="section-header">
       <h2 class="section-title">Developer Quickstart</h2>
       <p class="section-subtitle">Framework-agnostic Python library with simple, typed APIs.</p>
@@ -458,7 +466,7 @@ if status.safe:
   </section>
 
   <!-- Benchmark & ROI Calculator -->
-  <section id="calculator" class="calc-section container">
+  <section id="calculator" class="calc-section container reveal">
     <div class="section-header">
       <h2 class="section-title">CONTINUUM-Bench ROI & Recovery Calculator</h2>
       <p class="section-subtitle">Real-time mathematical estimation of token compression, dollar cost savings, and fault prevention for production agent workloads.</p>
@@ -645,7 +653,7 @@ if status.safe:
   </section>
 
   <!-- Comparison Section -->
-  <section class="comparison-section container">
+  <section class="comparison-section container reveal">
     <div class="section-header">
       <h2 class="section-title">Comparison Matrix</h2>
       <p class="section-subtitle">How CONTINUUM compares against standard workflow and framework approaches.</p>
