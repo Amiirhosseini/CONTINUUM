@@ -331,3 +331,39 @@ def test_all_and_pending_report_the_ledger_contents(ledger: ActionLedger) -> Non
 
     assert len(ledger.all()) == 2
     assert [a.action_type for a in ledger.pending()] == ["b.do"]
+
+
+def test_an_explicit_key_lets_a_repeat_be_a_genuine_second_action(
+    ledger: ActionLedger,
+) -> None:
+    """Argument hashing cannot express "this repeat is intentional".
+
+    Two identical reminders are two sends, not one. Without an explicit key the
+    second is silently deduplicated away — failing closed, but still wrong.
+    """
+    args = {"to": "x@y.z", "body": "Standup in 5"}
+
+    first = ledger.claim("send_reminder", args, key="reminder-monday")
+    ledger.complete(first.key, external_id="msg_1")
+
+    second = ledger.claim("send_reminder", args, key="reminder-tuesday")
+    assert second.fresh, "a distinct key must not collide with an earlier send"
+
+    repeat = ledger.claim("send_reminder", args, key="reminder-monday")
+    assert not repeat.fresh
+    assert repeat.external_id == "msg_1"
+
+
+def test_an_explicit_key_ignores_argument_drift(ledger: ActionLedger) -> None:
+    """The caller's key is the identity; incidental argument changes are not."""
+    first = ledger.claim("charge", {"amount": 100, "attempt": 1}, key="order-42")
+    ledger.complete(first.key, external_id="ch_1")
+
+    retry = ledger.claim("charge", {"amount": 100, "attempt": 2}, key="order-42")
+    assert not retry.fresh
+    assert retry.external_id == "ch_1"
+
+
+def test_an_empty_explicit_key_is_refused(ledger: ActionLedger) -> None:
+    with pytest.raises(ValueError, match="non-empty"):
+        ledger.claim("send_reminder", {"to": "x"}, key="")

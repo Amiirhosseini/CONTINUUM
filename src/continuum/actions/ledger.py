@@ -166,6 +166,7 @@ class ActionLedger:
         *,
         volatile: Sequence[str] = (),
         scoped_to_run: bool = True,
+        key: str | None = None,
         on_unknown: Callable[[Action], ActionOutcome | None] | None = None,
     ) -> ActionOutcome:
         """Register intent to perform an action, or report it already happened.
@@ -178,12 +179,14 @@ class ActionLedger:
         its real-world outcome cannot be determined, unless ``on_unknown``
         resolves it.
         """
-        key = idempotency_key(
+        idem = idempotency_key(
             action_type,
             arguments,
             scope=self.run_id if scoped_to_run else None,
             volatile=volatile,
+            key=key,
         )
+        key = idem
         existing = self.get(key)
 
         if existing is None:

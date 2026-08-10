@@ -32,7 +32,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from continuum.events import Event, EventType, IntegrityReport, IntegrityViolation
-from continuum.models import Run, SemanticState, StateCheckpoint, utcnow
+from continuum.models import Origin, Run, SemanticState, StateCheckpoint, utcnow
 from continuum.security.hashing import make_id
 from continuum.state.versioning import state_fingerprint
 from continuum.storage.base import (
@@ -46,7 +46,7 @@ from continuum.storage.base import (
 
 __all__ = ["SQLiteStorage", "SCHEMA_VERSION"]
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS continuum_meta (
@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS events (
     timestamp       TEXT NOT NULL,
     payload         TEXT NOT NULL,
     causer_event_id TEXT,
+    source          TEXT NOT NULL DEFAULT 'deterministic',
     prev_hash       TEXT,
     hash            TEXT NOT NULL,
     PRIMARY KEY (run_id, sequence)
@@ -285,6 +286,7 @@ class SQLiteStorage(Storage):
         *,
         causer_event_id: str | None = None,
         expected_sequence: int | None = None,
+        source: Origin = Origin.DETERMINISTIC,
     ) -> Event:
         with self._write() as conn:
             self._require_run(conn, run_id)
@@ -307,6 +309,7 @@ class SQLiteStorage(Storage):
                 timestamp=utcnow(),
                 payload=dict(payload or {}),
                 causer_event_id=causer_event_id,
+                source=source,
                 prev_hash=head["hash"] if head else None,
             ).sealed()
             self._insert_event(conn, event)
@@ -341,7 +344,8 @@ class SQLiteStorage(Storage):
         try:
             conn.execute(
                 "INSERT INTO events(run_id, sequence, event_id, type, timestamp, payload, "
-                "causer_event_id, prev_hash, hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "causer_event_id, source, prev_hash, hash) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     event.run_id,
                     event.sequence,
@@ -350,6 +354,7 @@ class SQLiteStorage(Storage):
                     event.timestamp.isoformat(),
                     json.dumps(dict(event.payload), sort_keys=True),
                     event.causer_event_id,
+                    event.source.value,
                     event.prev_hash,
                     event.hash,
                 ),
@@ -400,6 +405,7 @@ class SQLiteStorage(Storage):
                 timestamp=row["timestamp"],
                 payload=json.loads(row["payload"]),
                 causer_event_id=row["causer_event_id"],
+                source=row["source"],
                 prev_hash=row["prev_hash"],
                 hash=row["hash"],
             )

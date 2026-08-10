@@ -35,7 +35,7 @@ from types import TracebackType
 from typing import Any
 
 from continuum.events import Event, EventType, IntegrityReport
-from continuum.models import Run, SemanticState, StateCheckpoint
+from continuum.models import Origin, Run, SemanticState, StateCheckpoint
 
 __all__ = [
     "Storage",
@@ -142,6 +142,7 @@ class Storage(ABC):
         *,
         causer_event_id: str | None = None,
         expected_sequence: int | None = None,
+        source: Origin = Origin.DETERMINISTIC,
     ) -> Event:
         """Append an event, assigning its sequence and chain link atomically.
 

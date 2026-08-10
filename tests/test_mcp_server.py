@@ -18,6 +18,8 @@ from typing import Any
 import pytest
 
 from continuum.actions.ledger import ActionLedger
+from continuum.checkpoint import CheckpointManager
+from continuum.environment import StaticProvider, capture
 from continuum.events import EventType
 from continuum.mcp.server import DEFAULT_DB, build_server, resolve_database
 from continuum.models import ActionStatus, RecoveryMode, Run
@@ -172,15 +174,27 @@ async def test_successive_checkpoints_increment_the_version(
 
 
 @pytest.mark.asyncio
-async def test_validate_reports_a_clean_run_as_safe(server_ctx: tuple[Any, Any]) -> None:
+async def test_agent_self_reported_state_is_never_reported_as_verified(
+    server_ctx: tuple[Any, Any],
+) -> None:
+    """An agent cannot certify its own work as safe.
+
+    Everything written through MCP is an unverified self-report, so even with
+    a stable environment the run needs review rather than a clean bill. This
+    previously returned safe=True, which let an agent fabricate progress and
+    then have CONTINUUM confirm it was fine to continue.
+    """
     server, _ = server_ctx
     await seed_run(server)
     await call(server, "continuum_checkpoint", run_id="run_1", env={"dataset": "v3"})
 
     payload = await call(server, "continuum_validate", run_id="run_1", env={"dataset": "v3"})
-    assert payload["safe"] is True
-    assert payload["mode"] == RecoveryMode.RESUME.value
-    assert payload["environment_changes"] == []
+    assert payload["safe"] is False
+    assert payload["mode"] != RecoveryMode.RESUME.value
+    assert payload["environment_changes"] == []  # the environment really is clean
+    statuses = {(e["component"], e["status"]) for e in payload["components"]}
+    assert ("progress", "requires_review") in statuses
+    assert ("goal", "requires_review") in statuses
 
 
 @pytest.mark.asyncio
@@ -228,21 +242,38 @@ async def test_resume_returns_a_contract_and_next_action(
     await call(server, "continuum_checkpoint", run_id="run_1", env={"dataset": "v3"})
 
     payload = await call(server, "continuum_resume", run_id="run_1", env={"dataset": "v4"})
-    assert payload["mode"] == RecoveryMode.REPAIR_AND_RESUME.value
+    # Self-reported state outranks the dependency change: REQUEST_HUMAN (4)
+    # beats REPAIR_AND_RESUME (1) on the severity ordering.
+    assert payload["mode"] == RecoveryMode.REQUEST_HUMAN.value
     assert payload["safe"] is False
-    assert payload["next_allowed_action"].startswith("revalidate_dependency:")
+    assert any(r["kind"] == "revalidate_dependency" for r in payload["repairs"])
     assert payload["contract"]["integrity_hash"]
     assert payload["repairs"]
     assert payload["progress"]["completed"] == 20
 
 
 @pytest.mark.asyncio
-async def test_resume_on_an_intact_run_says_proceed(server_ctx: tuple[Any, Any]) -> None:
-    server, _ = server_ctx
-    await seed_run(server)
-    await call(server, "continuum_checkpoint", run_id="run_1", env={"dataset": "v3"})
+async def test_deterministic_state_still_resumes_cleanly(
+    server_ctx: tuple[Any, Any],
+) -> None:
+    """The provenance check must not block genuinely verified state.
 
-    payload = await call(server, "continuum_resume", run_id="run_1", env={"dataset": "v3"})
+    Written through the storage API directly (as the CLI or an in-process
+    adapter would), the same run resumes cleanly — proving the gate keys on
+    *who asserted it*, not on some blanket refusal.
+    """
+    server, ctx = server_ctx
+    ctx.storage.create_run(Run(run_id="run_det", goal="Analyze 100 documents"))
+    ctx.storage.append_event(
+        "run_det", EventType.RUN_STARTED, {"goal": "Analyze 100 documents", "total": 100}
+    )
+    for i in range(20):
+        ctx.storage.append_event("run_det", EventType.WORK_COMPLETED, {"doc": i})
+    CheckpointManager(ctx.storage).checkpoint(
+        "run_det", environment=capture("run_det", StaticProvider(dataset="v3"))
+    )
+
+    payload = await call(server, "continuum_resume", run_id="run_det", env={"dataset": "v3"})
     assert payload["mode"] == RecoveryMode.RESUME.value
     assert payload["safe"] is True
     assert payload["next_allowed_action"] is None

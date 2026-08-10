@@ -44,6 +44,7 @@ from continuum.models import (
     ActionStatus,
     EnvironmentSnapshot,
     EnvResource,
+    Origin,
     Run,
     UnknownSideEffect,
 )
@@ -55,6 +56,11 @@ __all__ = ["build_server", "ContinuumMCP", "MalformedRunLog", "DEFAULT_DB", "mai
 
 DEFAULT_DB = "continuum.db"
 _DB_ENV_VAR = "CONTINUUM_DB"
+
+#: Everything written through this server is asserted by a remote agent about
+#: its own work. Nothing here is independently verified, so it is recorded as
+#: self-certified and cannot by itself establish that a run is safe to resume.
+AGENT_SOURCE = Origin.EXTERNAL_AGENT
 
 
 class MalformedRunLog(RuntimeError):
@@ -129,7 +135,12 @@ class ContinuumMCP:
 
         first = self.storage.read_events(run_id, upto=1)
         if not first:
-            self.storage.append_event(run_id, EventType.RUN_STARTED, {"goal": goal or run.goal})
+            self.storage.append_event(
+                run_id,
+                EventType.RUN_STARTED,
+                {"goal": goal or run.goal},
+                source=AGENT_SOURCE,
+            )
         elif first[0].type is not EventType.RUN_STARTED:
             raise MalformedRunLog(
                 f"run {run_id!r} does not begin with RUN_STARTED "
@@ -192,7 +203,7 @@ def build_server(
         if total is not None:
             payload["total"] = total
             payload["pending"] = max(total - completed - failed, 0)
-        ctx.storage.append_event(run_id, EventType.TASK_UPDATED, payload)
+        ctx.storage.append_event(run_id, EventType.TASK_UPDATED, payload, source=AGENT_SOURCE)
 
         state = project(run_id, ctx.storage.read_events(run_id))
         return _json(

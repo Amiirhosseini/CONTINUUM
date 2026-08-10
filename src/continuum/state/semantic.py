@@ -39,7 +39,6 @@ from continuum.models import (
     Goal,
     ModelSpecificState,
     ModelState,
-    Origin,
     PendingWork,
     Progress,
     Provenance,
@@ -77,8 +76,14 @@ def _payload_str(event: Event, key: str, default: str | None = None) -> str:
 
 
 def _provenance(event: Event) -> Provenance:
+    """Carry the event's own trust marker into the projected component.
+
+    Previously this hardcoded ``DETERMINISTIC``, which was true of the *fold*
+    but said nothing about the event being folded — so an agent's self-report
+    projected as indistinguishable from a verified fact.
+    """
     return Provenance(
-        origin=Origin.DETERMINISTIC,
+        origin=event.source,
         source_sequence=event.sequence,
         source_event_id=event.event_id,
         extractor="deterministic",
@@ -132,10 +137,13 @@ class _Accumulator:
             description=_payload_str(event, "goal"),
             version=int(event.payload.get("goal_version", 1)),
             constraints=_as_str_list(event.payload.get("constraints")),
+            provenance=_provenance(event),
         )
         total = event.payload.get("total")
         if total is not None:
-            self.progress = Progress(total=int(total), pending=int(total))
+            self.progress = Progress(
+                total=int(total), pending=int(total), provenance=_provenance(event)
+            )
         self.created_at = event.timestamp
 
     def task_updated(self, event: Event) -> None:
@@ -150,19 +158,41 @@ class _Accumulator:
                 version=int(event.payload.get("goal_version", self.goal.version + 1)),
                 constraints=_as_str_list(event.payload.get("constraints"))
                 or list(self.goal.constraints),
+                provenance=_provenance(event),
             )
-        self._apply_progress(event.payload)
+        self._apply_progress(event.payload, event)
 
-    def _apply_progress(self, payload: Mapping[str, Any]) -> None:
+    def _apply_progress(self, payload: Mapping[str, Any], event: Event) -> None:
         keys = ("total", "completed", "pending", "failed")
         if not any(key in payload for key in keys):
             return
-        current = self.progress.model_dump()
+        current = {k: getattr(self.progress, k) for k in keys}
         for key in keys:
             if key in payload:
                 value = payload[key]
                 current[key] = None if value is None else int(value)
-        self.progress = Progress(**current)
+
+        # Re-derive `pending` whenever the caller moved `completed`/`failed`
+        # without restating it. Keeping the old value would leave the counters
+        # summing past `total` and the update would be rejected — punishing a
+        # caller for omitting a field that had not changed.
+        total = current["total"]
+        if total is not None and "pending" not in payload:
+            done = (current["completed"] or 0) + (current["failed"] or 0)
+            current["pending"] = max(total - done, 0)
+        # Progress is cumulative, so the weakest contributor wins: once an
+        # agent self-reports into the figure, the total stays self-certified
+        # until something re-derives it from scratch.
+        origin = event.source if event.source.self_certified else self.progress.provenance.origin
+        self.progress = Progress(
+            **current,
+            provenance=Provenance(
+                origin=origin,
+                source_sequence=event.sequence,
+                source_event_id=event.event_id,
+                extractor="deterministic",
+            ),
+        )
 
     def work_completed(self, event: Event) -> None:
         """Advance progress by one unit and close the matching pending task."""
@@ -171,11 +201,18 @@ class _Accumulator:
         completed = self.progress.completed + (0 if failed else count)
         failures = self.progress.failed + (count if failed else 0)
         pending = max(self.progress.pending - count, 0)
+        origin = event.source if event.source.self_certified else self.progress.provenance.origin
         self.progress = Progress(
             total=self.progress.total,
             completed=completed,
             pending=pending,
             failed=failures,
+            provenance=Provenance(
+                origin=origin,
+                source_sequence=event.sequence,
+                source_event_id=event.event_id,
+                extractor="deterministic",
+            ),
         )
         task_id = event.payload.get("task_id")
         if task_id is not None:

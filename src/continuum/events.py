@@ -30,7 +30,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from continuum.models import utcnow
+from continuum.models import Origin, utcnow
 from continuum.security.hashing import make_id, stable_hash
 
 __all__ = [
@@ -139,6 +139,16 @@ class Event(BaseModel):
     timestamp: datetime = Field(default_factory=utcnow)
     payload: Mapping[str, Any] = Field(default_factory=dict)
     causer_event_id: str | None = None
+    source: Origin = Origin.DETERMINISTIC
+    """Who asserted this fact. Captured at write time and signed.
+
+    Included in ``content()`` deliberately. A trust marker outside the hash
+    could be edited without breaking verification, which would make it useless
+    for the one job it has. The cost is that chains written before this field
+    existed no longer verify — accepted as a clean break rather than carrying a
+    permanently-untrusted legacy tier.
+    """
+
     prev_hash: str | None = None
     hash: str | None = None
 
@@ -159,6 +169,7 @@ class Event(BaseModel):
             "timestamp": self.timestamp,
             "payload": dict(self.payload),
             "causer_event_id": self.causer_event_id,
+            "source": self.source.value,
             "prev_hash": self.prev_hash,
         }
 
@@ -220,6 +231,7 @@ class EventLog:
         causer_event_id: str | None = None,
         timestamp: datetime | None = None,
         event_id: str | None = None,
+        source: Origin = Origin.DETERMINISTIC,
     ) -> Event:
         """Append an event and return the sealed (hashed) record."""
         chain = self._by_run.setdefault(run_id, [])
@@ -232,6 +244,7 @@ class EventLog:
             timestamp=timestamp or utcnow(),
             payload=dict(payload or {}),
             causer_event_id=causer_event_id,
+            source=source,
             prev_hash=head.hash if head else None,
         ).sealed()
         chain.append(event)

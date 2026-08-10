@@ -160,10 +160,20 @@ class PlanStepStatus(StrEnum):
 
 
 class Origin(StrEnum):
-    """Where a piece of state came from — decides how much it can be trusted."""
+    """Who asserted a fact — decides how much it can be trusted.
+
+    This describes the *writer*, not the derivation. Folding a fabricated event
+    is still a faithful fold, so "the projection is reproducible" says nothing
+    about whether the underlying claim is true. Provenance has to be captured
+    where the claim enters the system and carried forward from there.
+    """
 
     DETERMINISTIC = "deterministic"
-    """Derived by folding recorded events. Reproducible and independently checkable."""
+    """Recorded by trusted local code: the CLI, or an adapter called in-process.
+
+    Not a claim that the fact is *correct* — only that it was not asserted by an
+    autonomous agent reporting on itself.
+    """
 
     HUMAN = "human"
     """Asserted by a person."""
@@ -171,8 +181,25 @@ class Origin(StrEnum):
     LLM = "llm"
     """Inferred by a model. Never authoritative; always requires review."""
 
+    EXTERNAL_AGENT = "external_agent"
+    """Asserted by an autonomous agent over a remote interface such as MCP.
+
+    An agent reporting its own progress is marking its own homework. The claim
+    may well be true, but nothing has verified it, so it cannot on its own
+    establish that a run is safe to resume.
+    """
+
     IMPORTED = "imported"
     """Loaded from a foreign checkpoint whose event history is unavailable."""
+
+    @property
+    def self_certified(self) -> bool:
+        """Whether this origin is an unverified self-report.
+
+        Such state is usable — it is often correct — but it cannot be the
+        grounds for declaring a run verified.
+        """
+        return self in (Origin.LLM, Origin.EXTERNAL_AGENT, Origin.IMPORTED)
 
 
 class Provenance(BaseModel):
@@ -202,6 +229,7 @@ class Goal(BaseModel):
     description: str
     version: int = 1
     constraints: list[str] = Field(default_factory=list)
+    provenance: Provenance = Field(default_factory=Provenance)
 
     @field_validator("version")
     @classmethod
@@ -229,6 +257,7 @@ class Progress(BaseModel):
     completed: int = 0
     pending: int = 0
     failed: int = 0
+    provenance: Provenance = Field(default_factory=Provenance)
 
     @field_validator("total", "completed", "pending", "failed")
     @classmethod

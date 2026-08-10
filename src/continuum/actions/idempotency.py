@@ -66,13 +66,26 @@ def idempotency_key(
     *,
     scope: str | None = None,
     volatile: Iterable[str] = (),
+    key: str | None = None,
 ) -> IdempotencyKey:
     """Derive a stable key identifying this operation.
 
     ``scope`` narrows the key, typically to a run, so two runs performing the
     same logical operation do not deduplicate against each other. Omit it for
     effects that must be globally unique regardless of run.
+
+    ``key`` overrides argument hashing entirely, in the style of Stripe's
+    ``Idempotency-Key``. Argument hashing assumes identical arguments mean the
+    same operation, which is wrong for actions that are legitimately repeated:
+    sending the same reminder twice is two sends, not one, and hashing would
+    silently drop the second. When the caller knows the operation's identity,
+    it should say so rather than encode it by perturbing the arguments.
     """
+    if key is not None:
+        if not key:
+            raise ValueError("explicit idempotency key must be a non-empty string")
+        return IdempotencyKey(stable_hash({"scope": scope, "type": action_type, "key": key}))
+
     if not action_type:
         raise ValueError("action_type must be a non-empty string")
 

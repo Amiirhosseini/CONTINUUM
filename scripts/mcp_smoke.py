@@ -258,12 +258,25 @@ def main() -> int:
         for line in str(decision.get("report", "")).split("\n"):
             print(paint(f"    {line}", ""), flush=True)
 
+        # Expectation changed when event provenance landed. Everything written
+        # through MCP is tagged EXTERNAL_AGENT — an agent's unverified report
+        # about its own work — so the run is deliberately NOT certified as
+        # resumable on that basis alone. It previously returned mode=resume,
+        # which meant an agent could fabricate progress and have CONTINUUM
+        # confirm it was safe to continue. Requiring review is the fix, not a
+        # regression. The ledger is separately clean: the side effect really
+        # was performed exactly once, and that is what step 6 proves.
         mode = decision.get("mode")
-        if mode == "resume":
-            note(f"mode={mode} — safe to continue, nothing uncertain", GREEN)
+        uncertain = decision.get("uncertain_actions") or []
+        if mode != "resume" and not uncertain:
+            note(f"mode={mode} — agent-reported state requires review (expected)", GREEN)
+            note("no uncertain side effects: the ledger itself is clean", GREEN)
+        elif uncertain:
+            failures.append(f"unexpected uncertain actions: {uncertain}")
+            note(f"uncertain actions outstanding: {uncertain}", RED)
         else:
-            failures.append(f"expected mode=resume, got {mode}")
-            note(f"mode={mode} (expected resume)", RED)
+            failures.append("agent self-reported state was certified as resumable")
+            note(f"mode={mode} — self-reported state should not be 'resume'", RED)
 
         banner("9", "ledger contents")
         show(client.call_tool("continuum_list_actions", {"run_id": run_id}))
@@ -278,7 +291,8 @@ def main() -> int:
             return 1
         print(paint("  SMOKE TEST PASSED", BOLD + GREEN))
         print(paint("    handshake ok · 9 tools · progress durable ·", GREEN))
-        print(paint("    side effect performed exactly once · resume safe", GREEN))
+        print(paint("    side effect performed exactly once ·", GREEN))
+        print(paint("    agent-reported state correctly withheld from 'resume'", GREEN))
         return 0
     finally:
         client.close()

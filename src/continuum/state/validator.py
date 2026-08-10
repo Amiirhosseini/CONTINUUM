@@ -42,6 +42,13 @@ __all__ = ["StateValidator", "ValidationOutcome", "validate_state"]
 
 
 #: Statuses that mean the component cannot be relied on as-is.
+#:
+#: REQUIRES_REVIEW belongs here: something is asking for human judgement, and
+#: reporting "safe to resume" while that is outstanding is precisely the false
+#: assurance this layer exists to prevent. The recovery engine already refused
+#: to resume in these cases via the repair plan, but the validator's own
+#: `safe_to_resume` disagreed with it — so anything reading the validation
+#: report directly got the wrong answer.
 _UNUSABLE = frozenset(
     {
         StateStatus.INVALID,
@@ -49,6 +56,7 @@ _UNUSABLE = frozenset(
         StateStatus.CONFLICTED,
         StateStatus.EXPIRED,
         StateStatus.UNKNOWN,
+        StateStatus.REQUIRES_REVIEW,
     }
 )
 
@@ -286,6 +294,16 @@ class StateValidator:
 
     @staticmethod
     def _check_goal(state: SemanticState, entries: list[ComponentValidationEntry]) -> None:
+        origin = state.goal.provenance.origin
+        if origin.self_certified:
+            entries.append(
+                ComponentValidationEntry(
+                    component=Component.GOAL,
+                    status=StateStatus.REQUIRES_REVIEW,
+                    detail=f"v{state.goal.version}, asserted by {origin.value}",
+                )
+            )
+            return
         entries.append(
             ComponentValidationEntry(
                 component=Component.GOAL,
@@ -302,6 +320,17 @@ class StateValidator:
         # code; the invariant is tested at the model level instead.
         progress = state.progress
         status, detail = StateStatus.VALID, ""
+
+        # An agent reporting its own progress has not verified anything. The
+        # figure may be perfectly accurate, but nothing independent supports
+        # it, so it cannot count as verified state.
+        origin = progress.provenance.origin
+        if origin.self_certified:
+            status = StateStatus.REQUIRES_REVIEW
+            detail = (
+                f"{progress.completed} completed, self-reported by {origin.value} "
+                f"and not independently verified"
+            )
 
         if state.source_sequence == 0 and progress.completed > 0:
             status = StateStatus.UNKNOWN
