@@ -1,6 +1,6 @@
 # Project status
 
-**As of commit `9738b9e` — 2026-08-10.**
+**As of commit `d32f7a2` — 2026-08-10.**
 
 A factual snapshot for whoever picks this up next, human or otherwise, with no
 memory of how any of it was found. It records what is verified, what is
@@ -10,10 +10,12 @@ believed, and what is neither.
 
 ## Verified
 
-574 tests pass. CI is green on Python 3.11, 3.12 and 3.13, plus lint
-(`ruff`) and strict type-check (`mypy`). Everything below has tests behind it;
-several of the safety-critical paths have also been checked by deliberately
-breaking them and confirming the suite notices.
+607 tests pass. CI is green on Python 3.11, 3.12 and 3.13, plus lint
+(`ruff`) and strict type-check (`mypy`) — confirmed by run
+[31355087372](https://github.com/Cyrax321/CONTINUUM/actions/runs/31355087372).
+Everything below has tests behind it; several of the safety-critical paths have
+also been checked by deliberately breaking them and confirming the suite
+notices.
 
 ### Core
 
@@ -101,8 +103,107 @@ Commit: `9738b9e`.
 ### What it does *not* fix
 
 Provenance stops an agent certifying its own state. It does **not** stop an
-unauthorized caller invoking mutating tools in the first place. See
-[#1](https://github.com/Cyrax321/CONTINUUM/issues/1).
+unauthorized caller invoking mutating tools in the first place — that is the
+authorization layer below.
+
+---
+
+## The MCP authorization layer (`d9365c8`)
+
+Any client that could reach the server could call any tool. Several agents have
+been configured against this project's database simultaneously — Kilo, Gemini
+CLI and Claude Code all pointed at the same `continuum.db` — so any of them
+could overwrite another's progress, checkpoint over its state, or claim its
+actions.
+
+Mutating tools now require the caller to appear on an allowlist. The caller is
+identified by `client_info.name` from the initialize handshake, which the
+transport injects server-side; a caller cannot elevate itself by passing a
+forged `clientInfo` in tool arguments (verified against the live stdio
+transport and covered by test).
+
+**Deny by default.** An unlisted caller is not one we have decided to trust; it
+is one nobody has made a decision about. An unconfigured server is therefore
+read-only. This matches the validator's stance elsewhere: uncertainty degrades
+rather than resolving in its own favour.
+
+Policy resolves in four tiers, each replacing rather than merging the ones
+below, so `AuthorizationPolicy.source` always names where a grant came from:
+
+1. explicit `policy=` argument
+2. `CONTINUUM_MCP_MUTATING_CLIENTS`, or its alias `CONTINUUM_MCP_ALLOW`
+3. `.continuum/mcp-policy.json`
+4. deny
+
+A malformed policy file raises rather than falling back — a file that exists is
+a statement of intent, and ignoring a typo in it would either baffle the owner
+or quietly widen access.
+
+**Read-only tools are not gated.** `validate`, `resume` and `list_actions`
+cannot alter a run, and their value is that anyone can ask "is this safe to
+continue?" without first being granted permission. Gating them would also leave
+an unlisted caller unable to discover why its writes are failing. The
+information they disclose is already readable by anyone holding the database
+file. The split is driven by the `read_only_hint` annotation each tool already
+declared, so the two cannot drift apart.
+
+### What it does *not* do
+
+`clientInfo` is asserted by the client at handshake and never verified. A caller
+that wants to be seen as `claude-code` simply says so. **This is authorization
+by declared identity, not authentication.**
+
+It keeps honestly-named coexisting agents out of each other's runs. It does not
+defend against a deliberately impersonating or malicious local process — which
+in any case has direct filesystem access to the database and does not need the
+MCP server at all.
+
+Also out of scope: rate limiting, audit of failed attempts beyond the error
+response, and scoping callers to particular runs.
+
+### Naming (`d32f7a2`)
+
+`CONTINUUM_MCP_MUTATING_CLIENTS` is accepted as an alias for
+`CONTINUUM_MCP_ALLOW`, occupying the same precedence position rather than adding
+a config source. If both are set the longer name wins, since it states what is
+being allowed; `policy.source` reports which was used. The name is preserved
+from the closed PR #3 below.
+
+---
+
+## PR #3: an authorization attempt that failed open
+
+Worth reading before touching this code.
+[PR #3](https://github.com/Cyrax321/CONTINUUM/pull/3) was an independently
+developed attempt at the same fix, with the right shape — handshake identity,
+enforcement at the MCP boundary, read-only tools left callable. It was reviewed
+and **closed without merging** because its guard authorized the caller on two
+failure paths:
+
+```python
+if mcp_context is None:
+    return                    # allows
+try:
+    params = mcp_context.session.client_params
+except ValueError:
+    return                    # allows
+```
+
+The `ValueError` path is reachable: `Context.request_context` raises exactly
+`ValueError("Context is not available outside of a request")` when `.session` is
+touched outside a live request. Replicating the guard verbatim and invoking it
+the way the test suite invokes tools produced
+`{"authorized": true, "why": "ValueError -> allowed"}`.
+
+The instructive part is not the missing `raise`. The PR modified
+`tests/test_mcp_server.py` but added no test of the gate itself, so the fail-open
+produced a green checkmark — and its `Fixes #1` footer would have auto-closed
+the issue on merge. Passing tests, a closed issue, and an open hole is a worse
+outcome than no fix at all.
+
+Two things were kept from it: the `CONTINUUM_MCP_MUTATING_CLIENTS` name, and the
+observation that raising `ToolError` directly is a defensible alternative to the
+`PermissionError` subclass used here.
 
 ---
 
@@ -110,7 +211,7 @@ unauthorized caller invoking mutating tools in the first place. See
 
 | Issue | Summary | Priority |
 |:--|:--|:--|
-| [#1](https://github.com/Cyrax321/CONTINUUM/issues/1) | **MCP trust boundary.** No authorization layer for mutating tools. `clientInfo` identifies *which* client is calling (server-side, not forgeable via tool arguments) but is client-asserted at handshake — it does not establish that the caller is authorized or honest. Needs a thin capability layer between transport and adapter. | High |
+| [#1](https://github.com/Cyrax321/CONTINUUM/issues/1) | **MCP caller authentication.** Narrowed by `d9365c8`: authorization for mutating tools now exists and denies by default. What remains is authentication — `clientInfo` is client-asserted and unverified, so a deliberately impersonating local process is unaffected. Would need a shared secret, per-client token, or transport-level identity. | Medium |
 | [#2](https://github.com/Cyrax321/CONTINUUM/issues/2) | **CI Node deprecation.** `actions/checkout@v4`, `actions/setup-python@v5`, `codecov/codecov-action@v4` are being forced onto Node 24. Works today; hard failure once the grace period ends. `release.yml` likely has the same pins and was not checked. | Low |
 
 ### Not built
