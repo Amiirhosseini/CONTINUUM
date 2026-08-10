@@ -6,7 +6,162 @@ document.addEventListener('DOMContentLoaded', () => {
   initCalculator();
   initCodeTabs();
   initArchTooltips();
+  initCustomCursor();
+  initFaqAccordion();
+  initLiveTime();
+  initStudioTime();
+  initRuler();
 });
+
+// ---------------------------------------------------------------------------
+// Custom Cursor
+// ---------------------------------------------------------------------------
+function initCustomCursor() {
+  const cursor = document.createElement('div');
+  cursor.className = 'custom-cursor';
+  cursor.innerHTML = `
+    <svg class="cursor-arrow" width="12" height="16" viewBox="0 0 12 16" fill="none">
+      <path d="M2 2L12 11L7 11L5 16L2 2Z" fill="white" stroke="#071827" stroke-width="1"/>
+    </svg>
+    <div class="cursor-label">You</div>
+  `;
+  document.body.appendChild(cursor);
+
+  let mouseX = window.innerWidth / 2;
+  let mouseY = window.innerHeight / 2;
+  let cursorX = mouseX;
+  let cursorY = mouseY;
+
+  document.addEventListener('pointermove', (e) => {
+    mouseX = e.clientX;
+    mouseY = e.clientY;
+  });
+
+  document.addEventListener('pointerover', (e) => {
+    const target = e.target.closest('a, button, [role="button"], .faq-item, .clickable');
+    if (target) {
+      cursor.classList.add('clickable');
+      cursor.querySelector('.cursor-label').textContent = 'click';
+    } else {
+      cursor.classList.remove('clickable');
+      cursor.querySelector('.cursor-label').textContent = 'You';
+    }
+  });
+
+  function animate() {
+    cursorX += (mouseX - cursorX) * 0.12;
+    cursorY += (mouseY - cursorY) * 0.12;
+    cursor.style.transform = `translate3d(${cursorX}px, ${cursorY}px, 0)`;
+    requestAnimationFrame(animate);
+  }
+
+  requestAnimationFrame(animate);
+}
+
+// ---------------------------------------------------------------------------
+// FAQ Accordion
+// ---------------------------------------------------------------------------
+function initFaqAccordion() {
+  const faqItems = document.querySelectorAll('.faq-item');
+
+  faqItems.forEach(item => {
+    const plusBtn = item.querySelector('.faq-plus');
+    if (!plusBtn) return;
+
+    plusBtn.addEventListener('click', () => {
+      const isOpen = item.classList.contains('open');
+
+      faqItems.forEach(other => {
+        other.classList.remove('open');
+        const btn = other.querySelector('.faq-plus');
+        if (btn) {
+          btn.textContent = '+';
+          btn.setAttribute('aria-expanded', 'false');
+        }
+      });
+
+      if (!isOpen) {
+        item.classList.add('open');
+        plusBtn.textContent = '−';
+        plusBtn.setAttribute('aria-expanded', 'true');
+      }
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Live Time
+// ---------------------------------------------------------------------------
+function initLiveTime() {
+  function update() {
+    const el = document.getElementById('liveTime');
+    if (el) el.textContent = new Date().toLocaleTimeString('en-US', { hour12: true });
+  }
+  update();
+  setInterval(update, 1000);
+}
+
+// ---------------------------------------------------------------------------
+// Studio Time (IST) with Day/Dawn/Night
+// ---------------------------------------------------------------------------
+function initStudioTime() {
+  const timeText = document.getElementById('studioTimeText');
+  const subtext = document.getElementById('studioSubtext');
+  const sunMoon = document.getElementById('sunMoon');
+
+  function update() {
+    const now = new Date();
+    const utc = now.getTime() + now.getTimezoneOffset() * 60000;
+    const ist = new Date(utc + 5.5 * 3600000);
+    const hour = ist.getHours();
+    const mm = ist.getMinutes().toString().padStart(2, '0');
+    const timeStr = `${hour}:${mm}`;
+
+    if (timeText) timeText.textContent = timeStr;
+
+    // Day: 06:00-17:59
+    if (hour >= 6 && hour < 18) {
+      if (subtext) subtext.textContent = "The best ideas always seem to land about now.";
+      if (sunMoon) sunMoon.innerHTML = `<svg class="sun-moon-svg" viewBox="0 0 60 60" fill="none"><circle cx="30" cy="30" r="14" fill="#FF5017"/><g stroke="#FF5017" stroke-width="2.5" stroke-linecap="round"><line x1="30" y1="4" x2="30" y2="12"/><line x1="30" y1="48" x2="30" y2="56"/><line x1="4" y1="30" x2="12" y2="30"/><line x1="48" y1="30" x2="56" y2="30"/><line x1="11" y1="11" x2="17" y2="17"/><line x1="43" y1="43" x2="49" y2="49"/><line x1="11" y1="49" x2="17" y2="43"/><line x1="43" y1="17" x2="49" y2="11"/></g></svg>`;
+    }
+    // Dawn: 18:00-19:59
+    else if (hour >= 18 && hour < 20) {
+      if (subtext) subtext.textContent = "Golden hour. The studio is waking up.";
+      if (sunMoon) sunMoon.innerHTML = `<svg class="sun-moon-svg" viewBox="0 0 60 60" fill="none"><circle cx="30" cy="35" r="12" fill="#FF8C42"/><path d="M12 40 Q30 25 48 40" stroke="#FF8C42" stroke-width="2" fill="none" opacity="0.5"/><path d="M18 45 Q30 35 42 45" stroke="#FF8C42" stroke-width="1.5" fill="none" opacity="0.3"/></svg>`;
+    }
+    // Night: 20:00-05:59
+    else {
+      if (subtext) subtext.textContent = "Leave your idea, we'll grab it at dawn.";
+      if (sunMoon) sunMoon.innerHTML = `<svg class="sun-moon-svg" viewBox="0 0 60 60" fill="none"><circle cx="30" cy="30" r="13" fill="#E8ECF0"/><circle cx="36" cy="26" r="10" fill="#071827"/><circle cx="22" cy="38" r="1.5" fill="#B8C4D0"/><circle cx="38" cy="42" r="1" fill="#B8C4D0"/><circle cx="42" cy="34" r="1.2" fill="#B8C4D0"/></svg>`;
+    }
+
+    // Also update footer time
+    const footerEl = document.getElementById('footerTime');
+    if (footerEl) footerEl.textContent = `${hour.toString().padStart(2, '0')}:${mm} IST`;
+  }
+
+  update();
+  setInterval(update, 60000);
+}
+
+// ---------------------------------------------------------------------------
+// Ruler
+// ---------------------------------------------------------------------------
+function initRuler() {
+  const ruler = document.getElementById('topRuler');
+  if (!ruler) return;
+  const width = ruler.offsetWidth || 800;
+  const spacing = 30;
+  let html = '';
+  for (let i = 0; i < width; i += spacing) {
+    const isMajor = i % 100 === 0;
+    html += `<div style="position:absolute;bottom:0;left:${i}px;width:1px;height:${isMajor ? '10px' : '6px'};background:rgba(7,19,30,0.2)"></div>`;
+    if (isMajor && i > 0) {
+      html += `<div style="position:absolute;bottom:12px;left:${i}px;font-family:'JetBrains Mono',monospace;font-size:8px;color:rgba(7,19,30,0.4);transform:translateX(-50%)">${i}</div>`;
+    }
+  }
+  ruler.innerHTML = html;
+}
 
 // ---------------------------------------------------------------------------
 // 1. Live Fault Recovery Simulator Engine
