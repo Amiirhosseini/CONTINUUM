@@ -62,6 +62,11 @@ class MCPClient:
     def __init__(self, db_path: str) -> None:
         env = dict(os.environ)
         env["CONTINUUM_DB"] = db_path
+        # Mutating tools deny unlisted callers by default, so the demo grants
+        # itself access the same way a real deployment would. Without this the
+        # server is read-only and step 2 onward is refused — which is the
+        # intended posture for an unconfigured server, not a bug.
+        env["CONTINUUM_MCP_ALLOW"] = "mcp-smoke"
         src = Path(__file__).resolve().parents[1] / "src"
         if src.is_dir():
             existing = env.get("PYTHONPATH")

@@ -28,18 +28,22 @@ behaviour, not a leak.
 
 from __future__ import annotations
 
+import functools
+import inspect
 import json
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from mcp.server import MCPServer
+from mcp.server.mcpserver.context import Context
 from mcp.types import ToolAnnotations
 
 from continuum.actions.ledger import ActionLedger
 from continuum.adapters.generic import GenericAgentAdapter
 from continuum.environment import StaticProvider, capture
 from continuum.events import EventType
+from continuum.mcp.authz import AuthorizationPolicy, caller_name, load_policy
 from continuum.models import (
     ActionStatus,
     EnvironmentSnapshot,
@@ -158,12 +162,18 @@ def build_server(
     database: str | None = None,
     *,
     storage: Storage | None = None,
+    policy: AuthorizationPolicy | None = None,
 ) -> tuple[MCPServer, ContinuumMCP]:
     """Construct the MCP server and its backing context.
 
     Returns both so tests can drive tools directly and inspect the store.
+
+    ``policy`` decides which callers may use mutating tools. Omitted, it is
+    resolved from the environment and then the project policy file, falling
+    back to denying every mutation — an unconfigured server is read-only.
     """
     ctx = ContinuumMCP(database, storage=storage)
+    policy = load_policy() if policy is None else policy
     server = MCPServer(
         name="continuum",
         title="CONTINUUM",
@@ -179,6 +189,40 @@ def build_server(
     read_only = ToolAnnotations(read_only_hint=True)
     mutating = ToolAnnotations(read_only_hint=False)
 
+    def guard(fn: Callable[..., str]) -> Callable[..., str]:
+        """Refuse a mutating tool unless the caller is on the allowlist.
+
+        Applied per tool rather than globally so the read-only/mutating split
+        is visible at each call site, and so a new tool has to make an explicit
+        choice: undecorated means read-only, and a test asserts every mutating
+        tool carries this.
+
+        The check runs before the handler body, so a refused call writes
+        nothing — the denial precedes the side effect rather than following it.
+        """
+
+        @functools.wraps(fn)
+        def wrapper(*args: Any, ctx: Context | None = None, **kwargs: Any) -> str:
+            policy.require(caller_name(ctx), fn.__name__)
+            return fn(*args, **kwargs)
+
+        # The SDK locates the context parameter via get_type_hints(), and
+        # functools.wraps copies the *wrapped* function's annotations — which
+        # have no `ctx`. Re-advertise it in both the annotations and the
+        # signature, or the guard is never handed a context and every caller
+        # looks unidentified.
+        original = inspect.signature(fn)
+        wrapper.__annotations__ = {**fn.__annotations__, "ctx": Context}
+        wrapper.__signature__ = original.replace(  # type: ignore[attr-defined]
+            parameters=[
+                *original.parameters.values(),
+                inspect.Parameter(
+                    "ctx", inspect.Parameter.KEYWORD_ONLY, default=None, annotation=Context
+                ),
+            ]
+        )
+        return wrapper
+
     # -- progress --------------------------------------------------------- #
 
     @server.tool(
@@ -190,6 +234,7 @@ def build_server(
         ),
         annotations=mutating,
     )
+    @guard
     def continuum_record_progress(
         run_id: str,
         completed: int,
@@ -229,6 +274,7 @@ def build_server(
         ),
         annotations=mutating,
     )
+    @guard
     def continuum_checkpoint(
         run_id: str,
         reason: str = "",
@@ -374,6 +420,7 @@ def build_server(
         ),
         annotations=mutating,
     )
+    @guard
     def continuum_intercept_action(
         run_id: str,
         action_type: str,
@@ -440,6 +487,7 @@ def build_server(
         ),
         annotations=mutating,
     )
+    @guard
     def continuum_complete_action(
         run_id: str,
         action_key: str,
@@ -469,6 +517,7 @@ def build_server(
         ),
         annotations=mutating,
     )
+    @guard
     def continuum_fail_action(
         run_id: str,
         action_key: str,
@@ -496,6 +545,7 @@ def build_server(
         ),
         annotations=mutating,
     )
+    @guard
     def continuum_reconcile_action(
         run_id: str,
         action_key: str,

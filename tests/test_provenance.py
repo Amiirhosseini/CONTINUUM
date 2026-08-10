@@ -18,12 +18,14 @@ import pytest
 from continuum.checkpoint import CheckpointManager
 from continuum.environment import StaticProvider, capture
 from continuum.events import Event, EventLog, EventType
+from continuum.mcp.authz import AuthorizationPolicy
 from continuum.mcp.server import build_server
 from continuum.models import Goal, Origin, Progress, RecoveryMode, Run, StateStatus
 from continuum.recovery import RecoveryEngine
 from continuum.state.semantic import project
 from continuum.state.validator import validate_state
 from continuum.storage import SQLiteStorage
+from tests.mcp_helpers import fake_context
 
 
 @pytest.fixture
@@ -33,8 +35,11 @@ def store() -> Iterator[SQLiteStorage]:
     storage.close()
 
 
+MCP_CLIENT = "pytest-client"
+
+
 async def call(server: Any, name: str, **arguments: Any) -> dict[str, Any]:
-    result = await server.call_tool(name, arguments)
+    result = await server.call_tool(name, arguments, context=fake_context(MCP_CLIENT))
     return json.loads(result.content[0].text)
 
 
@@ -195,7 +200,7 @@ async def test_an_agent_cannot_certify_its_own_fabricated_progress(
     store: SQLiteStorage,
 ) -> None:
     """The exact reproduction that previously returned mode=resume, safe=True."""
-    server, ctx = build_server(storage=store)
+    server, ctx = build_server(storage=store, policy=AuthorizationPolicy([MCP_CLIENT]))
 
     await call(
         server,

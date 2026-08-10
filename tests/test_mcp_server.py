@@ -21,22 +21,32 @@ from continuum.actions.ledger import ActionLedger
 from continuum.checkpoint import CheckpointManager
 from continuum.environment import StaticProvider, capture
 from continuum.events import EventType
+from continuum.mcp.authz import AuthorizationPolicy
 from continuum.mcp.server import DEFAULT_DB, build_server, resolve_database
 from continuum.models import ActionStatus, RecoveryMode, Run
 from continuum.storage import SQLiteStorage
+from tests.mcp_helpers import fake_context as _ctx
+
+TEST_CLIENT = "pytest-client"
 
 
 @pytest.fixture
 def server_ctx() -> Iterator[tuple[Any, Any]]:
+    """A server whose caller is authorized to mutate.
+
+    These tests cover tool behaviour, not the authorization layer — that lives
+    in test_mcp_authz.py. Without an explicit policy the server denies every
+    mutation, and a policy failure here would look like a logic bug.
+    """
     storage = SQLiteStorage(":memory:")
-    server, ctx = build_server(storage=storage)
+    server, ctx = build_server(storage=storage, policy=AuthorizationPolicy([TEST_CLIENT]))
     yield server, ctx
     ctx.close()
 
 
 async def call(server: Any, name: str, **arguments: Any) -> dict[str, Any]:
     """Invoke a tool the way a client would and parse its JSON result."""
-    result = await server.call_tool(name, arguments)
+    result = await server.call_tool(name, arguments, context=_ctx(TEST_CLIENT))
     assert result.content, f"{name} returned no content"
     return json.loads(result.content[0].text)
 
@@ -136,7 +146,11 @@ async def test_recording_progress_for_an_unknown_run_without_a_goal_fails(
 
     server, _ = server_ctx
     with pytest.raises(ToolError, match="no such run"):
-        await server.call_tool("continuum_record_progress", {"run_id": "ghost", "completed": 1})
+        await server.call_tool(
+            "continuum_record_progress",
+            {"run_id": "ghost", "completed": 1},
+            context=_ctx(TEST_CLIENT),
+        )
 
 
 @pytest.mark.asyncio
@@ -614,7 +628,7 @@ async def test_state_persists_across_server_restarts(tmp_path: Any) -> None:
     """A restarted MCP server must see the previous session's work."""
     path = str(tmp_path / "agent.db")
 
-    server, ctx = build_server(path)
+    server, ctx = build_server(path, policy=AuthorizationPolicy([TEST_CLIENT]))
     await call(
         server,
         "continuum_record_progress",
@@ -639,7 +653,7 @@ async def test_state_persists_across_server_restarts(tmp_path: Any) -> None:
     )
     ctx.close()
 
-    server2, ctx2 = build_server(path)
+    server2, ctx2 = build_server(path, policy=AuthorizationPolicy([TEST_CLIENT]))
     repeat = await call(
         server2,
         "continuum_intercept_action",
@@ -705,7 +719,11 @@ async def test_a_log_not_beginning_with_run_started_is_refused(
 
     # surfaced to the MCP caller rather than swallowed
     with pytest.raises(Exception, match="RUN_STARTED"):
-        await server.call_tool("continuum_record_progress", {"run_id": "odd", "completed": 1})
+        await server.call_tool(
+            "continuum_record_progress",
+            {"run_id": "odd", "completed": 1},
+            context=_ctx(TEST_CLIENT),
+        )
 
     # nothing was written by the refused call
     assert [e.type for e in ctx.storage.read_events("odd")] == [EventType.TOOL_CALLED]
