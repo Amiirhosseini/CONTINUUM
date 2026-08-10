@@ -55,6 +55,16 @@ def mcp_client_context(server: Any, client_name: str) -> Context[Any, Any]:
     return Context(request_context=request_context, mcp_server=server)
 
 
+def mcp_client_context_with_invalid_params(server: Any) -> Context[Any, Any]:
+    class BrokenSession:
+        @property
+        def client_params(self) -> Any:
+            raise ValueError("client params unavailable")
+
+    request_context = SimpleNamespace(session=BrokenSession())
+    return Context(request_context=request_context, mcp_server=server)
+
+
 async def seed_run(server: Any, run_id: str = "run_1", completed: int = 20) -> None:
     await call(
         server,
@@ -142,6 +152,21 @@ async def test_authorized_clients_can_mutate_while_others_stay_read_only(
         context=mcp_client_context(server, "Gemini CLI"),
     )
     assert read_only.is_error is False
+    ctx.close()
+
+
+@pytest.mark.asyncio
+async def test_missing_client_params_are_not_authorized_for_mutating_tools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CONTINUUM_MCP_MUTATING_CLIENTS", "Claude Code")
+    server, ctx = build_server(storage=SQLiteStorage(":memory:"))
+    with pytest.raises(ToolError, match="not authorized"):
+        await server.call_tool(
+            "continuum_record_progress",
+            {"run_id": "run_1", "completed": 1, "goal": "Analyze"},
+            context=mcp_client_context_with_invalid_params(server),
+        )
     ctx.close()
 
 

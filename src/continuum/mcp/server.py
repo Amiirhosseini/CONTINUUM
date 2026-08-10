@@ -174,7 +174,7 @@ class ContinuumMCP:
         try:
             params = mcp_context.session.client_params
         except ValueError:
-            return
+            params = None
         client_name = params.client_info.name if params and params.client_info else None
         if client_name in self.allowed_mutating_clients:
             return
