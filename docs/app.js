@@ -102,44 +102,19 @@ function initLiveTime() {
 }
 
 // ---------------------------------------------------------------------------
-// Studio Time (IST) with Day/Dawn/Night
+// Studio Time (IST)
 // ---------------------------------------------------------------------------
 function initStudioTime() {
-  const timeText = document.getElementById('studioTimeText');
-  const subtext = document.getElementById('studioSubtext');
-  const sunMoon = document.getElementById('sunMoon');
-
   function update() {
+    const el = document.getElementById('footerTime');
+    if (!el) return;
     const now = new Date();
     const utc = now.getTime() + now.getTimezoneOffset() * 60000;
     const ist = new Date(utc + 5.5 * 3600000);
-    const hour = ist.getHours();
+    const hh = ist.getHours().toString().padStart(2, '0');
     const mm = ist.getMinutes().toString().padStart(2, '0');
-    const timeStr = `${hour}:${mm}`;
-
-    if (timeText) timeText.textContent = timeStr;
-
-    // Day: 06:00-17:59
-    if (hour >= 6 && hour < 18) {
-      if (subtext) subtext.textContent = "The best ideas always seem to land about now.";
-      if (sunMoon) sunMoon.innerHTML = `<svg class="sun-moon-svg" viewBox="0 0 60 60" fill="none"><circle cx="30" cy="30" r="14" fill="#FF5017"/><g stroke="#FF5017" stroke-width="2.5" stroke-linecap="round"><line x1="30" y1="4" x2="30" y2="12"/><line x1="30" y1="48" x2="30" y2="56"/><line x1="4" y1="30" x2="12" y2="30"/><line x1="48" y1="30" x2="56" y2="30"/><line x1="11" y1="11" x2="17" y2="17"/><line x1="43" y1="43" x2="49" y2="49"/><line x1="11" y1="49" x2="17" y2="43"/><line x1="43" y1="17" x2="49" y2="11"/></g></svg>`;
-    }
-    // Dawn: 18:00-19:59
-    else if (hour >= 18 && hour < 20) {
-      if (subtext) subtext.textContent = "Golden hour. The studio is waking up.";
-      if (sunMoon) sunMoon.innerHTML = `<svg class="sun-moon-svg" viewBox="0 0 60 60" fill="none"><circle cx="30" cy="35" r="12" fill="#FF8C42"/><path d="M12 40 Q30 25 48 40" stroke="#FF8C42" stroke-width="2" fill="none" opacity="0.5"/><path d="M18 45 Q30 35 42 45" stroke="#FF8C42" stroke-width="1.5" fill="none" opacity="0.3"/></svg>`;
-    }
-    // Night: 20:00-05:59
-    else {
-      if (subtext) subtext.textContent = "Leave your idea, we'll grab it at dawn.";
-      if (sunMoon) sunMoon.innerHTML = `<svg class="sun-moon-svg" viewBox="0 0 60 60" fill="none"><circle cx="30" cy="30" r="13" fill="#E8ECF0"/><circle cx="36" cy="26" r="10" fill="#071827"/><circle cx="22" cy="38" r="1.5" fill="#B8C4D0"/><circle cx="38" cy="42" r="1" fill="#B8C4D0"/><circle cx="42" cy="34" r="1.2" fill="#B8C4D0"/></svg>`;
-    }
-
-    // Also update footer time
-    const footerEl = document.getElementById('footerTime');
-    if (footerEl) footerEl.textContent = `${hour.toString().padStart(2, '0')}:${mm} IST`;
+    el.textContent = `${hh}:${mm} IST`;
   }
-
   update();
   setInterval(update, 60000);
 }
