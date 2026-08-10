@@ -42,11 +42,20 @@ __all__ = [
     "NotAuthorized",
     "UnknownCaller",
     "POLICY_ENV_VAR",
+    "POLICY_ENV_VAR_ALIAS",
     "POLICY_FILENAME",
     "load_policy",
 ]
 
 POLICY_ENV_VAR = "CONTINUUM_MCP_ALLOW"
+
+#: Alias for ``POLICY_ENV_VAR``, preserved from the closed PR #3. The longer
+#: name states what is being allowed rather than leaving it to be inferred, so
+#: it wins when both are set — a reader who followed that PR's history will
+#: reach for it first, and silently preferring the vaguer name would surprise
+#: them. Same precedence position: an alias, not an extra config source.
+POLICY_ENV_VAR_ALIAS = "CONTINUUM_MCP_MUTATING_CLIENTS"
+
 POLICY_FILENAME = ".continuum/mcp-policy.json"
 
 #: Used when the handshake supplied no client name at all.
@@ -113,7 +122,7 @@ class AuthorizationPolicy:
             base = f"Permitted callers: {', '.join(sorted(self.allowed))}."
         return (
             f"{base} Read-only tools remain available. To grant access, set "
-            f"{POLICY_ENV_VAR}={name!r} or add it to {POLICY_FILENAME}."
+            f"{POLICY_ENV_VAR_ALIAS}={name!r} or add it to {POLICY_FILENAME}."
         )
 
 
@@ -166,9 +175,10 @@ def load_policy(
         return AuthorizationPolicy(allow, source="argument")
 
     environ = os.environ if env is None else env
-    from_env = _from_env(environ.get(POLICY_ENV_VAR))
-    if from_env:
-        return AuthorizationPolicy(from_env, source=POLICY_ENV_VAR)
+    for var in (POLICY_ENV_VAR_ALIAS, POLICY_ENV_VAR):
+        from_env = _from_env(environ.get(var))
+        if from_env:
+            return AuthorizationPolicy(from_env, source=var)
 
     base = Path.cwd() if root is None else root
     found = _from_file(base / POLICY_FILENAME)

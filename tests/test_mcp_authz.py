@@ -20,6 +20,7 @@ import pytest
 
 from continuum.mcp.authz import (
     POLICY_ENV_VAR,
+    POLICY_ENV_VAR_ALIAS,
     POLICY_FILENAME,
     AuthorizationPolicy,
     NotAuthorized,
@@ -105,7 +106,8 @@ def test_the_refusal_explains_how_to_fix_it() -> None:
     with pytest.raises(NotAuthorized) as excinfo:
         AuthorizationPolicy([ALLOWED]).require(STRANGER, "continuum_checkpoint")
     message = str(excinfo.value)
-    assert POLICY_ENV_VAR in message
+    # Points at the preferred variable name, not merely a working one.
+    assert POLICY_ENV_VAR_ALIAS in message
     assert POLICY_FILENAME in message
     assert "Read-only tools remain available" in message
     assert ALLOWED in message  # who *is* permitted
@@ -130,6 +132,43 @@ def test_an_unconfigured_server_denies_every_mutation(tmp_path: Path) -> None:
 def test_the_env_var_grants_access(tmp_path: Path) -> None:
     policy = load_policy(root=tmp_path, env={POLICY_ENV_VAR: "a, b c"})
     assert policy.allowed == frozenset({"a", "b", "c"})
+    assert policy.source == POLICY_ENV_VAR
+
+
+def test_the_alias_env_var_resolves_identically(tmp_path: Path) -> None:
+    """CONTINUUM_MCP_MUTATING_CLIENTS is an alias, not a second config source.
+
+    The name is preserved from the closed PR #3, where it read better than
+    CONTINUUM_MCP_ALLOW: it says what is being allowed.
+    """
+    via_alias = load_policy(root=tmp_path, env={POLICY_ENV_VAR_ALIAS: "a, b c"})
+    via_primary = load_policy(root=tmp_path, env={POLICY_ENV_VAR: "a, b c"})
+
+    assert via_alias.allowed == via_primary.allowed == frozenset({"a", "b", "c"})
+    assert via_alias.source == POLICY_ENV_VAR_ALIAS
+    assert via_primary.source == POLICY_ENV_VAR
+
+
+def test_the_alias_wins_when_both_env_vars_are_set(tmp_path: Path) -> None:
+    """Ambiguity has to resolve one way; the more precise name wins.
+
+    Someone who followed PR #3's history reaches for the longer name first,
+    and silently preferring the vaguer one would surprise them. `source`
+    reports which was used so the choice is never invisible.
+    """
+    policy = load_policy(
+        root=tmp_path,
+        env={POLICY_ENV_VAR_ALIAS: ALLOWED, POLICY_ENV_VAR: STRANGER},
+    )
+    assert policy.permits(ALLOWED)
+    assert not policy.permits(STRANGER)
+    assert policy.source == POLICY_ENV_VAR_ALIAS
+
+
+def test_an_empty_alias_falls_through_to_the_primary(tmp_path: Path) -> None:
+    """An exported-but-empty variable is not a grant of nothing."""
+    policy = load_policy(root=tmp_path, env={POLICY_ENV_VAR_ALIAS: "", POLICY_ENV_VAR: ALLOWED})
+    assert policy.permits(ALLOWED)
     assert policy.source == POLICY_ENV_VAR
 
 
