@@ -13,20 +13,11 @@
   <div class="scroll-progress" id="scrollProgress"></div>
   <div class="global-background">
     <div class="clouds">
-      <!-- Distant layer -->
-      <div class="cloud cloud-distant cloud-1"></div>
-      <div class="cloud cloud-distant cloud-6"></div>
-      <!-- Middle layer -->
-      <div class="cloud cloud-middle cloud-2"></div>
-      <div class="cloud cloud-middle cloud-3"></div>
-      <div class="cloud cloud-middle cloud-7"></div>
-      <!-- Foreground layer -->
-      <div class="cloud cloud-foreground cloud-4"></div>
-      <div class="cloud cloud-foreground cloud-5"></div>
-      <!-- Warm/retro atmospheric layer -->
-      <div class="cloud cloud-warm warm-cloud-1"></div>
-      <div class="cloud cloud-warm warm-cloud-2"></div>
-      <div class="cloud cloud-warm warm-cloud-3"></div>
+      <div class="cloud cloud-1"></div>
+      <div class="cloud cloud-2"></div>
+      <div class="cloud cloud-3"></div>
+      <div class="cloud cloud-4"></div>
+      <div class="cloud cloud-5"></div>
     </div>
   </div>
 
@@ -92,9 +83,19 @@
         <p class="hero-copy">Crashes happen. Context disappears. CONTINUUM remembers what actually matters, so nothing gets done twice.</p>
       </div>
 
-      <div class="hero-ctas">
-        <a href="#quickstart" class="cta-primary">Get started &#8594;</a>
+    <div class="hero-ctas">
+        <a href="#quickstart" class="cta-primary">Get Started &#8594;</a>
         <a href="#simulator" class="cta-secondary">See it work</a>
+      </div>
+    </div>
+
+    <!-- Studio Time / Day-Night -->
+    <div class="studio-time" id="studioTime">
+      <div class="sun-moon" id="sunMoon"></div>
+      <div class="studio-message" id="studioMessage">
+        <span class="studio-time-text">It's <span id="studioTimeText">--:--</span> at the studio.</span>
+        <br>
+        <span id="studioSubtext">The best ideas always seem to land about now.</span>
       </div>
     </div>
 
