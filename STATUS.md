@@ -1,6 +1,8 @@
 # Project status
 
-**As of commit `d32f7a2` — 2026-08-10.**
+**As of 2026-08-12** (commit `d32f7a2` was the last tagged state; subsequent
+entries added the framework adapters, Inspector CLI verification, and CI
+Node 24 migration).
 
 A factual snapshot for whoever picks this up next, human or otherwise, with no
 memory of how any of it was found. It records what is verified, what is
@@ -10,8 +12,10 @@ believed, and what is neither.
 
 ## Verified
 
-607 tests pass. CI is green on Python 3.11, 3.12 and 3.13, plus lint
-(`ruff`) and strict type-check (`mypy`) — confirmed by run
+575 tests pass (MCP server tests excluded — they fail to load against the
+installed `mcp` SDK version; tracked separately). CI was green on Python 3.11,
+3.12 and 3.13, plus lint (`ruff`) and strict type-check (`mypy`) — confirmed
+by run
 [31355087372](https://github.com/Cyrax321/CONTINUUM/actions/runs/31355087372).
 Everything below has tests behind it; several of the safety-critical paths have
 also been checked by deliberately breaking them and confirming the suite
@@ -216,7 +220,64 @@ observation that raising `ToolError` directly is a defensible alternative to the
 | Issue | Summary | Priority |
 |:--|:--|:--|
 | [#1](https://github.com/Cyrax321/CONTINUUM/issues/1) | **MCP caller authentication.** Narrowed by `d9365c8`: authorization for mutating tools now exists and denies by default. What remains is authentication — `clientInfo` is client-asserted and unverified, so a deliberately impersonating local process is unaffected. Would need a shared secret, per-client token, or transport-level identity. | Medium |
-| [#2](https://github.com/Cyrax321/CONTINUUM/issues/2) | **CI Node deprecation.** `actions/checkout@v4`, `actions/setup-python@v5`, `codecov/codecov-action@v4` are being forced onto Node 24. Works today; hard failure once the grace period ends. `release.yml` likely has the same pins and was not checked. | Low |
+
+## The CI Node 24 migration (2026-08-12)
+
+### What the issue was
+
+GitHub-hosted actions running on Node 20 were being migrated to Node 24. Actions
+whose `action.yml` declares `using: node20` emit deprecation warnings and will
+hard-fail once GitHub ends its grace period. Three of the actions pinned in this
+project's workflows ran on Node 20:
+
+| Action | Pin | `using` |
+|:--|:--|:--|
+| `actions/checkout` | v4 | `node20` |
+| `actions/setup-python` | v5 | `node20` |
+| `codecov/codecov-action` | v4 | `node20` |
+
+`release.yml` had the same `checkout`/`setup-python` pins plus `upload-artifact`
+and `download-artifact` at v4 (also `node20`), and `softprops/action-gh-release@v2`
+(`node20`). `deploy-pages.yml` had `checkout@v4` and `deploy-pages@v4`
+(`node20`).
+
+### What closed it
+
+Each action was bumped to the latest stable major version, which publishes
+`using: node24` in its `action.yml`:
+
+| Action | Old pin | New pin |
+|:--|:--|:--|
+| `actions/checkout` | v4 | **v7.0.1** |
+| `actions/setup-python` | v5 | **v7.0.0** |
+| `codecov/codecov-action` | v4 | **v7.0.0** |
+| `actions/upload-artifact` | v4 | **v7.0.1** |
+| `actions/download-artifact` | v4 | **v8.0.1** |
+| `actions/configure-pages` | v5 | **v6.0.0** |
+| `actions/deploy-pages` | v4 | **v5.0.0** |
+| `softprops/action-gh-release` | v2 | **v3.0.2** |
+
+`actions/upload-pages-artifact@v3` was left at v3: it uses `runs: using: composite`,
+which is not subject to the Node deprecation (composite actions run as workflow
+steps, not in a Node runtime). `pypa/gh-action-pypi-publish@release/v1` was also
+left unchanged: it is a composite action.
+
+### How verified
+
+YAML syntax validated with `yaml.safe_load_all()` on all three workflow files.
+The new versions were confirmed by fetching each action's latest stable release
+tag via the GitHub API and reading its `action.yml` `runs.using` field to verify
+`node24` (or `composite` for `upload-pages-artifact`). A CI run on the updated
+workflows would be the final confirmation; this entry records the change, not a
+passed CI run.
+
+### Not done
+
+No action version was bumped to a prerelease, draft, or non-semver tag. All
+selected versions are the highest stable semver release for each action as of
+2026-08-12.
+
+---
 
 ## Not built
 

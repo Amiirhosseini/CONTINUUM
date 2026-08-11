@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **CI Node 24 migration.** Bumped all GitHub Actions workflow pins to versions
+  that run on Node 24, eliminating deprecation warnings and pre-empting the
+  hard failure when GitHub ends its Node 20 grace period. `actions/checkout`
+  v4→v7.0.1, `actions/setup-python` v5→v7.0.0, `codecov/codecov-action`
+  v4→v7.0.0, `actions/upload-artifact` v4→v7.0.1, `actions/download-artifact`
+  v4→v8.0.1, `actions/configure-pages` v5→v6.0.0, `actions/deploy-pages`
+  v4→v5.0.0, `softprops/action-gh-release` v2→v3.0.2. Applied across `ci.yml`,
+  `release.yml`, and `deploy-pages.yml`. `actions/upload-pages-artifact@v3` left at
+  v3 and `pypa/gh-action-pypi-publish@release/v1` left unchanged: both run as
+  composite actions, not on Node, so they are not affected.
+
 ### Added — Phase 8: command-line interface
 
 - `continuum` CLI covering `init`, `runs`, `inspect`, `history`, `events`, `diff`, `validate`,
