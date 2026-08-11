@@ -50,6 +50,7 @@ CONTINUUM does NOT replace the SDK's session/compaction mechanisms. It adds:
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -177,8 +178,6 @@ class OpenAIAgentAdapter(GenericAgentAdapter):
             # without calling the external system.
         """
         from agents import function_tool
-
-        import inspect
 
         def decorator(fn: Callable[..., Any]) -> Any:
             tool_name = name_override or fn.__name__
