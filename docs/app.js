@@ -8,6 +8,8 @@ document.addEventListener('DOMContentLoaded', () => {
   initArchTooltips();
   initCustomCursor();
   initFaqAccordion();
+  initScrollAnimations();
+});
   initLiveTime();
   initStudioTime();
   initRuler();
