@@ -9,7 +9,6 @@ document.addEventListener('DOMContentLoaded', () => {
   initCustomCursor();
   initFaqAccordion();
   initScrollAnimations();
-});
   initLiveTime();
   initStudioTime();
   initRuler();
@@ -786,6 +785,13 @@ document.addEventListener('DOMContentLoaded', () => {
   initScrollEffects();
 });
 
+function initScrollAnimations() {
+  initScrollEffects();
+}
+
+// ---------------------------------------------------------------------------
+// 7. Scroll effects & GSAP animations
+// ---------------------------------------------------------------------------
 function initScrollEffects() {
   // Scroll progress bar
   const progressBar = document.getElementById('scrollProgress');
