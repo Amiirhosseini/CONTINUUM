@@ -836,61 +836,124 @@ function initScrollEffects() {
   if (typeof gsap !== 'undefined' && typeof ScrollTrigger !== 'undefined') {
     gsap.registerPlugin(ScrollTrigger);
 
-    // Parallax clouds
-    gsap.utils.toArray('.cloud').forEach((cloud, i) => {
-      gsap.to(cloud, {
-        y: i % 2 === 0 ? -60 : -40,
-        ease: 'none',
-        scrollTrigger: {
-          trigger: cloud,
-          start: 'top bottom',
-          end: 'bottom top',
-          scrub: 1.5,
-        },
-      });
-    });
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-    // Section reveals
-    gsap.utils.toArray('.section, .features-section, .switch-section, .about-section, .pricing-section, .faq-section, .nothing-section, .what-we-make-section, .agent-recovery-intro, .metrics-section').forEach((section) => {
-      const children = section.querySelectorAll(':scope > *, :scope > * > *');
-      if (children.length) {
-        gsap.from(children, {
-          y: 30,
-          opacity: 0,
-          duration: 0.7,
-          stagger: 0.06,
-          ease: 'power3.out',
+    if (!prefersReducedMotion) {
+
+      // Hero entrance animation
+      const heroTl = gsap.timeline({ delay: 0.1 });
+      heroTl.from('.hero-badge', { y: 20, autoAlpha: 0, duration: 0.6, ease: 'power3.out' })
+           .from('.pixel-headline .line-1', { y: 60, autoAlpha: 0, duration: 1, ease: 'power4.out' }, '+=0.1')
+           .from('.pixel-headline .line-2', { y: 60, autoAlpha: 0, duration: 1, ease: 'power4.out' }, '+=0.15')
+           .from('.hero-tagline', { y: 20, autoAlpha: 0, duration: 0.6, ease: 'power3.out' }, '+=0.2')
+           .from('.hero-copy-box', { y: 30, autoAlpha: 0, duration: 0.7, ease: 'power3.out' }, '+=0.1')
+           .from('.hero-ctas a', { y: 20, autoAlpha: 0, duration: 0.5, stagger: 0.1, ease: 'power3.out' }, '+=0.1')
+           .from('.hero-proof', { y: 20, autoAlpha: 0, duration: 0.6, ease: 'power3.out' }, '+=0.1');
+
+      // Parallax clouds - subtle depth
+      gsap.utils.toArray('.cloud').forEach((cloud, i) => {
+        gsap.to(cloud, {
+          y: i % 2 === 0 ? -80 : -50,
+          ease: 'none',
           scrollTrigger: {
-            trigger: section,
-            start: 'top 85%',
+            trigger: cloud,
+            start: 'top bottom',
+            end: 'bottom top',
+            scrub: 2,
+          },
+        });
+      });
+
+      // Gentle cloud drift for all clouds
+      gsap.utils.toArray('[class*="cloud-"]').forEach((cloud, i) => {
+        gsap.to(cloud, {
+          x: i % 2 === 0 ? 20 : -20,
+          duration: 6 + i * 0.5,
+          repeat: -1,
+          yoyo: true,
+          ease: 'sine.inOut',
+        });
+      });
+
+      // Section reveals with stagger
+      const sections = document.querySelectorAll('.section, .features-section, .switch-section, .about-section, .pricing-section, .faq-section, .nothing-section, .what-we-make-section, .agent-recovery-intro, .metrics-section, .mcp-section');
+      sections.forEach((section) => {
+        const children = section.querySelectorAll(':scope > *:not(.clouds), :scope > * > *:not(.cloud)');
+        if (children.length) {
+          gsap.from(children, {
+            y: 40,
+            autoAlpha: 0,
+            duration: 0.8,
+            stagger: {
+              amount: 0.4,
+              from: 'start',
+              ease: 'power2.out',
+            },
+            ease: 'power3.out',
+            scrollTrigger: {
+              trigger: section,
+              start: 'top 80%',
+              end: 'top 30%',
+              toggleActions: 'play none none reverse',
+            },
+          });
+        }
+      });
+
+      // Feature cards hover effect
+      const featureCards = document.querySelectorAll('.feature-card, .feat-item');
+      featureCards.forEach(card => {
+        card.addEventListener('mouseenter', () => {
+          gsap.to(card, { y: -6, duration: 0.3, ease: 'power2.out' });
+        });
+        card.addEventListener('mouseleave', () => {
+          gsap.to(card, { y: 0, duration: 0.3, ease: 'power2.out' });
+        });
+      });
+
+      // Comparison table rows reveal
+      const tableRows = document.querySelectorAll('.comp-table tbody tr, .matrix-table tbody tr');
+      tableRows.forEach((row, i) => {
+        gsap.from(row, {
+          x: i % 2 === 0 ? -30 : 30,
+          autoAlpha: 0,
+          duration: 0.5,
+          delay: i * 0.05,
+          ease: 'power2.out',
+          scrollTrigger: {
+            trigger: row,
+            start: 'top 90%',
             toggleActions: 'play none none reverse',
           },
         });
-      }
-    });
+      });
 
-    // Hero title animation on load
-    const titleLines = document.querySelectorAll('.pixel-headline .line-1, .pixel-headline .line-2');
-    if (titleLines.length) {
-      gsap.from(titleLines, {
-        y: 50,
-        opacity: 0,
-        duration: 0.9,
-        stagger: 0.12,
-        ease: 'power4.out',
-        delay: 0.2,
+      // CTA buttons pulse
+      const ctas = document.querySelectorAll('.cta-primary, .cta-button, .footer-cta, .cta-secondary');
+      ctas.forEach(cta => {
+        cta.addEventListener('mouseenter', () => {
+          gsap.to(cta, { scale: 1.03, duration: 0.2, ease: 'power2.out' });
+        });
+        cta.addEventListener('mouseleave', () => {
+          gsap.to(cta, { scale: 1, duration: 0.2, ease: 'power2.out' });
+        });
+      });
+
+      // Smooth nav link hover
+      const navLinks = document.querySelectorAll('.nav-link');
+      navLinks.forEach(link => {
+        link.addEventListener('mouseenter', () => {
+          gsap.to(link, { y: -2, duration: 0.2, ease: 'power2.out' });
+        });
+        link.addEventListener('mouseleave', () => {
+          gsap.to(link, { y: 0, duration: 0.2, ease: 'power2.out' });
+        });
+      });
+
+      // ScrollTrigger refresh on images load
+      window.addEventListener('load', () => {
+        ScrollTrigger.refresh();
       });
     }
-
-    // Smooth cloud drift
-    gsap.utils.toArray('.cloud-a, .cloud-b, .cloud-c, .cloud-d, .cloud-e, .cloud-f, .cloud-g, .cloud-h, .cloud-i').forEach((cloud, i) => {
-      gsap.to(cloud, {
-        x: i % 2 === 0 ? 25 : -25,
-        duration: 7 + i,
-        repeat: -1,
-        yoyo: true,
-        ease: 'sine.inOut',
-      });
-    });
   }
 }
