@@ -118,11 +118,13 @@ for i, doc in enumerate(documents[state.progress.completed :], state.progress.co
 
 ### Run the proof yourself
 
-Two scripts are the primary evidence, both verified end to end rather than
+These scripts are the primary evidence, verified end to end rather than
 described:
 
 ```bash
 python examples/crash_recovery_agent.py   # real process kill, real side effect
+python examples/context_compaction.py     # transcript lost, checkpoint survives
+python examples/model_switch.py           # Model A dies, Model B resumes safely
 python scripts/mcp_smoke.py               # real subprocess, real JSON-RPC traffic
 ```
 
@@ -131,6 +133,17 @@ terminates the process with `os._exit(9)` — no cleanup, no flush — while the
 dataset it depends on changes underneath it. It restarts, detects the change,
 refuses to resume until the uncertain side effect is reconciled, and finishes
 with the work not repeated and the side effect not duplicated.
+
+`context_compaction.py` simulates a long-running agent whose context window
+fills up and is compacted — the full conversation history is discarded. The
+semantic checkpoint survives. It measures the actual compression: full
+transcript size versus the bounded recovery context, and confirms the task can
+continue correctly from the checkpoint alone.
+
+`model_switch.py` runs a task under Model A, checkpoints (including
+model-specific assumptions), then simulates Model A becoming unavailable. Model
+B attempts to resume. CONTINUUM flags the model-specific state as needing
+revalidation — it does not silently assume the switch is safe.
 
 `mcp_smoke.py` drives the MCP server as a subprocess over stdio and prints every
 JSON-RPC frame as it crosses the wire. It asserts, rather than reports, that the
