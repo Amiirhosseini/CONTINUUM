@@ -177,6 +177,7 @@ class OpenAIAgentAdapter(GenericAgentAdapter):
             # without calling the external system.
         """
         from agents import function_tool
+
         import inspect
 
         def decorator(fn: Callable[..., Any]) -> Any:
