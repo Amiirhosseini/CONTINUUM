@@ -197,7 +197,9 @@ class OpenAIAgentAdapter(GenericAgentAdapter):
                 inspect.Parameter(
                     p.name,
                     inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                    annotation=p.annotation if p.annotation is not inspect.Parameter.empty else inspect.Parameter.empty,
+                    annotation=p.annotation
+                    if p.annotation is not inspect.Parameter.empty
+                    else inspect.Parameter.empty,
                     default=p.default,
                 )
                 for p in tool_params
@@ -209,8 +211,8 @@ class OpenAIAgentAdapter(GenericAgentAdapter):
                 param_str = ", ".join(param_names)
 
                 code = f"""
-def wrapped_tool(ctx: ToolContext, {', '.join(f'{p.name}: Any = None' for p in params)}):
-    arguments = {{{', '.join(f'"{p.name}": {p.name}' for p in params)}}}
+def wrapped_tool(ctx: ToolContext, {", ".join(f"{p.name}: Any = None" for p in params)}):
+    arguments = {{{", ".join(f'"{p.name}": {p.name}' for p in params)}}}
     run_id = _extract_run_id_from_tool_context(ctx)
     if run_id is None:
         return _call_original(ctx, {param_str})
@@ -349,7 +351,7 @@ def wrapped_tool(ctx: ToolContext, {', '.join(f'{p.name}: Any = None' for p in p
         existing = self.storage.get_run(run_id)
         if existing is not None:
             return
-        goal = getattr(agent, 'name', 'OpenAI agent task')
+        goal = getattr(agent, "name", "OpenAI agent task")
         run = Run(run_id=run_id, goal=goal, status=RunStatus.STARTED)
         self.storage.create_run(run)
 
@@ -374,7 +376,7 @@ def wrapped_tool(ctx: ToolContext, {', '.join(f'{p.name}: Any = None' for p in p
         """Build SemanticState from agent runtime state."""
         from continuum.models import Goal, Progress
 
-        goal_desc = getattr(agent, 'name', 'OpenAI agent task')
+        goal_desc = getattr(agent, "name", "OpenAI agent task")
         ctx = _extract_continuum_context(context)
         if ctx and ctx.goal:
             goal_desc = ctx.goal
@@ -404,7 +406,7 @@ def _extract_continuum_context(wrapper: Any) -> ContinuumContext | None:
     """Extract ContinuumContext from a RunContextWrapper."""
     if isinstance(wrapper, ContinuumContext):
         return wrapper
-    if hasattr(wrapper, 'context'):
+    if hasattr(wrapper, "context"):
         inner = wrapper.context
         if isinstance(inner, ContinuumContext):
             return inner
@@ -419,7 +421,7 @@ def _extract_run_id_from_tool_context(ctx: Any) -> str | None:
     if ctx is None:
         return None
     # Check tool_input for a dict with continuum_run_id
-    tool_input = getattr(ctx, 'tool_input', None)
+    tool_input = getattr(ctx, "tool_input", None)
     if isinstance(tool_input, dict):
         run_id = tool_input.get("continuum_run_id")
         if run_id:

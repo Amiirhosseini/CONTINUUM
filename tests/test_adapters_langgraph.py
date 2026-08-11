@@ -152,6 +152,7 @@ class TestWithMockedLangGraph:
         original = lg.langgraph_available
         lg.langgraph_available = True
         try:
+
             def custom_extract(state: dict[str, Any]) -> SemanticState:
                 return SemanticState(
                     run_id=state["rid"],
@@ -159,9 +160,7 @@ class TestWithMockedLangGraph:
                     progress=Progress(completed=99),
                 )
 
-            adapter = lg.LangGraphAgentAdapter(
-                store, state_to_semantic=custom_extract
-            )
+            adapter = lg.LangGraphAgentAdapter(store, state_to_semantic=custom_extract)
             semantic = adapter.extract_semantic_state({"rid": "custom_1"})
             assert semantic.run_id == "custom_1"
             assert semantic.progress.completed == 99

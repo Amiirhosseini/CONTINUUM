@@ -215,6 +215,7 @@ class TestWithMockedOpenAIAgents:
         original = oa.openai_agents_available
         oa.openai_agents_available = True
         try:
+
             def custom_extract(ctx: oa.ContinuumContext) -> SemanticState:
                 return SemanticState(
                     run_id=ctx.continuum_run_id,
