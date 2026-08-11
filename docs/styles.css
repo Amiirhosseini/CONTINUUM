@@ -57,29 +57,32 @@ body { background: var(--bg); color: var(--text); font-family: 'Inter', system-u
 
 /* Cloud A — Upper Left: x:245-465, y:135-260 */
 .cloud-1 {
-  width: 270px;
-  height: 115px;
-  left: 14%;
+  width: 340px;
+  height: 140px;
+  left: 12%;
   top: 14%;
   animation: cloudDriftA 90s linear infinite;
+  opacity: 0.9;
 }
 
 /* Cloud B — Upper Right: x:1290-1535, y:105-270 (partially clipped) */
 .cloud-2 {
-  width: 300px;
-  height: 125px;
-  right: -3%;
+  width: 380px;
+  height: 150px;
+  right: -5%;
   top: 11%;
   animation: cloudDriftB 75s linear infinite;
+  opacity: 0.85;
 }
 
 /* Cloud C — Mid Right: x:1420-1535, y:295-375 (partially clipped) */
 .cloud-3 {
-  width: 190px;
-  height: 80px;
-  right: -2%;
-  top: 31%;
+  width: 280px;
+  height: 110px;
+  right: -3%;
+  top: 33%;
   animation: cloudDriftC 110s linear infinite;
+  opacity: 0.8;
 }
 
 /* Cloud D — Lower Left/Mid: x:235-435, y:630-720 */
@@ -129,62 +132,62 @@ body { background: var(--bg); color: var(--text); font-family: 'Inter', system-u
 
 /* Cloud G: small, far upper left */
 .cloud-g {
-  width: 150px;
-  height: 60px;
-  left: 5%;
-  top: 5%;
+  width: 280px;
+  height: 110px;
+  left: 3%;
+  top: 6%;
   animation: cloudDriftG 95s linear infinite;
-  opacity: 0.7;
+  opacity: 0.85;
 }
 
 /* Cloud H: medium, center top */
 .cloud-h {
-  width: 230px;
-  height: 90px;
-  left: 55%;
-  top: 8%;
+  width: 350px;
+  height: 140px;
+  left: 50%;
+  top: 10%;
   animation: cloudDriftH 80s linear infinite;
-  opacity: 0.6;
+  opacity: 0.8;
 }
 
 /* Cloud I: small, right edge */
 .cloud-i {
-  width: 160px;
-  height: 65px;
-  right: 15%;
-  top: 25%;
+  width: 300px;
+  height: 120px;
+  right: 10%;
+  top: 28%;
   animation: cloudDriftI 110s linear infinite;
-  opacity: 0.5;
+  opacity: 0.75;
 }
 
 /* Cloud J: medium, lower center */
 .cloud-j {
-  width: 240px;
-  height: 95px;
-  left: 40%;
-  top: 50%;
+  width: 380px;
+  height: 150px;
+  left: 35%;
+  top: 55%;
   animation: cloudDriftJ 70s linear infinite;
-  opacity: 0.55;
+  opacity: 0.8;
 }
 
 /* Cloud K: small, far right */
 .cloud-k {
-  width: 140px;
-  height: 55px;
-  right: 5%;
-  top: 40%;
+  width: 320px;
+  height: 130px;
+  right: 3%;
+  top: 45%;
   animation: cloudDriftK 100s linear infinite;
-  opacity: 0.45;
+  opacity: 0.75;
 }
 
 /* Cloud L: tiny, scattered */
 .cloud-l {
-  width: 100px;
-  height: 40px;
-  left: 70%;
-  top: 70%;
+  width: 260px;
+  height: 100px;
+  left: 65%;
+  top: 72%;
   animation: cloudDriftL 85s linear infinite;
-  opacity: 0.4;
+  opacity: 0.7;
 }
 
 @keyframes cloudDriftG {
