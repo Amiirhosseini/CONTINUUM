@@ -2,14 +2,8 @@
   <img src="docs/assets/readme-img.png" alt="CONTINUUM Banner" width="100%" />
 </p>
 
-<h1 align="center">CONTINUUM</h1>
-
 <p align="center">
-  <strong>Agents that can lose their context without losing their work.</strong>
-</p>
-
-<p align="center">
-  A lightweight, framework-agnostic semantic recovery layer for long-running AI agents.
+  <strong>A lightweight, framework-agnostic semantic recovery layer for long-running AI agents.</strong>
 </p>
 
 <p align="center">
