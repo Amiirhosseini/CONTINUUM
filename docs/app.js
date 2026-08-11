@@ -820,16 +820,77 @@ function initScrollEffects() {
 
   // Scroll reveal animations
   const reveals = document.querySelectorAll('.reveal');
-  if (!reveals.length) return;
+  if (reveals.length) {
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+          observer.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+    reveals.forEach(el => observer.observe(el));
+  }
 
-  const observer = new IntersectionObserver((entries) => {
-    entries.forEach(entry => {
-      if (entry.isIntersecting) {
-        entry.target.classList.add('visible');
-        observer.unobserve(entry.target);
+  // GSAP ScrollTrigger animations
+  if (typeof gsap !== 'undefined' && typeof ScrollTrigger !== 'undefined') {
+    gsap.registerPlugin(ScrollTrigger);
+
+    // Parallax clouds
+    gsap.utils.toArray('.cloud').forEach((cloud, i) => {
+      gsap.to(cloud, {
+        y: i % 2 === 0 ? -60 : -40,
+        ease: 'none',
+        scrollTrigger: {
+          trigger: cloud,
+          start: 'top bottom',
+          end: 'bottom top',
+          scrub: 1.5,
+        },
+      });
+    });
+
+    // Section reveals
+    gsap.utils.toArray('.section, .features-section, .switch-section, .about-section, .pricing-section, .faq-section, .nothing-section, .what-we-make-section, .agent-recovery-intro, .metrics-section').forEach((section) => {
+      const children = section.querySelectorAll(':scope > *, :scope > * > *');
+      if (children.length) {
+        gsap.from(children, {
+          y: 30,
+          opacity: 0,
+          duration: 0.7,
+          stagger: 0.06,
+          ease: 'power3.out',
+          scrollTrigger: {
+            trigger: section,
+            start: 'top 85%',
+            toggleActions: 'play none none reverse',
+          },
+        });
       }
     });
-  }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
 
-  reveals.forEach(el => observer.observe(el));
+    // Hero title animation on load
+    const titleLines = document.querySelectorAll('.pixel-headline .line-1, .pixel-headline .line-2');
+    if (titleLines.length) {
+      gsap.from(titleLines, {
+        y: 50,
+        opacity: 0,
+        duration: 0.9,
+        stagger: 0.12,
+        ease: 'power4.out',
+        delay: 0.2,
+      });
+    }
+
+    // Smooth cloud drift
+    gsap.utils.toArray('.cloud-a, .cloud-b, .cloud-c, .cloud-d, .cloud-e, .cloud-f, .cloud-g, .cloud-h, .cloud-i').forEach((cloud, i) => {
+      gsap.to(cloud, {
+        x: i % 2 === 0 ? 25 : -25,
+        duration: 7 + i,
+        repeat: -1,
+        yoyo: true,
+        ease: 'sine.inOut',
+      });
+    });
+  }
 }
