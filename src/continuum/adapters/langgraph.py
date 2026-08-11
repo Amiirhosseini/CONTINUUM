@@ -176,11 +176,7 @@ class LangGraphAgentAdapter(GenericAgentAdapter):
                 if run_id is None:
                     return fn(*args, **kwargs)
 
-                arguments = (
-                    arguments_fn(*args, **kwargs)
-                    if arguments_fn is not None
-                    else dict(kwargs)
-                )
+                arguments = arguments_fn(*args, **kwargs) if arguments_fn is not None else dict(kwargs)
 
                 return self.intercept_action(
                     run_id,
