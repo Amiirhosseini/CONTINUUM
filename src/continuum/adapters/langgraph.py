@@ -44,7 +44,7 @@ purposes:
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol, cast, runtime_checkable
 
 from continuum.adapters.generic import GenericAgentAdapter
 from continuum.models import (
@@ -298,11 +298,11 @@ def _extract_run_id(args: tuple[Any, ...], kwargs: dict[str, Any]) -> str | None
     with the key.
     """
     if "continuum_run_id" in kwargs:
-        return kwargs["continuum_run_id"]
+        return cast(str, kwargs["continuum_run_id"])
     if "run_id" in kwargs:
-        return kwargs["run_id"]
+        return cast(str, kwargs["run_id"])
     if args and isinstance(args[0], dict):
         run_id = args[0].get("continuum_run_id")
         if run_id:
-            return run_id
+            return cast(str, run_id)
     return None

@@ -53,7 +53,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from continuum.adapters.generic import GenericAgentAdapter
 from continuum.models import (
@@ -236,7 +236,7 @@ def wrapped_tool(ctx: ToolContext, {", ".join(f"{p.name}: Any = None" for p in p
                     "Any": Any,
                 }
                 exec(code, namespace)
-                return namespace["wrapped_tool"]
+                return cast(Callable[..., Any], namespace["wrapped_tool"])
 
             wrapped_fn = make_wrapper(tool_params)
             wrapped_fn.__signature__ = dynamic_sig  # type: ignore[attr-defined]
@@ -425,6 +425,6 @@ def _extract_run_id_from_tool_context(ctx: Any) -> str | None:
     if isinstance(tool_input, dict):
         run_id = tool_input.get("continuum_run_id")
         if run_id:
-            return run_id
+            return cast(str, run_id)
     # Fall back to agent context
     return _extract_run_id(ctx)
