@@ -8,8 +8,6 @@ document.addEventListener('DOMContentLoaded', () => {
   initArchTooltips();
   initCustomCursor();
   initFaqAccordion();
-  initScrollAnimations();
-});
   initLiveTime();
   initStudioTime();
   initRuler();
@@ -22,10 +20,10 @@ function initCustomCursor() {
   const cursor = document.createElement('div');
   cursor.className = 'custom-cursor';
   cursor.innerHTML = `
-    <svg class="cursor-arrow" width="20" height="24" viewBox="0 0 20 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M3 3L18 16L10 15L7 22L3 3Z" fill="white" stroke="black" stroke-width="1.5" stroke-linejoin="round"/>
+    <svg class="cursor-arrow" width="12" height="16" viewBox="0 0 12 16" fill="none">
+      <path d="M2 2L12 11L7 11L5 16L2 2Z" fill="white" stroke="#071827" stroke-width="1"/>
     </svg>
-    <div class="cursor-label">click</div>
+    <div class="cursor-label">You</div>
   `;
   document.body.appendChild(cursor);
 
@@ -33,45 +31,31 @@ function initCustomCursor() {
   let mouseY = window.innerHeight / 2;
   let cursorX = mouseX;
   let cursorY = mouseY;
-  let isVisible = false;
 
   document.addEventListener('pointermove', (e) => {
     mouseX = e.clientX;
     mouseY = e.clientY;
-    if (!isVisible) {
-      cursor.style.opacity = '1';
-      isVisible = true;
-    }
-  });
-
-  document.addEventListener('pointerenter', () => {
-    cursor.style.opacity = '1';
-    isVisible = true;
-  });
-
-  document.addEventListener('pointerleave', () => {
-    cursor.style.opacity = '0';
-    isVisible = false;
   });
 
   document.addEventListener('pointerover', (e) => {
-    const target = e.target.closest('a, button, [role="button"], .faq-item, .clickable, .sim-nav-btn, .code-tab-btn, .theme-toggle, .nav-link');
+    const target = e.target.closest('a, button, [role="button"], .faq-item, .clickable');
     if (target) {
       cursor.classList.add('clickable');
+      cursor.querySelector('.cursor-label').textContent = 'click';
     } else {
       cursor.classList.remove('clickable');
+      cursor.querySelector('.cursor-label').textContent = 'You';
     }
   });
 
   function animate() {
-    cursorX += (mouseX - cursorX) * 0.15;
-    cursorY += (mouseY - cursorY) * 0.15;
-    cursor.style.transform = 'translate3d(' + cursorX + 'px, ' + cursorY + 'px, 0)';
+    cursorX += (mouseX - cursorX) * 0.12;
+    cursorY += (mouseY - cursorY) * 0.12;
+    cursor.style.transform = `translate3d(${cursorX}px, ${cursorY}px, 0)`;
     requestAnimationFrame(animate);
   }
 
   requestAnimationFrame(animate);
-}
 }
 
 // ---------------------------------------------------------------------------
@@ -834,140 +818,16 @@ function initScrollEffects() {
 
   // Scroll reveal animations
   const reveals = document.querySelectorAll('.reveal');
-  if (reveals.length) {
-    const observer = new IntersectionObserver((entries) => {
-      entries.forEach(entry => {
-        if (entry.isIntersecting) {
-          entry.target.classList.add('visible');
-          observer.unobserve(entry.target);
-        }
-      });
-    }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
-    reveals.forEach(el => observer.observe(el));
-  }
+  if (!reveals.length) return;
 
-  // GSAP ScrollTrigger animations
-  if (typeof gsap !== 'undefined' && typeof ScrollTrigger !== 'undefined') {
-    gsap.registerPlugin(ScrollTrigger);
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
 
-    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-    if (!prefersReducedMotion) {
-
-      // Hero entrance animation
-      const heroTl = gsap.timeline({ delay: 0.1 });
-      heroTl.from('.hero-badge', { y: 20, autoAlpha: 0, duration: 0.6, ease: 'power3.out' })
-           .from('.pixel-headline .line-1', { y: 60, autoAlpha: 0, duration: 1, ease: 'power4.out' }, '+=0.1')
-           .from('.pixel-headline .line-2', { y: 60, autoAlpha: 0, duration: 1, ease: 'power4.out' }, '+=0.15')
-           .from('.hero-tagline', { y: 20, autoAlpha: 0, duration: 0.6, ease: 'power3.out' }, '+=0.2')
-           .from('.hero-copy-box', { y: 30, autoAlpha: 0, duration: 0.7, ease: 'power3.out' }, '+=0.1')
-           .from('.hero-ctas a', { y: 20, autoAlpha: 0, duration: 0.5, stagger: 0.1, ease: 'power3.out' }, '+=0.1')
-           .from('.hero-proof', { y: 20, autoAlpha: 0, duration: 0.6, ease: 'power3.out' }, '+=0.1');
-
-      // Parallax clouds - subtle depth
-      gsap.utils.toArray('.cloud').forEach((cloud, i) => {
-        gsap.to(cloud, {
-          y: i % 2 === 0 ? -80 : -50,
-          ease: 'none',
-          scrollTrigger: {
-            trigger: cloud,
-            start: 'top bottom',
-            end: 'bottom top',
-            scrub: 2,
-          },
-        });
-      });
-
-      // Gentle cloud drift for all clouds
-      gsap.utils.toArray('[class*="cloud-"]').forEach((cloud, i) => {
-        gsap.to(cloud, {
-          x: i % 2 === 0 ? 20 : -20,
-          duration: 6 + i * 0.5,
-          repeat: -1,
-          yoyo: true,
-          ease: 'sine.inOut',
-        });
-      });
-
-      // Section reveals with stagger
-      const sections = document.querySelectorAll('.section, .features-section, .switch-section, .about-section, .pricing-section, .faq-section, .nothing-section, .what-we-make-section, .agent-recovery-intro, .metrics-section, .mcp-section');
-      sections.forEach((section) => {
-        const children = section.querySelectorAll(':scope > *:not(.clouds), :scope > * > *:not(.cloud)');
-        if (children.length) {
-          gsap.from(children, {
-            y: 40,
-            autoAlpha: 0,
-            duration: 0.8,
-            stagger: {
-              amount: 0.4,
-              from: 'start',
-              ease: 'power2.out',
-            },
-            ease: 'power3.out',
-            scrollTrigger: {
-              trigger: section,
-              start: 'top 80%',
-              end: 'top 30%',
-              toggleActions: 'play none none reverse',
-            },
-          });
-        }
-      });
-
-      // Feature cards hover effect
-      const featureCards = document.querySelectorAll('.feature-card, .feat-item');
-      featureCards.forEach(card => {
-        card.addEventListener('mouseenter', () => {
-          gsap.to(card, { y: -6, duration: 0.3, ease: 'power2.out' });
-        });
-        card.addEventListener('mouseleave', () => {
-          gsap.to(card, { y: 0, duration: 0.3, ease: 'power2.out' });
-        });
-      });
-
-      // Comparison table rows reveal
-      const tableRows = document.querySelectorAll('.comp-table tbody tr, .matrix-table tbody tr');
-      tableRows.forEach((row, i) => {
-        gsap.from(row, {
-          x: i % 2 === 0 ? -30 : 30,
-          autoAlpha: 0,
-          duration: 0.5,
-          delay: i * 0.05,
-          ease: 'power2.out',
-          scrollTrigger: {
-            trigger: row,
-            start: 'top 90%',
-            toggleActions: 'play none none reverse',
-          },
-        });
-      });
-
-      // CTA buttons pulse
-      const ctas = document.querySelectorAll('.cta-primary, .cta-button, .footer-cta, .cta-secondary');
-      ctas.forEach(cta => {
-        cta.addEventListener('mouseenter', () => {
-          gsap.to(cta, { scale: 1.03, duration: 0.2, ease: 'power2.out' });
-        });
-        cta.addEventListener('mouseleave', () => {
-          gsap.to(cta, { scale: 1, duration: 0.2, ease: 'power2.out' });
-        });
-      });
-
-      // Smooth nav link hover
-      const navLinks = document.querySelectorAll('.nav-link');
-      navLinks.forEach(link => {
-        link.addEventListener('mouseenter', () => {
-          gsap.to(link, { y: -2, duration: 0.2, ease: 'power2.out' });
-        });
-        link.addEventListener('mouseleave', () => {
-          gsap.to(link, { y: 0, duration: 0.2, ease: 'power2.out' });
-        });
-      });
-
-      // ScrollTrigger refresh on images load
-      window.addEventListener('load', () => {
-        ScrollTrigger.refresh();
-      });
-    }
-  }
+  reveals.forEach(el => observer.observe(el));
 }
