@@ -29,80 +29,81 @@ body { background: var(--bg); color: var(--text); font-family: 'Inter', system-u
 
 .cloud {
   position: absolute;
-  filter: blur(18px);
-  opacity: 0.55;
+  filter: blur(22px);
+  opacity: 0.5;
 }
 
 .cloud svg {
   width: 100%;
   height: 100%;
   display: block;
+  overflow: visible;
 }
 
-/* Cloud A — Upper Left */
+/* Cloud A — Upper Left: x:245-465, y:135-260 */
 .cloud-1 {
-  width: 280px;
-  height: 120px;
-  left: 15%;
+  width: 270px;
+  height: 115px;
+  left: 14%;
   top: 14%;
   animation: cloudDrift1 82s linear infinite;
 }
 
-/* Cloud B — Upper Right (partially clipped) */
+/* Cloud B — Upper Right: x:1290-1535, y:105-270 (partially clipped) */
 .cloud-2 {
-  width: 320px;
-  height: 130px;
-  right: -2%;
+  width: 300px;
+  height: 125px;
+  right: -3%;
   top: 11%;
   animation: cloudDrift2 96s linear infinite;
 }
 
-/* Cloud C — Mid Right (partially clipped) */
+/* Cloud C — Mid Right: x:1420-1535, y:295-375 (partially clipped) */
 .cloud-3 {
-  width: 200px;
-  height: 85px;
-  right: -1%;
+  width: 190px;
+  height: 80px;
+  right: -2%;
   top: 31%;
   animation: cloudDrift3 71s linear infinite;
 }
 
-/* Cloud D — Lower Left/Mid */
+/* Cloud D — Lower Left/Mid: x:235-435, y:630-720 */
 .cloud-4 {
-  width: 240px;
-  height: 100px;
-  left: 15%;
-  bottom: 22%;
+  width: 250px;
+  height: 105px;
+  left: 14%;
+  top: 66%;
   animation: cloudDrift4 105s linear infinite;
 }
 
-/* Cloud E — Lower Left */
+/* Cloud E — Lower Left: x:150-420, y:760-860 */
 .cloud-5 {
-  width: 260px;
-  height: 110px;
+  width: 280px;
+  height: 115px;
   left: 8%;
-  bottom: 12%;
+  top: 80%;
   animation: cloudDrift5 88s linear infinite;
 }
 
 @keyframes cloudDrift1 {
-  0% { transform: translateX(-20vw); }
-  100% { transform: translateX(120vw); }
+  0% { transform: translateX(-25vw); }
+  100% { transform: translateX(125vw); }
 }
 @keyframes cloudDrift2 {
-  0% { transform: translateX(5vw); }
-  100% { transform: translateX(-110vw); }
+  0% { transform: translateX(8vw); }
+  100% { transform: translateX(-115vw); }
 }
 @keyframes cloudDrift3 {
-  0% { transform: translateX(0vw); }
-  100% { transform: translateX(-105vw); }
+  0% { transform: translateX(2vw); }
+  100% { transform: translateX(-108vw); }
 }
 @keyframes cloudDrift4 {
-  0% { transform: translateX(-18vw); }
-  100% { transform: translateX(118vw); }
+  0% { transform: translateX(-22vw); }
+  100% { transform: translateX(122vw); }
 }
 @keyframes cloudDrift5 {
-  0% { transform: translateX(-15vw); }
-  100% { transform: translateX(115vw); }
+  0% { transform: translateX(-18vw); }
+  100% { transform: translateX(118vw); }
 }
 
 .container { max-width: 1280px; margin: 0 auto; padding: 0 32px; }
