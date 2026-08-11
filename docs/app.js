@@ -9,6 +9,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initCustomCursor();
   initFaqAccordion();
   initScrollAnimations();
+});
   initLiveTime();
   initStudioTime();
   initRuler();
@@ -21,10 +22,10 @@ function initCustomCursor() {
   const cursor = document.createElement('div');
   cursor.className = 'custom-cursor';
   cursor.innerHTML = `
-    <svg class="cursor-arrow" width="12" height="16" viewBox="0 0 12 16" fill="none">
-      <path d="M2 2L12 11L7 11L5 16L2 2Z" fill="white" stroke="#071827" stroke-width="1"/>
+    <svg class="cursor-arrow" width="20" height="24" viewBox="0 0 20 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M3 3L18 16L10 15L7 22L3 3Z" fill="white" stroke="black" stroke-width="1.5" stroke-linejoin="round"/>
     </svg>
-    <div class="cursor-label">You</div>
+    <div class="cursor-label">click</div>
   `;
   document.body.appendChild(cursor);
 
@@ -32,31 +33,45 @@ function initCustomCursor() {
   let mouseY = window.innerHeight / 2;
   let cursorX = mouseX;
   let cursorY = mouseY;
+  let isVisible = false;
 
   document.addEventListener('pointermove', (e) => {
     mouseX = e.clientX;
     mouseY = e.clientY;
+    if (!isVisible) {
+      cursor.style.opacity = '1';
+      isVisible = true;
+    }
+  });
+
+  document.addEventListener('pointerenter', () => {
+    cursor.style.opacity = '1';
+    isVisible = true;
+  });
+
+  document.addEventListener('pointerleave', () => {
+    cursor.style.opacity = '0';
+    isVisible = false;
   });
 
   document.addEventListener('pointerover', (e) => {
-    const target = e.target.closest('a, button, [role="button"], .faq-item, .clickable');
+    const target = e.target.closest('a, button, [role="button"], .faq-item, .clickable, .sim-nav-btn, .code-tab-btn, .theme-toggle, .nav-link');
     if (target) {
       cursor.classList.add('clickable');
-      cursor.querySelector('.cursor-label').textContent = 'click';
     } else {
       cursor.classList.remove('clickable');
-      cursor.querySelector('.cursor-label').textContent = 'You';
     }
   });
 
   function animate() {
-    cursorX += (mouseX - cursorX) * 0.12;
-    cursorY += (mouseY - cursorY) * 0.12;
-    cursor.style.transform = `translate3d(${cursorX}px, ${cursorY}px, 0)`;
+    cursorX += (mouseX - cursorX) * 0.15;
+    cursorY += (mouseY - cursorY) * 0.15;
+    cursor.style.transform = 'translate3d(' + cursorX + 'px, ' + cursorY + 'px, 0)';
     requestAnimationFrame(animate);
   }
 
   requestAnimationFrame(animate);
+}
 }
 
 // ---------------------------------------------------------------------------
@@ -785,13 +800,6 @@ document.addEventListener('DOMContentLoaded', () => {
   initScrollEffects();
 });
 
-function initScrollAnimations() {
-  initScrollEffects();
-}
-
-// ---------------------------------------------------------------------------
-// 7. Scroll effects & GSAP animations
-// ---------------------------------------------------------------------------
 function initScrollEffects() {
   // Scroll progress bar
   const progressBar = document.getElementById('scrollProgress');
