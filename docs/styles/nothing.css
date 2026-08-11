@@ -1,0 +1,94 @@
+/* ============================================
+   NOTHING BUTTON SECTION
+   ============================================ */
+
+.nothing-section {
+  position: relative;
+  padding: 120px 40px 140px;
+  text-align: center;
+  background: transparent;
+  overflow: hidden;
+  z-index: 1;
+}
+
+.nothing-glow {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 600px;
+  height: 400px;
+  background: radial-gradient(ellipse, rgba(255,255,255,0.35), transparent 70%);
+  filter: blur(60px);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.nothing-container {
+  position: relative;
+  z-index: 1;
+  max-width: 1000px;
+  margin: 0 auto;
+}
+
+.nothing-eyebra {
+  font-family: var(--script);
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 28px;
+}
+
+.nothing-headline {
+  font-size: clamp(48px, 7vw, 88px);
+  font-weight: 900;
+  color: var(--text);
+  letter-spacing: -0.04em;
+  line-height: 0.95;
+  margin-bottom: 24px;
+}
+
+.nothing-headline span {
+  display: block;
+}
+
+.nothing-headline .orange {
+  color: var(--accent);
+}
+
+.nothing-text {
+  font-size: 18px;
+  color: var(--text-secondary);
+  margin-bottom: 36px;
+}
+
+.nothing-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  padding: 16px 32px;
+  border-radius: 12px;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 8px 32px rgba(255, 80, 23, 0.3);
+  transition: all 0.2s;
+}
+
+.nothing-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 40px rgba(255, 80, 23, 0.4);
+}
+
+.btn-cursor {
+  flex-shrink: 0;
+}
+
+@media (max-width: 768px) {
+  .nothing-section { padding: 80px 20px 100px; }
+  .nothing-headline { font-size: 42px; }
+  .nothing-text { font-size: 16px; }
+}
