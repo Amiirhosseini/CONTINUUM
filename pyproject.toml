@@ -38,6 +38,10 @@ dev = [
     "ruff>=0.9",
     "mypy>=1.13",
     "mcp>=2.0",
+    # The adapter packages are optional runtime dependencies (see [project.optional-dependencies])
+    # but installed in dev so mypy can type-check the adapter modules in CI.
+    "langgraph>=0.2",
+    "openai-agents>=0.2",
 ]
 # The MCP server is optional: the core library and CLI never import it, so
 # installing CONTINUUM does not pull in a server stack you may not want.
