@@ -156,42 +156,59 @@ body { background: var(--bg); color: var(--text); font-family: 'Inter', system-u
   75% { transform: translate(-18px, 12px); }
 }
 
-/* Cloud B — Upper Right: x:1290-1535, y:105-270 (partially clipped) */
-.cloud-2 {
+/* Cloud B — Upper Right */
+.cloud-b {
   width: 380px;
   height: 150px;
   right: -5%;
   top: 11%;
-  animation: cloudDriftB 75s linear infinite;
+  animation: cloudFloatB 7s ease-in-out infinite;
   opacity: 0.85;
+  filter: brightness(1.1);
 }
 
-/* Cloud C — Mid Right: x:1420-1535, y:295-375 (partially clipped) */
-.cloud-3 {
+/* Cloud C — Mid Right */
+.cloud-c {
   width: 280px;
   height: 110px;
   right: -3%;
   top: 33%;
-  animation: cloudDriftC 110s linear infinite;
+  animation: cloudFloatC 8s ease-in-out infinite 1s;
   opacity: 0.8;
+  filter: brightness(1.1);
 }
 
-/* Cloud D — Lower Left/Mid: x:235-435, y:630-720 */
-.cloud-4 {
+/* Cloud D — Lower Left/Mid */
+.cloud-d {
   width: 250px;
   height: 105px;
   left: 14%;
   top: 66%;
-  animation: cloudDriftD 65s linear infinite;
+  animation: cloudFloatD 6.5s ease-in-out infinite 0.5s;
+  opacity: 0.85;
+  filter: brightness(1.1);
 }
 
-/* Cloud E — Lower Left: x:150-420, y:760-860 */
-.cloud-5 {
+/* Cloud E — Lower Left */
+.cloud-e {
   width: 280px;
   height: 115px;
   left: 8%;
   top: 80%;
-  animation: cloudDriftE 95s linear infinite;
+  animation: cloudFloatE 9s ease-in-out infinite 1.5s;
+  opacity: 0.8;
+  filter: brightness(1.1);
+}
+
+/* Cloud F — Upper Left back */
+.cloud-f {
+  width: 300px;
+  height: 120px;
+  left: 25%;
+  top: 3%;
+  animation: cloudFloatF 10s ease-in-out infinite 2s;
+  opacity: 0.75;
+  filter: brightness(1.1);
 }
 
 @keyframes cloudDriftA {
