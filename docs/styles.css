@@ -61,8 +61,8 @@ body { background: var(--bg); color: var(--text); font-family: 'Inter', system-u
   height: 140px;
   left: 12%;
   top: 18%;
-  animation: cloudFloatA 6s ease-in-out infinite, cloudDriftA 90s linear infinite;
-  filter: brightness(1.1);
+  animation: cloudFloatA 6s ease-in-out infinite;
+  filter: brightness(1.15);
 }
 
 /* Cloud A copies with different sizes, positions and opacities */
@@ -118,9 +118,10 @@ body { background: var(--bg); color: var(--text); font-family: 'Inter', system-u
 
 @keyframes cloudFloatA {
   0%, 100% { transform: translate(0, 0); }
-  25% { transform: translate(12px, -10px); }
-  50% { transform: translate(20px, 0); }
-  75% { transform: translate(12px, 10px); }
+  20% { transform: translate(10px, -12px); }
+  40% { transform: translate(18px, -6px); }
+  60% { transform: translate(12px, 8px); }
+  80% { transform: translate(4px, 14px); }
 }
 
 @keyframes cloudFloatB {
