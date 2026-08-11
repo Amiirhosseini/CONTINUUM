@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/continuum-mark.png" alt="CONTINUUM Logo" width="160" />
+  <img src="docs/assets/readme-img.png" alt="CONTINUUM Banner" width="100%" />
 </p>
 
 <h1 align="center">CONTINUUM</h1>
