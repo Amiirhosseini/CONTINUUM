@@ -259,6 +259,190 @@ by the v2 migration. The Gemini session transcript persists under
 
 ---
 
+## MCP Inspector CLI verification (2026-08-12)
+
+The MCP server was tested end-to-end using `@modelcontextprotocol/inspector`
+v2.1.0 in `--cli` mode, which drives the real stdio protocol boundary — the
+inspector spawns the server as a subprocess, performs the initialize handshake
+over JSON-RPC 2.0 over stdio, and pipes tool calls through the transport. This
+is **not** an in-process pytest call.
+
+```
+npx @modelcontextprotocol/inspector --cli --config mcp-config.json \
+  --server continuum --method tools/list --format json
+```
+
+All 9 tools were returned (`tools/list`): `continuum_record_progress`,
+`continuum_checkpoint`, `continuum_validate`, `continuum_resume`,
+`continuum_intercept_action`, `continuum_complete_action`,
+`continuum_fail_action`, `continuum_reconcile_action`,
+`continuum_list_actions`. The read-only/mutating annotation split was as
+declared (3 read-only, 6 mutating).
+
+Test database: `.continuum/inspector-test.db`, separate from any prior history,
+created fresh and deleted afterward. Authorization was granted via config-file
+env (`CONTINUUM_MCP_MUTATING_CLIENTS=inspector-cli`); the caller name observed
+in the handshake was `inspector-cli`, injected by the transport server-side.
+
+Each sequence below used a new inspector invocation per call — the server
+process was killed between calls (the inspector spawns a fresh subprocess per
+`--method` invocation). Crashes are therefore real process deaths, not simulated
+exceptions.
+
+### Sequence A — clean crash, MCP-written state
+
+```
+record_progress(run_id='run_a_001', completed=50, total=200)
+record_progress(run_id='run_a_001', completed=100, total=200)
+checkpoint(run_id='run_a_001')
+                        ← server process ends here
+resume(run_id='run_a_001')   ← new server process, same db
+```
+
+Result (`continuum_resume` JSON):
+
+```json
+{
+  "mode": "request_human",
+  "safe": false,
+  "next_allowed_action": "human_review:goal",
+  "rationale": ["at least one repair needs a person"],
+  "repairs": [
+    {"action": "human_review:goal", "kind": "human_review",
+     "reason": "v1, asserted by external_agent", "requires_human": true},
+    {"action": "human_review:progress", "kind": "human_review",
+     "reason": "100 completed, self-reported by external_agent and not independently verified",
+     "requires_human": true}
+  ],
+  "uncertain_actions": [],
+  "progress": {"completed": 100, "pending": 100, "failed": 0, "total": 200}
+}
+```
+
+MCP-written state (`Origin.EXTERNAL_AGENT`) is correctly not trusted: goal and
+progress are `REQUIRES_REVIEW`, mode is `request_human`. No uncertain actions —
+the crash happened *after* checkpoint, not mid-action.
+
+### Sequence B — crash between intercept and complete
+
+```
+record_progress(run_id='run_b_001', completed=0, total=100)
+intercept_action(run_id='run_b_001', action_type='test.write_file', arguments={...})
+                        ← server killed here; complete_action never called
+resume(run_id='run_b_001')   ← new server process
+list_actions(run_id='run_b_001')
+```
+
+`intercept_action` returned `proceed: true`, status `started` — the action was
+claimed in the ledger. The resume JSON:
+
+```json
+{
+  "mode": "request_human",
+  "safe": false,
+  "next_allowed_action": "reconcile_action:action_ee2437c3ddb0ed69fa8d5766c9e051bd",
+  "rationale": [
+    "1 external side effect(s) have unknown outcomes",
+    "at least one repair needs a person"
+  ],
+  "repairs": [
+    {"action": "reconcile_action:action_ee2437c3ddb0ed69fa8d5766c9e051bd",
+     "kind": "reconcile_action",
+     "reason": "test.write_file was interrupted; the side effect may or may not have occurred",
+     "requires_human": false},
+    {"action": "human_review:goal", "kind": "human_review",
+     "reason": "v1, asserted by external_agent", "requires_human": true},
+    {"action": "human_review:progress", "kind": "human_review",
+     "reason": "0 completed, self-reported by external_agent and not independently verified",
+     "requires_human": true}
+  ],
+  "uncertain_actions": [
+    {"action_id": "action_ee2437c3ddb0ed69fa8d5766c9e051bd",
+     "action_type": "test.write_file", "status": "started"}
+  ],
+  "progress": {"completed": 0, "pending": 100, "failed": 0, "total": 100}
+}
+```
+
+`list_actions` confirmed the ledger state:
+
+```json
+{
+  "actions": [
+    {"action_id": "action_ee2437c3ddb0ed69fa8d5766c9e051bd",
+     "action_type": "test.write_file",
+     "external_id": null, "side_effect_uncertain": false,
+     "status": "started"}
+  ],
+  "unresolved": 1
+}
+```
+
+The action was not silently completed, not retried, not dropped. It stayed
+`started`, surfaced in `uncertain_actions`, and the contract named
+`reconcile_action:<id>` as the next required step. `safe: false`.
+
+### Sequence C — trusted-writer state, clean crash
+
+State was created in-process via `GenericAgentAdapter` (not through MCP), with
+150 `WORK_COMPLETED` events folded into the checkpoint. Origin:
+`DETERMINISTIC` for all components. `source_sequence: 156`.
+
+```
+# state written in-process, checkpointed, then:
+resume(run_id='run_c_001', env={dataset: v1})
+```
+
+Result:
+
+```json
+{
+  "mode": "resume",
+  "safe": true,
+  "next_allowed_action": null,
+  "repairs": [],
+  "progress": {"completed": 150, "failed": 0, "pending": 50},
+  "contract": {
+    "recovery_status": "safe_to_resume",
+    "verified": ["approval:apr_001", "external_dependency:dataset", "goal", "progress"],
+    "invalidated": [],
+    "required_actions": []
+  }
+}
+```
+
+Exit code: **0**. Trusted-writer state whose environment matches resumes cleanly.
+
+### What this establishes
+
+The self-certification fix (`9738b9e`) behaves correctly under a real external
+MCP client hitting a real process boundary — not just in pytest:
+
+- MCP-attested state cannot self-certify safety (Sequences A, B → `request_human`)
+- A crash between `intercept_action` and `complete_action` leaves the action
+  uncertain and blocks resume until reconciled (Sequence B)
+- Trusted-writer state resumes cleanly when warranted (Sequence C → `resume`,
+  exit 0) — ruling out the alternative explanation that the system simply never
+  resumes
+
+The MCP server's two-phase action interception, ledger uncertainty handling, and
+authorization gating all functioned as documented when driven through the
+actual stdio protocol by an external process.
+
+### What this does NOT establish
+
+This was still a **scripted** test. The building agent itself acted as the MCP
+client, following an exact predetermined sequence. No independent LLM (Claude
+Code, Gemini CLI, etc.) has yet chosen *on its own initiative* to call
+`continuum_checkpoint` or `continuum_resume` without being told the exact steps.
+Whether the tool descriptions actually motivate correct **autonomous** usage by
+an LLM agent — calling checkpoint at the right moment, calling resume before
+acting, respecting the response — remains **open**. This is the same question
+flagged in the Third-party MCP client testing section above (neither Gemini nor
+Kilo completed a cycle either), and it is unanswered by this test.
+
+---
+
 ## Unresolved
 
 `demo_report.md` (an untracked artifact from the third-party testing above)
