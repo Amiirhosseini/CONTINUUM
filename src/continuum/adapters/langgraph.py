@@ -253,7 +253,7 @@ class LangGraphAgentAdapter(GenericAgentAdapter):
         run_id = state.get("continuum_run_id", "unknown")
         goal_desc = state.get("goal", "LangGraph agent task")
         completed = state.get("completed_count", 0)
-        total = state.get("total_count", None)
+        total = state.get("total_count")
 
         return SemanticState(
             run_id=run_id,

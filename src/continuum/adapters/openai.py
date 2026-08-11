@@ -176,8 +176,8 @@ class OpenAIAgentAdapter(GenericAgentAdapter):
             # If the action already completed, the cached result is returned
             # without calling the external system.
         """
-        import inspect
         from agents import function_tool
+        import inspect
 
         def decorator(fn: Callable[..., Any]) -> Any:
             tool_name = name_override or fn.__name__
