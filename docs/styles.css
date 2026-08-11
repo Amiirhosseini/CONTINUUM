@@ -24,64 +24,15 @@ body { background: var(--bg); color: var(--text); font-family: 'Inter', system-u
 .scroll-progress { position: fixed; top: 0; left: 0; height: 2px; background: var(--accent); z-index: 10000; transition: width 0.1s linear; }
 
 /* Global Background */
-.global-background {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  z-index: 0;
-  pointer-events: none;
-  overflow: hidden;
-  background: linear-gradient(180deg, #5FA9DA 0%, #65B0E2 35%, #8CC9EB 100%);
-}
-
+.global-background { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
 .clouds { position: absolute; inset: 0; }
-.cloud { position: absolute; filter: blur(18px); will-change: transform; }
-.cloud span { position: absolute; border-radius: 50%; background: radial-gradient(ellipse at 40% 50%, rgba(255,255,255,0.95), rgba(235,247,255,0.5) 60%, transparent 100%); }
+.cloud { position: absolute; border-radius: 50%; filter: blur(30px); opacity: 0.55; }
 
-/* Cloud 1 — Large upper-left */
-.cloud-1 { width: 320px; height: 180px; top: 10%; left: 12%; animation: driftA 90s linear infinite; }
-.cloud-1 span:nth-child(1) { width: 180px; height: 120px; bottom: 0; left: 0; }
-.cloud-1 span:nth-child(2) { width: 140px; height: 100px; bottom: 40px; left: 80px; }
-.cloud-1 span:nth-child(3) { width: 120px; height: 90px; bottom: 60px; left: 150px; }
-.cloud-1 span:nth-child(4) { width: 100px; height: 70px; bottom: 20px; left: 200px; }
-
-/* Cloud 2 — Medium upper-center */
-.cloud-2 { width: 280px; height: 150px; top: 8%; left: 40%; opacity: 0.85; animation: driftB 120s linear infinite; }
-.cloud-2 span:nth-child(1) { width: 160px; height: 110px; bottom: 0; left: 0; }
-.cloud-2 span:nth-child(2) { width: 130px; height: 90px; bottom: 35px; left: 70px; }
-.cloud-2 span:nth-child(3) { width: 110px; height: 80px; bottom: 55px; left: 130px; }
-
-/* Cloud 3 — Large upper-right */
-.cloud-3 { width: 350px; height: 190px; top: 12%; left: 55%; animation: driftC 75s linear infinite; }
-.cloud-3 span:nth-child(1) { width: 200px; height: 130px; bottom: 0; left: 0; }
-.cloud-3 span:nth-child(2) { width: 160px; height: 110px; bottom: 45px; left: 90px; }
-.cloud-3 span:nth-child(3) { width: 140px; height: 100px; bottom: 70px; left: 170px; }
-.cloud-3 span:nth-child(4) { width: 110px; height: 75px; bottom: 25px; left: 230px; }
-
-/* Cloud 4 — Small lower-left */
-.cloud-4 { width: 200px; height: 110px; top: 45%; left: 20%; opacity: 0.7; animation: driftD 110s linear infinite; }
-.cloud-4 span:nth-child(1) { width: 120px; height: 80px; bottom: 0; left: 0; }
-.cloud-4 span:nth-child(2) { width: 100px; height: 65px; bottom: 25px; left: 50px; }
-
-/* Cloud 5 — Small lower-right */
-.cloud-5 { width: 180px; height: 100px; top: 50%; left: 72%; opacity: 0.65; animation: driftE 95s linear infinite; }
-.cloud-5 span:nth-child(1) { width: 110px; height: 75px; bottom: 0; left: 0; }
-.cloud-5 span:nth-child(2) { width: 90px; height: 60px; bottom: 20px; left: 45px; }
-
-/* Cloud 6 — Medium bottom-center */
-.cloud-6 { width: 260px; height: 140px; top: 65%; left: 40%; opacity: 0.75; animation: driftF 100s linear infinite; }
-.cloud-6 span:nth-child(1) { width: 150px; height: 100px; bottom: 0; left: 0; }
-.cloud-6 span:nth-child(2) { width: 120px; height: 80px; bottom: 30px; left: 60px; }
-.cloud-6 span:nth-child(3) { width: 100px; height: 70px; bottom: 50px; left: 110px; }
-
-@keyframes driftA { 0% { transform: translate3d(-15vw, 0, 0); } 100% { transform: translate3d(100vw, 0, 0); } }
-@keyframes driftB { 0% { transform: translate3d(-20vw, 0, 0); } 100% { transform: translate3d(100vw, 0, 0); } }
-@keyframes driftC { 0% { transform: translate3d(-10vw, 0, 0); } 100% { transform: translate3d(100vw, 0, 0); } }
-@keyframes driftD { 0% { transform: translate3d(-25vw, 0, 0); } 100% { transform: translate3d(100vw, 0, 0); } }
-@keyframes driftE { 0% { transform: translate3d(-18vw, 0, 0); } 100% { transform: translate3d(100vw, 0, 0); } }
-@keyframes driftF { 0% { transform: translate3d(-22vw, 0, 0); } 100% { transform: translate3d(100vw, 0, 0); } }
+.cloud-1 { width: 280px; height: 160px; left: 8%; top: 8%; background: radial-gradient(ellipse at 40% 50%, rgba(255,255,255,0.9), rgba(220,240,255,0.4) 60%, transparent 80%); }
+.cloud-2 { width: 380px; height: 200px; right: 5%; top: 12%; background: radial-gradient(ellipse at 60% 40%, rgba(255,255,255,0.85), rgba(220,240,255,0.3) 60%, transparent 80%); }
+.cloud-3 { width: 220px; height: 130px; left: 50%; top: 35%; background: radial-gradient(ellipse at 50% 50%, rgba(255,255,255,0.7), rgba(220,240,255,0.2) 60%, transparent 80%); }
+.cloud-4 { width: 200px; height: 110px; left: 12%; bottom: 25%; background: radial-gradient(ellipse at 45% 55%, rgba(255,255,255,0.75), rgba(220,240,255,0.25) 60%, transparent 80%); }
+.cloud-5 { width: 250px; height: 140px; right: 10%; bottom: 15%; background: radial-gradient(ellipse at 55% 45%, rgba(255,255,255,0.8), rgba(220,240,255,0.3) 60%, transparent 80%); }
 
 .container { max-width: 1280px; margin: 0 auto; padding: 0 32px; }
 
@@ -89,7 +40,7 @@ body { background: var(--bg); color: var(--text); font-family: 'Inter', system-u
    HERO
    ============================================ */
 
-.hero-canvas { position: relative; width: 100%; height: 100vh; min-height: 800px; background: transparent; overflow: hidden; z-index: 1; }
+.hero-canvas { position: relative; width: 100%; height: 100vh; min-height: 800px; background: var(--bg); overflow: hidden; z-index: 1; }
 
 .top-bar { position: fixed; top: 0; left: 0; right: 0; height: 28px; background: rgba(255,255,255,0.35); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: space-between; padding: 0 16px; z-index: 100; }
 .top-bar-left { display: flex; align-items: center; gap: 8px; }
@@ -149,7 +100,19 @@ body { background: var(--bg); color: var(--text); font-family: 'Inter', system-u
 }
 
 .pixel-headline .line-1, .pixel-headline .line-2 { display: block; }
-.pixel-headline .period { color: transparent; background: repeating-linear-gradient(to bottom, var(--navy) 0px, var(--navy) 4px, var(--accent) 4px, var(--accent) 5px); -webkit-background-clip: text; background-clip: text; }
+.pixel-headline .period {
+  color: transparent;
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--navy) 0px,
+    var(--navy) 4px,
+    var(--accent) 4px,
+    var(--accent) 5px
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
 
 .hero-tagline { font-family: var(--mono); font-size: 11px; font-weight: 700; color: var(--accent); letter-spacing: 3px; text-transform: uppercase; margin-top: 16px; }
 .hero-copy-box { position: relative; max-width: 480px; margin: 20px auto 0; padding: 24px 28px; }
