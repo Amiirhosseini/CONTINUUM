@@ -37,6 +37,10 @@ notices.
   Colour is TTY-aware and respects `NO_COLOR`; piped output is byte-identical
   to uncoloured output.
 - **`GenericAgentAdapter`** (`adapters/generic.py`) — in-process Python facade.
+- **`LangGraphAgentAdapter`** (`adapters/langgraph.py`) — LangGraph
+  integration, optional `langgraph` dependency.
+- **`OpenAIAgentAdapter`** (`adapters/openai.py`) — OpenAI Agents SDK
+  integration, optional `openai-agents` dependency.
 - **MCP server** (`mcp/server.py`) — 9 tools over stdio.
 
 ### MCP two-phase action interception
@@ -214,12 +218,23 @@ observation that raising `ToolError` directly is a defensible alternative to the
 | [#1](https://github.com/Cyrax321/CONTINUUM/issues/1) | **MCP caller authentication.** Narrowed by `d9365c8`: authorization for mutating tools now exists and denies by default. What remains is authentication — `clientInfo` is client-asserted and unverified, so a deliberately impersonating local process is unaffected. Would need a shared secret, per-client token, or transport-level identity. | Medium |
 | [#2](https://github.com/Cyrax321/CONTINUUM/issues/2) | **CI Node deprecation.** `actions/checkout@v4`, `actions/setup-python@v5`, `codecov/codecov-action@v4` are being forced onto Node 24. Works today; hard failure once the grace period ends. `release.yml` likely has the same pins and was not checked. | Low |
 
-### Not built
+## Not built
 
 Phases 12–14 of the original plan: benchmark suite (CONTINUUM-Bench), cloud API,
-dashboard. `adapters/` contains only `base.py` and `generic.py` — the OpenAI and
-LangGraph adapters do not exist. **No benchmark numbers have been measured**, and
-`continuum benchmark` exits `4` saying so.
+dashboard. **No benchmark numbers have been measured**, and `continuum benchmark`
+exits `4` saying so.
+
+### Framework adapters (Phase 11)
+
+`adapters/` now contains `base.py`, `generic.py`, `langgraph.py`, and
+`openai.py`. Both are optional dependencies — `langgraph` and `openai-agents`
+are not pulled in by `pip install continuum-agent`; install via
+`pip install continuum-agent[langgraph]` or `[openai]`. Each was written after
+checking the target framework's actual API surface (ToolContext/RunHooks for
+OpenAI Agents SDK; StateGraph/TypedDict for LangGraph), not an assumed shape.
+Tests cover behavior without the SDK installed (mocked), with it installed
+(integration class, skip-guarded), and the established `AgentAdapter`
+contract.
 
 ---
 
