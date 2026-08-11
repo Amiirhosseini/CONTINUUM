@@ -15,7 +15,6 @@ from continuum.adapters import GenericAgentAdapter
 from continuum.adapters.langgraph import langgraph_available
 from continuum.environment import StaticProvider, capture
 from continuum.models import (
-    ActionStatus,
     Goal,
     Progress,
     RecoveryMode,

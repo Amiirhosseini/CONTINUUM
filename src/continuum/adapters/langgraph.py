@@ -50,7 +50,6 @@ from continuum.adapters.generic import GenericAgentAdapter
 from continuum.models import (
     EnvironmentSnapshot,
     SemanticState,
-    StateCheckpoint,
 )
 from continuum.recovery.engine import RecoveryDecision
 from continuum.storage.base import Storage

@@ -13,7 +13,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from continuum.adapters import GenericAgentAdapter
-from continuum.adapters.openai import ContinuumContext, openai_agents_available
+from continuum.adapters.openai import openai_agents_available
 from continuum.environment import StaticProvider, capture
 from continuum.models import (
     Goal,
@@ -164,7 +164,16 @@ class TestWithMockedOpenAIAgents:
     @pytest.fixture
     def adapter(self, store: SQLiteStorage) -> Any:
         """Create an OpenAIAgentAdapter with openai-agents mocked as available."""
+        import sys
+        import types
+
         import continuum.adapters.openai as oa
+
+        # Mock the agents module so `from agents import RunHooks` works
+        mock_agents = types.ModuleType("agents")
+        mock_run_hooks = type("RunHooks", (), {})
+        mock_agents.RunHooks = mock_run_hooks
+        sys.modules["agents"] = mock_agents
 
         original = oa.openai_agents_available
         oa.openai_agents_available = True
@@ -173,6 +182,7 @@ class TestWithMockedOpenAIAgents:
             yield adapter
         finally:
             oa.openai_agents_available = original
+            sys.modules.pop("agents", None)
 
     def test_isinstance_generic_adapter(self, adapter: Any) -> None:
         assert isinstance(adapter, GenericAgentAdapter)
