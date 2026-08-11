@@ -64,49 +64,49 @@ body { background: var(--bg); color: var(--text); font-family: 'Inter', system-u
   animation: cloudFloatA 8s ease-in-out infinite, cloudDriftA 90s linear infinite;
 }
 
-/* Cloud A copies with different sizes and opacities */
+/* Cloud A copies with different sizes, positions and opacities */
 .cloud-a-copy-1 {
-  width: 200px;
-  height: 80px;
-  left: 75%;
-  top: 12%;
-  opacity: 0.6;
+  width: 220px;
+  height: 88px;
+  left: 40%;
+  top: 5%;
+  opacity: 0.65;
   animation: cloudFloatB 10s ease-in-out infinite 1s;
 }
 
 .cloud-a-copy-2 {
-  width: 150px;
-  height: 60px;
-  left: 85%;
-  top: 45%;
-  opacity: 0.45;
+  width: 160px;
+  height: 64px;
+  left: 70%;
+  top: 25%;
+  opacity: 0.5;
   animation: cloudFloatC 12s ease-in-out infinite 2s;
 }
 
 .cloud-a-copy-3 {
-  width: 250px;
-  height: 100px;
-  left: 60%;
-  top: 70%;
-  opacity: 0.5;
+  width: 280px;
+  height: 112px;
+  left: 50%;
+  top: 48%;
+  opacity: 0.55;
   animation: cloudFloatD 9s ease-in-out infinite 0.5s;
 }
 
 .cloud-a-copy-4 {
-  width: 120px;
-  height: 48px;
-  left: 45%;
-  top: 85%;
-  opacity: 0.35;
+  width: 130px;
+  height: 52px;
+  left: 30%;
+  top: 65%;
+  opacity: 0.4;
   animation: cloudFloatE 11s ease-in-out infinite 1.5s;
 }
 
 .cloud-a-copy-5 {
-  width: 180px;
-  height: 72px;
-  left: 90%;
-  top: 80%;
-  opacity: 0.4;
+  width: 200px;
+  height: 80px;
+  left: 78%;
+  top: 75%;
+  opacity: 0.45;
   animation: cloudFloatF 13s ease-in-out infinite 2.5s;
 }
 
