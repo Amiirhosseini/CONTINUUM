@@ -267,9 +267,10 @@ left unchanged: it is a composite action.
 YAML syntax validated with `yaml.safe_load_all()` on all three workflow files.
 The new versions were confirmed by fetching each action's latest stable release
 tag via the GitHub API and reading its `action.yml` `runs.using` field to verify
-`node24` (or `composite` for `upload-pages-artifact`). A CI run on the updated
-workflows would be the final confirmation; this entry records the change, not a
-passed CI run.
+`node24` (or `composite` for `upload-pages-artifact`). Confirmed by CI run
+[31534363260](https://github.com/Cyrax321/CONTINUUM/actions/runs/31534363260)
+— all four jobs green: ruff lint, ruff format, mypy strict, and tests on
+Python 3.11 / 3.12 / 3.13.
 
 ### Not done
 
