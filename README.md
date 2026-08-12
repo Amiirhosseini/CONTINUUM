@@ -1181,7 +1181,7 @@ mypy                      # Type check
 - **Unbuilt components** - the benchmark suite (Phase 12), cloud API (Phase 13), and dashboard (Phase 14) do not exist. `continuum benchmark` exits `4` saying so. Framework adapters (Phase 11) and the MCP server are built.
 - **CI Node 24 migration** - the earlier Node 20 deprecation has been resolved; the workflows now run on Node 24.
 
-For a full account of what is verified, what is believed, and what is neither, see [STATUS.md](STATUS.md). The current set of open correctness bugs (a 2026-08-12 code audit) is tracked there: `resume --repair` records nothing (#19), `continuum events` on a missing run exits 0 instead of 2 (#18), and a pre-v2 database opens silently then fails on first write (#17), in addition to #21 above.
+For a full account of what is verified, what is believed, and what is neither, see [STATUS.md](STATUS.md). The current set of open correctness bugs (a 2026-08-12 code audit) is tracked there: `resume --repair` records nothing (#19), `continuum events` on a missing run exits 0 instead of 2 (#18), and a pre-v2 database opens silently then fails on first write (#17), in addition to #21 above. For a chronological record of the work sessions and the reasoning behind each change, see [WORKLOG.md](WORKLOG.md).
 
 ## Contributing
 
