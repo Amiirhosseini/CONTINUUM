@@ -237,7 +237,9 @@ A module-by-module audit filed seven issues, each reproduced against clean
 | [#21](https://github.com/Cyrax321/CONTINUUM/issues/21) | **OpenAI adapter cannot auto-provision runs.** `_ensure_run_exists` reads via `get_run` which raises rather than returning `None`, so its `create_run` branch is dead code and `on_agent_start` raises `RunNotFound` for any fresh run. | Medium | Open |
 | [#17](https://github.com/Cyrax321/CONTINUUM/issues/17) | **Older-schema DB accepted silently.** A pre-v2 file opens without `SchemaVersionError` (only newer versions are rejected), `read_events` returns `[]` for a populated run, and the first write fails with a raw sqlite `OperationalError`. No migration path exists. | Medium | Open |
 | [#19](https://github.com/Cyrax321/CONTINUUM/issues/19) | **`resume --repair` is a no-op.** Help and docstrings claim `--repair` records the repair plan (and is one of only three mutating commands); in practice it only suppresses a stderr hint, writing nothing. | Medium | Open |
-| [#18](https://github.com/Cyrax321/CONTINUUM/issues/18) | **`events` breaks the exit-code contract.** `continuum events $MISSING` exits 0 with "No events.", while every other run-scoped command exits 2; `events` is absent from the enforcing parametrised test. Tagged `good first issue`. | Medium | Resolved — `1bcc933` gates `cmd_events` on `get_run` (which raises `RunNotFound`, mapped to `NOT_FOUND` by the dispatcher) and adds `events` to the missing-run parametrised test. |
+| [#18](https://github.com/Cyrax321/CONTINUUM/issues/18) | **`events` breaks the exit-code contract.** `continuum events $MISSING` exits 0 with "No events.", while every other run-scoped command exits 2; `events` is absent from the enforcing parametrised test. Tagged `good first issue`. | Medium | Resolved: `1bcc933` gates `cmd_events` on `get_run` (which raises `RunNotFound`, mapped to `NOT_FOUND` by the dispatcher) and adds `events` to the missing-run parametrised test. |
+| Orphaned-WAL startup crash | **MCP server fails to connect after a hard-kill.** A killed server leaves `<db>-wal`/`<db>-shm` sidecars that make `PRAGMA journal_mode=WAL` throw `disk I/O error` on the next launch. Manual fix (delete sidecars) applied 2026-08-13; a self-heal code fix in `src/continuum/mcp/server.py` is designed but not yet implemented (see the MCP server section). | Medium | Open |
+| Stale editable metadata | `pip show continuum-agent` reports its editable location as `Desktop/untitled folder 2` (the pre-move path); imports still resolve correctly, so it is cosmetic. A clean `pip install -e ".[mcp]"` from the current project root fixes it. | Low | Open |
 
 ## The CI Node 24 migration (2026-08-12)
 
@@ -520,7 +522,81 @@ Whether the tool descriptions actually motivate correct **autonomous** usage by
 an LLM agent — calling checkpoint at the right moment, calling resume before
 acting, respecting the response — remains **open**. This is the same question
 flagged in the Third-party MCP client testing section above (neither Gemini nor
-Kilo completed a cycle either), and it is unanswered by this test.
+Kilo completed a cycle either), and it is unanswered by this test. As of 2026-08-13
+the server is confirmed reachable and fully tool-callable from a real Claude Code
+session (see the section below); the autonomous-usage question above remains open.
+
+---
+
+## MCP server verified from Claude Code (2026-08-13)
+
+The CONTINUUM MCP server is registered in Claude Code (config in `~/.claude.json`,
+project entry: command `/opt/miniconda3/bin/python -m continuum.mcp`,
+`CONTINUUM_DB=/tmp/continuum-claude-mcp.db`,
+`CONTINUUM_MCP_MUTATING_CLIENTS="claude-code claude"`). It was driven end to end
+from a real Claude Code session and confirmed reachable and functional.
+
+### The Failed to connect incident and its root cause
+
+`claude mcp list` reported `continuum ... ✘ Failed to connect` and no
+`mcp__continuum__*` tools were available in-session. Traced from Claude Code's own
+connection log, the server process was crashing at startup:
+
+    sqlite3.OperationalError: disk I/O error
+        at PRAGMA journal_mode=WAL   (src/continuum/storage/sqlite.py:144, SQLiteStorage._configure)
+        opening CONTINUUM_DB=/tmp/continuum-claude-mcp.db
+
+Root cause: a previously hard-killed server process left orphaned WAL sidecar files
+(`/tmp/continuum-claude-mcp.db-wal`, `...-shm`) in an inconsistent state, so SQLite
+refused to reopen the database in WAL mode. Registration, the editable install
+(`continuum-agent`, `mcp` 2.0.0), the config, and the server code were all fine.
+Pointed at a fresh database path, the server answered a manual `initialize` and
+`tools/list` handshake correctly.
+
+Remediation applied: deleted the two stale sidecar files. `claude mcp list` then
+reported `✔ Connected`. This was environment and data cleanup only, no source
+changed.
+
+### What was verified through the live server
+
+- All 9 tools exposed, correctly split by `read_only_hint`: 3 read-only
+  (`validate`, `resume`, `list_actions`) and 6 mutating (`record_progress`,
+  `checkpoint`, `intercept_action`, `complete_action`, `fail_action`,
+  `reconcile_action`).
+- Full cycle exercised for real: `record_progress` (twice) then `checkpoint`,
+  `validate`, `intercept_action`, `complete_action`, `list_actions` (reflected the
+  completed action, `unresolved: 0`), then `resume`. Every call returned sane JSON,
+  not merely no error thrown.
+- Authorization boundary intact: `claude-code` (allowlisted) may call mutating
+  tools; an unlisted caller and an empty `clientInfo` are denied mutating calls
+  while read-only still works. Deny-by-default posture preserved.
+- A run written purely through MCP resumes as `request_human` and `safe: false`
+  (progress is tagged `EXTERNAL_AGENT` and the self-certification fix `9738b9e`
+  degrades it to human review). The trusted-writer clean-resume pattern
+  (`mode: resume`, `safe: true`) from Sequence C was reproduced by seeding state
+  in-process via `GenericAgentAdapter` (DETERMINISTIC origin) and confirming it
+  resumes through MCP.
+
+### Known limitation: startup latency
+
+Opening the server imports `continuum.adapters`, which eagerly imports `langgraph`
+(about 0.6s) and `openai` (about 0.9s); spawn to first response is about 3s. This
+is within Claude Code's health-check tolerance today, but deferring the adapter
+imports until first use would be a worthwhile follow-up.
+
+### Open: the crash will recur (pending code fix)
+
+Deleting the sidecars is a band-aid. The next hard-kill leaves them again, so the
+server will fail to connect on the following launch until a code fix lands.
+Designed fix (Option 1, not yet implemented): self-heal at MCP-server startup, in
+`src/continuum/mcp/server.py` where storage is opened
+(`ContinuumMCP.__init__` builds `SQLiteStorage(self.database)`); on
+`sqlite3.OperationalError` from `PRAGMA journal_mode=WAL`, drop the orphaned
+`<db>-wal` and `<db>-shm` sidecars and retry opening once. Scope the change to the
+server; do not alter the library's `journal_mode=WAL`, `synchronous=FULL`, or
+IMMEDIATE-transaction guarantees in `src/continuum/storage/sqlite.py`. A regression
+test belongs in `tests/test_mcp_server.py` (write events, plant orphaned sidecars,
+assert the server's open path recovers). Tracked as a planned fix, not yet coded.
 
 ---
 
