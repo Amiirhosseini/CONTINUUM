@@ -151,26 +151,34 @@ same action intercepted twice returns `proceed: false` with the prior result.
 
 Both exit non-zero if their guarantees fail.
 
-### The API this is being built toward
+### The API
 
-The ergonomic wrapper below is **not implemented yet** - it arrives with the runtime and CLI in
-Phases 4–8. It is shown so the direction is clear, not because it works today:
+The core Python surface is `EventType`, `Run`, and `SQLiteStorage`, with `diff_states` for the
+state-machine and CLI validation checks. `VersionChain` was folded into `SQLiteStorage` during
+Phase 7, so keep it in mind only when reading older CHANGELOG entries. Example:
 
 ```python
-from continuum import Continuum  # not available yet
+from continuum import EventType, Run, SQLiteStorage, diff_states, project
 
-runtime = Continuum("agent.db")
-run = runtime.start(goal="Analyze 10,000 documents")
-run.checkpoint()
-run.record_action(type="github.create_issue", arguments={...})
-run.complete()
+store = SQLiteStorage("sqlite:///agent.db")
+run = Run(run_id="run_4821", goal="Reconcile ledgers")
+store.create_run(run)
+store.append_event("run_4821", EventType.RUN_STARTED, {"goal": run.goal})
+
+state = project("run_4821", store.read_events("run_4821"))  # fold events into state
+store.put_version(state, reason="milestone")  # versioned history
+
+store.append_event("run_4821", EventType.RUN_COMPLETED, {})
+later = project("run_4821", store.read_events("run_4821"))
+change = diff_states(state, later)  # what changed, semantically
+print(store.verify_events("run_4821"))  # audit the chain
 ```
 
-```bash
-continuum resume run_4821                # CLI: Phase 8
-```
+The CLI is the same surface in shell form: `continuum runs`, `continuum inspect <run_id>`,
+`continuum events <run_id>`, `continuum diff`, `continuum validate <run_id>`, and
+`continuum checkpoint <run_id>`.
 
-Target output, illustrating the intended recovery report (not a recording of a working build):
+Target output from `continuum run validate`, illustrating the shape of a recovery report:
 
 ```
 CONTINUUM RECOVERY
@@ -184,11 +192,9 @@ State validation:
   [ok] 127 findings preserved
   [ok] 14 decisions preserved
   [!!] Dataset version changed (v3 -> v4)
-  [ok] Action ledger - no duplicate side effects
 
 Recovery decision: REPAIR_AND_RESUME
 Repair: Revalidate experiments 14-17
-Next permitted action: dataset_revalidation
 ```
 
 The goal: zero duplicated work, zero duplicated side effects, verified safe recovery. Crash recovery
@@ -401,7 +407,7 @@ Before allowing resume, CONTINUUM generates a deterministic, machine-readable co
 ### Python - available now
 
 ```python
-from continuum import EventType, Run, SQLiteStorage, VersionChain, diff_states, project
+from continuum import EventType, Run, SQLiteStorage, diff_states, project
 
 store = SQLiteStorage("sqlite:///agent.db")
 store.create_run(Run(run_id="run_4821", goal="Analyze these documents"))
@@ -413,24 +419,14 @@ store.verify_events("run_4821")  # audit the chain
 diff_states(previous, state)  # what changed, semantically
 ```
 
-### Python - planned (Phases 4–7)
+### Python - the adapter API (Phase 7)
 
-```python
-from continuum import Continuum  # not implemented yet
-
-runtime = Continuum(storage="sqlite:///agent.db")
-run = runtime.start(goal="Analyze these documents")
-
-run.checkpoint()
-run.record_action(type="github.create_issue", arguments={...})
-run.complete()
-
-# After crash
-run = runtime.resume("run_4821")
-status = run.validate()
-if status.safe:
-    run.continue_execution()
-```
+`SQLiteStorage` doubles as the MCP server adapter; `Run` carries the agent-facing surface. Instead of
+a `run.record_action(type="github.create_issue", ...)` convenience method that does not exist, the
+contract is: the adapter records the side effect with `run.record` or `store.append_event`, using the
+event types in `EventType`, and the ledger deduplicates on recovery. There is no
+`runtime.start` / `runtime.resume` object yet; that arrives with the non-MCP runtime binding, which
+is out of scope for 0.1.0.
 
 ### CLI
 
@@ -1048,6 +1044,8 @@ capabilities have since been built that are not phase-numbered there:
   chain. Agent-reported progress and goals carry `Origin.EXTERNAL_AGENT`
   provenance and are marked `REQUIRES_REVIEW`, so an agent cannot certify its
   own safety.
+- **Community files** - `CODE_OF_CONDUCT.md` at repo root (spec §32; issues
+  [#22](https://github.com/Cyrax321/CONTINUUM/issues/22) / #28).
 - **Schema versioning** - the storage schema is versioned (`SCHEMA_VERSION =
   2`). A database written by a *newer* CONTINUUM build is rejected on open with
   `SchemaVersionError`. Rejecting *older* files is incomplete: a pre-v2 database
@@ -1078,8 +1076,6 @@ phases:
   `uv` with PyPI Trusted Publishing (OIDC), add a `Dockerfile` /
   `docker-compose.yml`, and validate `SECURITY.md` (spec §32, §2.7; issue
   [#27](https://github.com/Cyrax321/CONTINUUM/issues/27)).
-- **Community files** - `CODE_OF_CONDUCT.md` at repo root (spec §32; issues
-  [#22](https://github.com/Cyrax321/CONTINUUM/issues/22) / #28).
 - **LangGraph revalidation adapter** - layer CONTINUUM's environment
   revalidation on top of a LangGraph checkpointer rather than replacing it
   (issue [#25](https://github.com/Cyrax321/CONTINUUM/issues/25)).

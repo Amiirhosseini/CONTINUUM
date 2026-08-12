@@ -42,7 +42,7 @@ pytest --no-cov --tb=short
 # A specific test file
 pytest tests/test_events.py -v
 
-# Property-based tests (hypothesis) — slow, good before PRs
+# Property-based tests (hypothesis) - slow, good before PRs
 pytest tests/test_hashing.py tests/test_models.py -v
 ```
 
@@ -123,7 +123,7 @@ added to the release workflow.
 
 1. Create a feature branch: `git checkout -b feat/my-feature`
 2. Write tests for your change.
-3. Run `pytest` and `ruff check` and `mypy` — all must pass.
+3. Run `pytest` and `ruff check` and `mypy` - all must pass.
 4. Update `CHANGELOG.md` under the `Unreleased` section.
 5. Open a PR against `main`.
 
@@ -131,4 +131,5 @@ added to the release workflow.
 
 ## Code of Conduct
 
-Be kind. Review others' PRs as you would want yours reviewed.
+Be kind. Review others' PRs as you would want yours reviewed. Participation in
+this project is governed by the [Contributor Covenant](CODE_OF_CONDUCT.md).
