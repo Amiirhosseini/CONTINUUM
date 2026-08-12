@@ -74,16 +74,25 @@ class ScenarioSpec:
 
 SCENARIOS: dict[str, ScenarioSpec] = {
     "process_crash": ScenarioSpec(
-        name="process_crash", crash_frac=0.5, side_frac=0.25,
-        interrupted=False, env_change=False,
+        name="process_crash",
+        crash_frac=0.5,
+        side_frac=0.25,
+        interrupted=False,
+        env_change=False,
     ),
     "dataset_change": ScenarioSpec(
-        name="dataset_change", crash_frac=0.5, side_frac=0.25,
-        interrupted=False, env_change=True,
+        name="dataset_change",
+        crash_frac=0.5,
+        side_frac=0.25,
+        interrupted=False,
+        env_change=True,
     ),
     "unknown_side_effect": ScenarioSpec(
-        name="unknown_side_effect", crash_frac=0.25, side_frac=0.25,
-        interrupted=True, env_change=False,
+        name="unknown_side_effect",
+        crash_frac=0.25,
+        side_frac=0.25,
+        interrupted=True,
+        env_change=False,
     ),
 }
 
@@ -148,14 +157,30 @@ def _run_one(method: str, spec: ScenarioSpec, total: int, workdir: Path) -> Meth
 
     store.create_run(Run(run_id=run_id, goal="Process documents"))
     store.append_event(run_id, EventType.RUN_STARTED, {"goal": "Process documents", "total": total})
-    store.append_event(run_id, EventType.DEPENDENCY_DECLARED, {"resource": "dataset", "version": "v3"})
-    store.append_event(run_id, EventType.EVIDENCE_ADDED, {"evidence_id": "paper_128", "summary": "study", "source": "dataset"})
-    store.append_event(run_id, EventType.FINDING_ADDED, {"finding_id": "finding_17", "claim": "X holds", "evidence": ["paper_128"], "confidence": 0.91})
+    store.append_event(
+        run_id, EventType.DEPENDENCY_DECLARED, {"resource": "dataset", "version": "v3"}
+    )
+    store.append_event(
+        run_id,
+        EventType.EVIDENCE_ADDED,
+        {"evidence_id": "paper_128", "summary": "study", "source": "dataset"},
+    )
+    store.append_event(
+        run_id,
+        EventType.FINDING_ADDED,
+        {
+            "finding_id": "finding_17",
+            "claim": "X holds",
+            "evidence": ["paper_128"],
+            "confidence": 0.91,
+        },
+    )
 
     ledger = ActionLedger(store, run_id)
     manager = (
         CheckpointManager(store, policy=SemanticPolicy(progress_stride=total))
-        if method == "continuum" else None
+        if method == "continuum"
+        else None
     )
 
     for i in range(crash_at):
@@ -171,7 +196,9 @@ def _run_one(method: str, spec: ScenarioSpec, total: int, workdir: Path) -> Meth
     if manager is not None:
         manager.checkpoint(run_id, environment=env_v3)
 
-    env_after = capture_environment(run_id, StaticProvider(dataset="v4")) if spec.env_change else env_v3
+    env_after = (
+        capture_environment(run_id, StaticProvider(dataset="v4")) if spec.env_change else env_v3
+    )
 
     # --- phase 2: recover, then continue to the end ---------------------- #
     detected = False

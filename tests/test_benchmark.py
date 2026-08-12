@@ -37,4 +37,3 @@ def test_benchmark_results_are_json_serialisable() -> None:
     assert "continuum" in text
     payload = json.dumps([r.as_dict() for r in results])
     assert json.loads(payload) == [r.as_dict() for r in results]
-
