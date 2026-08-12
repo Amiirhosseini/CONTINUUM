@@ -16,7 +16,7 @@ need to go from a fresh clone to a passing test suite and a clean pull request.
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/continuum-agent/continuum.git
+git clone https://github.com/Cyrax321/CONTINUUM.git
 cd continuum
 
 # 2. Create and activate a virtual environment

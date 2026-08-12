@@ -14,6 +14,11 @@ All notable changes to this project are documented here. The format follows
   are reformatted, and the CI `ruff check`/`ruff format --check` steps now
   include `examples/`. Fixes #8.
 
+- **Wrong clone URL in CONTRIBUTING.md.** `git clone
+  https://github.com/continuum-agent/continuum.git` pointed at a repository
+  that does not exist; the correct URL is `git clone
+  https://github.com/Cyrax321/CONTINUUM.git`.
+
 - **CI Node 24 migration.** Bumped all GitHub Actions workflow pins to versions
   that run on Node 24, eliminating deprecation warnings and pre-empting the
   hard failure when GitHub ends its Node 20 grace period. `actions/checkout`
