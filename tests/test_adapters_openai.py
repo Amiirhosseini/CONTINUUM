@@ -211,18 +211,14 @@ class TestWithMockedOpenAIAgents:
         assert run.run_id == "run_fresh_oa"
         assert run.status == RunStatus.STARTED
 
-    def test_ensure_run_exists_is_idempotent(
-        self, adapter: Any, store: SQLiteStorage
-    ) -> None:
+    def test_ensure_run_exists_is_idempotent(self, adapter: Any, store: SQLiteStorage) -> None:
         """An already-existing run is left untouched, with no duplicate create."""
         import types
 
         from continuum.models import Run
 
         store.create_run(Run(run_id="run_existing_oa", goal="preexisting"))
-        adapter._ensure_run_exists(
-            "run_existing_oa", types.SimpleNamespace(name="my-agent")
-        )
+        adapter._ensure_run_exists("run_existing_oa", types.SimpleNamespace(name="my-agent"))
         assert store.get_run("run_existing_oa").goal == "preexisting"
 
     def test_start_run_and_capture_restore(self, adapter: Any) -> None:
