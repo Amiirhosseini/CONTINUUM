@@ -95,6 +95,25 @@ async def test_read_only_tools_are_annotated_as_such(server_ctx: tuple[Any, Any]
 
 
 @pytest.mark.asyncio
+async def test_read_only_tools_do_not_write_events(server_ctx: tuple[Any, Any]) -> None:
+    """The read-only guarantee must be behavioral, not just declared. A bare run
+    (row exists, no history) must be listable without the tool appending a
+    RUN_STARTED event of its own (issue #20)."""
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    server, ctx = server_ctx
+    ctx.storage.create_run(Run(run_id="bare", goal="g"))
+    assert [e.type.value for e in ctx.storage.read_events("bare")] == []
+    # list_actions returns empty without writing.
+    await call(server, "continuum_list_actions", run_id="bare")
+    assert [e.type.value for e in ctx.storage.read_events("bare")] == []
+    # validate may error on a run with no history, but must not write either.
+    with pytest.raises(ToolError):
+        await server.call_tool("continuum_validate", {"run_id": "bare"}, context=_ctx(TEST_CLIENT))
+    assert [e.type.value for e in ctx.storage.read_events("bare")] == []
+
+
+@pytest.mark.asyncio
 async def test_tools_describe_when_they_matter(server_ctx: tuple[Any, Any]) -> None:
     """An LLM picks tools from descriptions; vague ones get called wrongly."""
     server, _ = server_ctx

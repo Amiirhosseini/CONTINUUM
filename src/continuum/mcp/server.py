@@ -589,7 +589,11 @@ def build_server(
     )
     def continuum_list_actions(run_id: str) -> str:
         """List ledger entries for a run."""
-        ctx.ensure_run(run_id)
+        # Read-only: do not call `ensure_run`, which backfills RUN_STARTED when
+        # the log is empty. A bare run (row exists, no history yet) is valid
+        # here and just has no actions. Fetching the row raises RunNotFound for
+        # a genuinely unknown run without writing anything.
+        ctx.storage.get_run(run_id)
         ledger = ctx.ledger(run_id)
         actions = ledger.all()
         return _json(
