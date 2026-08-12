@@ -151,6 +151,12 @@ same action intercepted twice returns `proceed: false` with the prior result.
 
 Both exit non-zero if their guarantees fail.
 
+The `e2e-autonomy-test/` kit (issue #6) takes the proof one level further. It
+scripts a real invoice-batch task, a hard-kill mid-run, and a fresh resume
+session, then scores the outbox, ledger, and event chain out of band. It still
+requires a human to drive the two Claude Code sessions, so it verifies the
+server and toolkit, not yet an autonomous agent. See its README.
+
 ### The API
 
 The core Python surface is `EventType`, `Run`, and `SQLiteStorage`, with `diff_states` for the
@@ -254,6 +260,32 @@ does not defend against a deliberately impersonating local process, which in any
 case can read and write the SQLite file directly.
 
 Tracked as [#1](https://github.com/Cyrax321/CONTINUUM/issues/1).
+
+### Status, verification, and open questions
+
+**Crash recovery at startup is fixed and tested.** A server process killed with
+`SIGKILL` leaves orphaned `<db>-wal` / `<db>-shm` sidecars that previously made
+the next launch fail with `sqlite3.OperationalError: disk I/O error`. The server
+now opens its store through `_open_server_storage`, which on that error removes
+the orphaned sidecars and retries the open exactly once, re-raising when there is
+nothing to clear. Two regression tests in `tests/test_mcp_server.py` cover the
+recovery and the re-raise. Recorded in CHANGELOG.md under Fixed.
+
+**The server is verified usable through Claude Code.** Registered as an MCP
+server, it reports `✔ Connected`, exposes all nine tools with the correct
+read-only/mutating split, and the full `record_progress` to `checkpoint` to
+`intercept_action` to `complete_action` to `resume` cycle returns correct,
+durable JSON. Authorization denies by default. That claim is proven end to end
+over the real stdio protocol, and the unit suite (662 passed, 4 skipped) covers
+every tool.
+
+**What is not yet demonstrated (open: issue #6).** The mechanics are proven, but
+the project's actual goal, an unscripted LLM agent that checkpoints on its own
+initiative, routes side effects through the ledger, and calls `resume` before
+acting after a crash, has not been observed. The `e2e-autonomy-test/` kit drives
+exactly this, but it requires a human to run it against a real agent session, and
+no such run has happened yet. A green mechanics result is not evidence of
+autonomous correct behaviour.
 
 ---
 
