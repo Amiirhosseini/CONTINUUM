@@ -395,6 +395,53 @@ async def test_a_completed_action_is_never_repeated(server_ctx: tuple[Any, Any])
 
 
 @pytest.mark.asyncio
+async def test_a_stable_key_deduplicates_across_argument_shape_changes(
+    server_ctx: tuple[Any, Any],
+) -> None:
+    """The e2e-autonomy-test regression (issue #6).
+
+    Session 1 recorded an invoice send with a relative path argument; session 2
+    passed an absolute path. Hashing raw arguments made the two look like
+    different actions and intercept_action answered proceed=true for an invoice
+    that was already sent. A stable `key` derived from the resource identity must
+    make the second claim a no-op regardless of argument formatting.
+    """
+    server, _ = server_ctx
+    await seed_run(server)
+
+    first = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="send_invoice",
+        arguments={"external_id": "INV-001.sent", "path": "INV-001.sent"},
+        key="invoice:INV-001",
+    )
+    assert first["proceed"] is True
+    await call(
+        server,
+        "continuum_complete_action",
+        run_id="run_1",
+        action_key=first["action_key"],
+        external_id="INV-001.sent",
+    )
+
+    second = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="send_invoice",
+        arguments={
+            "external_id": "/tmp/e2e-outbox/INV-001.sent",
+            "path": "/tmp/e2e-outbox/INV-001.sent",
+        },
+        key="invoice:INV-001",
+    )
+    assert second["proceed"] is False
+    assert second["external_id"] == "INV-001.sent"
+
+
+@pytest.mark.asyncio
 async def test_an_unknown_outcome_refuses_to_grant_proceed(
     server_ctx: tuple[Any, Any],
 ) -> None:

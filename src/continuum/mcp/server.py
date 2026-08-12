@@ -461,8 +461,14 @@ def build_server(
             "should do it, or proceed=false with the previous result if it was "
             "already done — do NOT repeat it in that case. If a previous attempt was "
             "interrupted, returns proceed=false with status='unknown': the effect may "
-            "or may not have happened, so stop and ask a human. After performing the "
-            "action, always call continuum_complete_action."
+            "or may or may not have happened, so stop and ask a human. After performing the "
+            "action, always call continuum_complete_action.\n\n"
+            "Pass a stable `key` identifying the specific operation (for example the "
+            "invoice id or external resource id), not incidental formatting. The key "
+            "is what makes two attempts count as the same action, so reuse the exact "
+            "same key for the same operation across sessions; a key derived from the "
+            "resource identity makes deduplication immune to argument formatting "
+            "differences (relative vs absolute paths, argument naming, and so on)."
         ),
         annotations=mutating,
     )
@@ -471,13 +477,16 @@ def build_server(
         run_id: str,
         action_type: str,
         arguments: dict[str, Any] | None = None,
+        key: str | None = None,
         scoped_to_run: bool = True,
     ) -> str:
         """Claim an action in the ledger and report whether to proceed."""
         ctx.ensure_run(run_id)
         ledger = ctx.ledger(run_id)
         try:
-            outcome = ledger.claim(action_type, arguments=arguments, scoped_to_run=scoped_to_run)
+            outcome = ledger.claim(
+                action_type, arguments=arguments, key=key, scoped_to_run=scoped_to_run
+            )
         except UnknownSideEffect as exc:
             return _json(
                 {

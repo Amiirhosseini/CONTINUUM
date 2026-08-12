@@ -8,6 +8,22 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`continuum_intercept_action` deduplicated on argument formatting, not
+  resource identity.** The idempotency key hashes the action type plus the
+  caller's raw arguments, so two sessions describing the same operation with
+  different argument shapes (relative vs absolute path) computed different keys
+  and the resumed session was told `proceed: true` for a side effect the first
+  session already completed. Found by the issue #6 end-to-end series: three real
+  Claude Code runs all hit it, and correctness survived only because the agents
+  cross-checked the outbox and refused the flag. The tool now accepts a stable
+  `key` (e.g. `invoice:INV-001`) passed through to `ActionLedger.claim(key=...)`;
+  two attempts sharing action type and key are the same action regardless of
+  argument formatting, so dedup is immune to path/argument drift. The tool
+  description tells callers to derive the key from the resource identity. A
+  regression test mirrors the e2e failure: intercept and complete with
+  `key="invoice:INV-001"` and relative-path arguments, then intercept again with
+  the same key and absolute-path arguments, and assert `proceed: false`.
+
 - **MCP server fails to connect after a hard-kill (orphaned WAL sidecars).** A
   server process killed with `SIGKILL` cannot run SQLite's WAL cleanup, so it
   leaves `<db>-wal` and `<db>-shm` sidecars behind. On the next launch, opening

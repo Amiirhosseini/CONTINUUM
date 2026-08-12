@@ -157,6 +157,24 @@ session, then scores the outbox, ledger, and event chain out of band. It still
 requires a human to drive the two Claude Code sessions, so it verifies the
 server and toolkit, not yet an autonomous agent. See its README.
 
+The kit has now run against real Claude Code sessions. Mechanics score 7/7
+across runs (exactly-once side effects, ledger, projected progress, event
+chain, recovery gate). The autonomy half is demonstrated too: an agent used
+`record_progress`, `intercept_action`, `complete_action`, and `resume`
+unprompted, refused to re-send invoices it verified as already sent, and
+surfaced the `request_human` verdict instead of overriding it.
+
+One defect surfaced and is fixed: `continuum_intercept_action` originally
+hashed the caller's raw `arguments`, so two sessions describing the same
+operation with different argument formatting (relative vs absolute path)
+computed different idempotency keys and the second session was told
+`proceed: true` for an invoice that was already sent. The tool now accepts a
+stable `key` (derived from the resource identity, e.g. `invoice:INV-001`),
+which makes deduplication immune to argument formatting. The regression test
+in `tests/test_mcp_server.py` mirrors the e2e failure: intercept and complete
+with `key="invoice:INV-001"` and relative path arguments, then intercept again
+with the same key and absolute path arguments, and assert `proceed: false`.
+
 ### The API
 
 The core Python surface is `EventType`, `Run`, and `SQLiteStorage`, with `diff_states` for the

@@ -72,6 +72,46 @@ verdict to you rather than blindly continuing; it uses `intercept_action` for
 INV-004/005 (`proceed: true`) and gets `proceed: false` for INV-001..003 and does
 **not** rewrite those files.
 
+> **Note for the resumed agent (not a spoiler):** `continuum_intercept_action`
+> accepts a `key` that identifies the specific operation (for example
+> `invoice:INV-001`). When the previous session used a key, reuse the exact same
+> key on resume so the tool recognises the already-sent invoice regardless of
+> argument formatting. This is part of the tool's documented contract, not a
+> scripted step.
+
+---
+
+## Findings from the first run series (2026-08-13)
+
+Three full runs against real Claude Code sessions (Opus 4.8), each
+hard-killed mid-batch and resumed in a brand-new session. All scored 7/7
+mechanics. Two findings came out of them:
+
+1. **Tool-level deduplication was fragile against argument drift.** Session 1
+   recorded `send_invoice` actions with relative-path arguments
+   (`INV-001.sent`); session 2 passed absolute paths
+   (`/tmp/e2e-outbox/INV-001.sent`). The idempotency key hashes the action type
+   plus the caller's arguments, so the two sessions computed different keys and
+   `intercept_action` answered `proceed: true` for invoices that were already
+   sent. Correctness was preserved in all three runs only because the agent
+   cross-checked the outbox on disk and refused to follow the flag. **The agent
+   saved the batch; the tooling guarantee had failed.**
+2. **Ledger pollution from the workaround.** Agents resolved the spurious
+   `proceed: true` slots via `fail_action(certain=true)`, which is semantically
+   honest (no new side effect occurred) but records `send_invoice -> failed`
+   rows for invoices that actually succeeded earlier.
+
+Both are fixed in the tooling: `continuum_intercept_action` now accepts a
+stable `key` derived from the resource identity, so deduplication is immune to
+argument formatting, and no spurious `started` slots are created to be failed
+out. The regression test `test_a_stable_key_deduplicates_across_argument_shape_changes`
+mirrors this exact failure.
+
+One secondary observation, not yet a fix: session 1 reports taking a
+checkpoint (`checkpoint_a03ba166...`), but `continuum_resume` consistently
+reports `checkpoint_version: 0` on resume. Worth investigating whether the
+resume contract reflects checkpoints at all.
+
 ---
 
 ## Scoring

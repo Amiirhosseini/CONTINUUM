@@ -238,6 +238,7 @@ A module-by-module audit filed seven issues, each reproduced against clean
 | [#19](https://github.com/Cyrax321/CONTINUUM/issues/19) | **`resume --repair` is a no-op.** Help and docstrings claim `--repair` records the repair plan (and is one of only three mutating commands); in practice it only suppresses a stderr hint, writing nothing. | Medium | Open |
 | [#18](https://github.com/Cyrax321/CONTINUUM/issues/18) | **`events` breaks the exit-code contract.** `continuum events $MISSING` exits 0 with "No events.", while every other run-scoped command exits 2; `events` is absent from the enforcing parametrised test. Tagged `good first issue`. | Medium | Resolved: `1bcc933` gates `cmd_events` on `get_run` (which raises `RunNotFound`, mapped to `NOT_FOUND` by the dispatcher) and adds `events` to the missing-run parametrised test. |
 | Orphaned-WAL startup crash | **MCP server fails to connect after a hard-kill.** A killed server leaves `<db>-wal`/`<db>-shm` sidecars that make `PRAGMA journal_mode=WAL` throw `disk I/O error` on the next launch. | Medium | Resolved: `_open_server_storage` in `src/continuum/mcp/server.py` clears orphaned sidecars and retries the open once on `OperationalError` (re-raising when there was nothing to clear), with two regression tests in `tests/test_mcp_server.py`. See the MCP server section. |
+| Issue #6 e2e dedup defect | **`continuum_intercept_action` deduplicated on raw argument formatting, not resource identity.** Three real Claude Code e2e runs showed session 2 getting `proceed: true` for invoices session 1 already sent, because relative-path vs absolute-path arguments hashed to different idempotency keys. Correctness survived only because the agents cross-checked the outbox and refused the flag. | High | Resolved: the tool now accepts a stable `key` (e.g. `invoice:INV-001`) that is what makes two attempts the same action, immune to argument drift. Regression test `test_a_stable_key_deduplicates_across_argument_shape_changes`. |
 | Stale editable metadata | `pip show continuum-agent` reports its editable location as `Desktop/untitled folder 2` (the pre-move path); imports still resolve correctly, so it is cosmetic. A clean `pip install -e ".[mcp]"` from the current project root fixes it. | Low | Open |
 
 ## The CI Node 24 migration (2026-08-12)
@@ -607,6 +608,62 @@ sidecar on disk, because a hand-written `-wal`/`-shm` pair does not reproduce th
 error on every filesystem (on the APFS volume used here SQLite simply rebuilds the
 sidecars and opens cleanly, verified including after a real `kill -9`). Injecting
 the error drives the identical recovery branch deterministically on any filesystem.
+
+---
+
+## The issue #6 e2e series (2026-08-13)
+
+The `e2e-autonomy-test/` kit answered its open question: will an unscripted LLM
+agent use CONTINUUM correctly on its own? Three full runs against real Claude
+Code sessions (Opus 4.8), each hard-killed mid-batch and resumed in a
+brand-new session, all scored 7/7 on the mechanics checks. The autonomy half
+was demonstrated too: agents called `record_progress`, routed sends through
+`intercept_action` -> write -> `complete_action`, called `resume` before
+acting, surfaced the `request_human` / `safe: false` verdict rather than
+overriding it, and refused to re-send invoices they verified as already sent.
+
+### The defect the runs exposed
+
+Dedup was keyed on the caller's raw argument dictionary. Session 1 recorded
+`send_invoice` with relative-path arguments (`INV-001.sent`); session 2 passed
+absolute paths (`/tmp/e2e-outbox/INV-001.sent`). `idempotency_key` hashes
+(action type + arguments), so the two sessions computed different keys and
+`continuum_intercept_action` answered `proceed: true` for invoices already
+sent. In all three runs correctness was preserved only because the agent
+cross-checked the outbox and refused the flag. A less careful run would have
+double-sent.
+
+### What closed it
+
+`continuum_intercept_action` now accepts a stable `key` that identifies the
+specific operation (e.g. `invoice:INV-001`), passed through to
+`ActionLedger.claim(key=...)`. The tool description tells callers to derive the
+key from the resource identity, not incidental formatting. Two attempts sharing
+action type and key are the same action regardless of argument shape, so dedup
+is immune to relative-vs-absolute path drift and the resumed session gets
+`proceed: false` instead of a fresh `started` slot to fail out. The regression
+test `test_a_stable_key_deduplicates_across_argument_shape_changes` mirrors the
+e2e failure exactly: intercept and complete with `key="invoice:INV-001"` and
+relative arguments, then intercept again with the same key and absolute
+arguments, and assert `proceed: false`.
+
+### Secondary observations
+
+- **Ledger pollution.** Before the fix, agents resolved the spurious
+  `proceed: true` slots via `fail_action(certain=true)`. Semantically honest
+  (no new side effect occurred) but it recorded `send_invoice -> failed` rows
+  for invoices that actually succeeded earlier. The fix removes the spurious
+  slots, so no such rows are created.
+- **Checkpoint version, still open.** Session 1 reported taking a checkpoint
+  (`checkpoint_a03ba166...`), but `continuum_resume` consistently reported
+  `checkpoint_version: 0` on resume. Whether the resume contract reflects
+  checkpoints at all is not established. Not filed yet.
+
+### The "failed" rows note
+
+The verify scorecard counts only `completed` and `unresolved`, so the
+workaround `failed` rows never failed a run. They were a data-quality smell,
+not a correctness failure, and are gone with the fix.
 
 ---
 
