@@ -526,6 +526,12 @@ agent processes before assuming a bug.
 
 ---
 
+## Repository housekeeping
+
+The commit history on `main` is dominated by website and logo iteration: roughly 50 of ~115 commits are site, favicon, or logo experiments, including one revert (`ea583ec`). This is cosmetic churn, not open code debt. Not tracked as a GitHub issue: rewriting history on a repository others may have forked is disruptive, and a public flame-on-commits is low value. If a clean history matters for the v0.1.0 presentation, squash or rewrite those commits before release; otherwise leave them.
+
+---
+
 ## Untracked files, deliberately excluded
 
 - `.mcp.json` — Claude Code registration; hard-codes machine-specific absolute
