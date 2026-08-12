@@ -137,6 +137,27 @@ async def test_progress_accumulates_across_calls(server_ctx: tuple[Any, Any]) ->
 
 
 @pytest.mark.asyncio
+async def test_over_total_progress_is_rejected_before_being_written(
+    server_ctx: tuple[Any, Any],
+) -> None:
+    """An over-total update must fail before any TASK_UPDATED is appended, or the
+    run's log stays intact yet unprojectable and every later checkpoint/resume
+    fails with a raw pydantic ValidationError (issue #15)."""
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    server, ctx = server_ctx
+    ctx.storage.create_run(Run(run_id="run_1", goal="g"))
+    with pytest.raises(ToolError, match="exceeds total"):
+        await server.call_tool(
+            "continuum_record_progress",
+            {"run_id": "run_1", "completed": 15, "total": 10, "goal": "g"},
+            context=_ctx(TEST_CLIENT),
+        )
+    # Nothing beyond the start event was written: the log is not poisoned.
+    assert [e.type.value for e in ctx.storage.read_events("run_1")] == ["RUN_STARTED"]
+
+
+@pytest.mark.asyncio
 async def test_recording_progress_for_an_unknown_run_without_a_goal_fails(
     server_ctx: tuple[Any, Any],
 ) -> None:

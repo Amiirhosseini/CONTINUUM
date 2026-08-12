@@ -248,6 +248,18 @@ def build_server(
         if total is not None:
             payload["total"] = total
             payload["pending"] = max(total - completed - failed, 0)
+        # Reject impossible counters before anything is written. An over-total
+        # update passes `verify_events` but fails to project, so a run whose log
+        # is intact yet unprojectable would be poisoned permanently. The
+        # `Progress` model enforces this at projection time; checking here keeps
+        # the bad value out of the event log in the first place.
+        if total is not None:
+            if completed < 0 or failed < 0:
+                raise ValueError("progress counters must be non-negative")
+            if completed + failed > total:
+                raise ValueError(
+                    f"completed ({completed}) + failed ({failed}) exceeds total ({total})"
+                )
         ctx.storage.append_event(run_id, EventType.TASK_UPDATED, payload, source=AGENT_SOURCE)
 
         state = project(run_id, ctx.storage.read_events(run_id))
