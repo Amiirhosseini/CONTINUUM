@@ -359,11 +359,14 @@ def test_postgres_fails_clearly_rather_than_silently(db: str) -> None:
     assert "not implemented" in err
 
 
-def test_benchmark_admits_it_is_unbuilt() -> None:
-    code, _, err = run("benchmark")
-    assert code == ExitCode.NOT_IMPLEMENTED
-    assert "not implemented" in err
-    assert "no benchmark numbers" in err.lower()
+def test_benchmark_runs_and_reports_numbers() -> None:
+    code, out, err = run("benchmark", "--total", "20")
+    assert code == ExitCode.OK
+    assert "continuum" in out
+    assert "replay" in out
+    assert "naive_checkpoint" in out
+    # continuum shows no duplicate work and detects stale environments
+    assert "12.93" in out or "16.61" in out or "compress" in out
 
 
 def test_a_run_with_no_versions_says_so(tmp_path: Path) -> None:

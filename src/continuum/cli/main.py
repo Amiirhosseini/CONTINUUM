@@ -511,12 +511,15 @@ def cmd_replay(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
 
 
 def cmd_benchmark(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
-    print(
-        "The CONTINUUM-Bench harness is not implemented yet (Phase 12).\n"
-        "No benchmark numbers are published, because none have been measured.",
-        file=err,
-    )
-    return ExitCode.NOT_IMPLEMENTED
+    from continuum.benchmark import _to_json, render, run_benchmark
+
+    total = getattr(args, "total", 200) or 200
+    results = run_benchmark(total=total)
+    if getattr(args, "json", False):
+        print(_to_json(results), file=out)
+    else:
+        print(render(results), file=out)
+    return ExitCode.OK
 
 
 # --------------------------------------------------------------------------- #
@@ -607,7 +610,9 @@ def build_parser() -> argparse.ArgumentParser:
     replay = with_run(add("replay", cmd_replay, "Re-derive state from events."))
     replay.add_argument("--upto", type=int, default=None)
 
-    add("benchmark", cmd_benchmark, "Run CONTINUUM-Bench (not implemented).")
+    add("benchmark", cmd_benchmark, "Run CONTINUUM-Bench (minimal harness).").add_argument(
+        "--total", type=int, default=200, help="documents processed per run (default: 200)"
+    )
     return parser
 
 
