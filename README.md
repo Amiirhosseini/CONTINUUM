@@ -87,7 +87,7 @@ CONTINUUM separates **LLM context** (temporary) from **durable task state** (per
 > (the MCP server). The core library and CLI use only the standard library —
 > the `mcp` extra is required solely for the server.
 
-What runs today (Phases 1–7): record events, project state, checkpoint, survive a crash, validate against the current environment, never duplicate an external side effect, and decide how it is safe to resume.
+What runs today (Phases 1–11): record events, project state, checkpoint, survive a crash, validate against the current environment, never duplicate an external side effect, decide how it is safe to resume, expose a stdio MCP server, and plug into agent frameworks.
 
 ```python
 from continuum import EventType, Run, SQLiteStorage, project
@@ -227,7 +227,9 @@ indistinguishable from a completed one.
 from `CONTINUUM_MCP_MUTATING_CLIENTS` (or `CONTINUUM_MCP_ALLOW`), or
 `.continuum/mcp-policy.json`. An unconfigured server is read-only. Read-only
 tools stay open to everyone, so asking "is this safe to resume?" never requires
-permission.
+permission. They are also guaranteed not to mutate state: `validate`, `resume` and
+`list_actions` never append an event, so a status query can never change the run
+it inspects. That is enforced, not merely documented.
 
 **Agent-reported state is never self-certifying.** Everything written through
 MCP is recorded with `Origin.EXTERNAL_AGENT` provenance, and the validator marks
@@ -246,6 +248,37 @@ does not defend against a deliberately impersonating local process, which in any
 case can read and write the SQLite file directly.
 
 Tracked as [#1](https://github.com/Cyrax321/CONTINUUM/issues/1).
+
+---
+
+## Framework Integration
+
+CONTINUUM plugs into agent frameworks without becoming one. Three adapters ship
+in `src/continuum/adapters/`, all optional installs so the core library keeps
+its standard-library-only guarantee:
+
+```bash
+pip install continuum-agent[langgraph]   # LangGraph integration
+pip install continuum-agent[openai]       # OpenAI Agents SDK integration
+```
+
+| Adapter | Class | Notes |
+|:--|:--|:--|
+| Generic Python agent | `GenericAgentAdapter` | In-process facade; writes trusted (`Origin.DETERMINISTIC`) state. |
+| OpenAI Agents SDK | `OpenAIAgentAdapter` | Hooks `ToolContext` / `RunHooks`; optional `openai-agents`. |
+| LangGraph | `LangGraphAgentAdapter` | Wraps a `StateGraph`; optional `langgraph`. |
+
+Each adapter implements the same `AgentAdapter` contract: it records progress and
+side effects through the ledger and checkpoint policy, and routes external
+effects through the two-phase intercept/complete protocol so recovery stays
+correct. Tests cover each adapter without its SDK installed (mocked), with it
+installed (integration, skip-guarded), and against the shared contract.
+
+**Known limitation (open):** `OpenAIAgentAdapter` cannot yet auto-provision a
+run for a fresh agent — `_ensure_run_exists` reads via `get_run` (which raises)
+and never reaches its `create_run` branch, so `on_agent_start` raises
+`RunNotFound` for a new run. Tracked as
+[#21](https://github.com/Cyrax321/CONTINUUM/issues/21).
 
 ---
 
@@ -894,6 +927,15 @@ continuum/
 |       |   +-- engine.py            Decide how a run may resume
 |       |   +-- planner.py           Ordered repair steps
 |       |   +-- contract.py          Sealed, gated next action
+|       +-- mcp/
+|       |   +-- __init__.py
+|       |   +-- server.py            9 stdio tools, read-only/mutating split, auth gate
+|       +-- adapters/
+|       |   +-- __init__.py          AgentAdapter contract
+|       |   +-- base.py              Shared adapter plumbing
+|       |   +-- generic.py           In-process Python facade
+|       |   +-- langgraph.py         LangGraph integration (optional)
+|       |   +-- openai.py            OpenAI Agents SDK integration (optional)
 |       +-- cli/
 |       |   +-- __init__.py
 |       |   +-- main.py              argparse CLI, read-only by default
@@ -919,6 +961,7 @@ continuum/
     +-- test_recovery_context.py     Bounded context and truncation safety
     +-- test_environment.py          Capture, diffing, unverifiable resources
     +-- test_validator.py            Validation and staleness propagation
+    +-- test_mcp_server.py           MCP tools, auth gate, read-only guarantee
     +-- test_action_ledger.py        Idempotency and the crash gap
     +-- test_reconciliation.py       Strategies + real-subprocess crash tests
     +-- test_recovery_engine.py      Decision precedence and contract gating
@@ -986,6 +1029,65 @@ Design for evaluating long-running agent recovery under controlled failures.
 
 Built framework adapters: generic Python agent, OpenAI Agents SDK, LangGraph.
 
+### Shipped beyond the original phase plan
+
+The roadmap above tracks the original 14-phase plan. Several substantial
+capabilities have since been built that are not phase-numbered there:
+
+- **MCP server** — a stdio server exposing nine tools (three read-only:
+  `validate`, `resume`, `list_actions`; six mutating). The read-only/mutating
+  split is driven by each tool's own `read_only_hint` annotation, so the two
+  cannot drift apart.
+- **MCP authorization layer** — mutating tools deny by default and match
+  callers against an allowlist resolved from `CONTINUUM_MCP_MUTATING_CLIENTS`
+  (or its alias `CONTINUUM_MCP_ALLOW`) or `.continuum/mcp-policy.json`.
+  Read-only tools stay open to everyone. Authorization is by declared client
+  identity; see the authentication limitation below.
+- **Provenance and anti-self-certification** — every event records who asserted
+  it (`Event.source`), folded into projected state and signed into the hash
+  chain. Agent-reported progress and goals carry `Origin.EXTERNAL_AGENT`
+  provenance and are marked `REQUIRES_REVIEW`, so an agent cannot certify its
+  own safety.
+- **Schema versioning** — the storage schema is versioned (`SCHEMA_VERSION =
+  2`). A database written by a *newer* CONTINUUM build is rejected on open with
+  `SchemaVersionError`. Rejecting *older* files is incomplete: a pre-v2 database
+  currently opens silently and fails later on first write (open issue
+  [#17](https://github.com/Cyrax321/CONTINUUM/issues/17)).
+- **Bounded recovery context** — `build_recovery_context` renders the minimum
+  sufficient briefing under a token budget, truncating from the least important
+  end while never dropping the goal, verified progress, or stale state.
+
+### Planned beyond the original phase plan
+
+Drawn from the project spec (`project.md`) but outside the original 1–14
+phases:
+
+- **Cryptographic attestation** — sign the event chain's `trusted_through`
+  hash (e.g. Ed25519, behind an optional extra so the core stays
+  dependency-free) and emit a portable `continuum attest` document, so a run's
+  history can be independently verified as unaltered. Builds directly on the
+  existing hash chain and canonical hashing; tracked as
+  [#24](https://github.com/Cyrax321/CONTINUUM/issues/24).
+- **PostgreSQL storage + object storage** — an optional `postgres.py` backend
+  and S3-compatible object storage, behind the existing `open_storage()` URL
+  dispatch (spec §22–§23; the coordinating Cloud API is Phase 13).
+- **Generated API reference** — render the docstring API surface into a docs
+  site (e.g. `mkdocs-material`), closing the "no separate API reference" gap
+  (issue [#23](https://github.com/Cyrax321/CONTINUUM/issues/23)).
+- **Packaging and distribution polish** — migrate the build/release path to
+  `uv` with PyPI Trusted Publishing (OIDC), add a `Dockerfile` /
+  `docker-compose.yml`, and validate `SECURITY.md` (spec §32, §2.7; issue
+  [#27](https://github.com/Cyrax321/CONTINUUM/issues/27)).
+- **Community files** — `CODE_OF_CONDUCT.md` at repo root (spec §32; issues
+  [#22](https://github.com/Cyrax321/CONTINUUM/issues/22) / #28).
+- **LangGraph revalidation adapter** — layer CONTINUUM's environment
+  revalidation on top of a LangGraph checkpointer rather than replacing it
+  (issue [#25](https://github.com/Cyrax321/CONTINUUM/issues/25)).
+- **Minimal CONTINUUM-Bench** — the first defensible slice of Phase 12: three
+  scenarios (process crash, dataset change, unknown side effect), two baselines
+  (full transcript replay, naive checkpointing), and real measured numbers
+  (issue [#26](https://github.com/Cyrax321/CONTINUUM/issues/26)).
+
 ---
 
 ## What CONTINUUM Is Not
@@ -1029,14 +1131,15 @@ mypy                      # Type check
 ## Known Limitations
 
 - **MCP caller authentication** — `clientInfo` is asserted by the client during the handshake and never verified. The authorization layer distinguishes honestly-named callers; it does not defend against a deliberately impersonating local process. Tracked as [#1](https://github.com/Cyrax321/CONTINUUM/issues/1).
-- **CI Node deprecation** — the workflows pin `actions/checkout@v4` and `actions/setup-python@v5` on Node 20, which GitHub is forcing onto Node 24. Works today; becomes a hard failure on GitHub's schedule. [#2](https://github.com/Cyrax321/CONTINUUM/issues/2).
-- **Unbuilt components** — the benchmark suite (Phase 12), cloud API (Phase 13), and dashboard (Phase 14) do not exist. `continuum benchmark` exits `4` saying so. Framework adapters for OpenAI Agents SDK and LangGraph are built (optional installs `continuum-agent[langgraph]` / `[openai]`).
+- **OpenAI adapter auto-provisioning** — `OpenAIAgentAdapter` cannot create a run for a fresh agent; `on_agent_start` raises `RunNotFound` because `_ensure_run_exists` raises instead of creating. Tracked as [#21](https://github.com/Cyrax321/CONTINUUM/issues/21).
+- **Unbuilt components** — the benchmark suite (Phase 12), cloud API (Phase 13), and dashboard (Phase 14) do not exist. `continuum benchmark` exits `4` saying so. Framework adapters (Phase 11) and the MCP server are built.
+- **CI Node 24 migration** — the earlier Node 20 deprecation has been resolved; the workflows now run on Node 24.
 
-For a full account of what is verified, what is believed, and what is neither, see [STATUS.md](STATUS.md).
+For a full account of what is verified, what is believed, and what is neither, see [STATUS.md](STATUS.md). The current set of open correctness bugs (a 2026-08-12 code audit) is tracked there: `resume --repair` records nothing (#19), `continuum events` on a missing run exits 0 instead of 2 (#18), and a pre-v2 database opens silently then fails on first write (#17), in addition to #21 above.
 
 ## Contributing
 
-The project is in early development (Phases 1–8 and 10 complete). There are many components to build — storage engines, state validation, framework adapters, benchmark scenarios, documentation.
+Phases 1–11 are complete: data models, semantic state, persistence, checkpointing, validation, the action ledger, the recovery engine, the CLI, crash-recovery examples, environment snapshots and diffs, and framework adapters. Remaining planned work is the benchmark suite (Phase 12), cloud API (Phase 13), and dashboard (Phase 14), alongside the open correctness bugs tracked in STATUS.md and on the issue tracker.
 
 Open an issue before submitting large PRs.
 

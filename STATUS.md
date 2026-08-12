@@ -12,7 +12,7 @@ believed, and what is neither.
 
 ## Verified
 
-653 tests pass, 4 skip, run from a clean `HEAD` (0e2a43a) on Python 3.13 with
+657 tests pass, 4 skip, run from a clean `HEAD` (e9c5f78) on Python 3.13 with
 `mcp 2.0.0` installed. The MCP server tests are no longer excluded: they load
 and pass against `mcp>=2.0` (the version pinned in `pyproject.toml`). An
 earlier note recorded them as failing to load; that incompatibility is gone
@@ -229,15 +229,15 @@ observation that raising `ToolError` directly is a defensible alternative to the
 A module-by-module audit filed seven issues, each reproduced against clean
 `HEAD` (455e307) and filed with the `bug_report` template:
 
-| Issue | Summary | Priority |
-|:--|:--|:--|
-| [#15](https://github.com/Cyrax321/CONTINUUM/issues/15) | **Over-total progress is a partial write.** `record_progress`/event writers commit a `TASK_UPDATED` whose `completed + pending + failed > total`; the log then passes `verify_events` but every projection, checkpoint, resume and validate raises a raw pydantic `ValidationError`, permanently, with no rollback. | High |
-| [#20](https://github.com/Cyrax321/CONTINUUM/issues/20) | **Read-only `list_actions` writes.** Annotated `read_only` (and therefore ungated), `continuum_list_actions` calls `ensure_run`, backfilling `RUN_STARTED` into a bare run's log. Contradicts the read-only split guarantee. | High |
-| [#16](https://github.com/Cyrax321/CONTINUUM/issues/16) | **STALE STATE section droppable.** `build_recovery_context` protects sections by sorted index, not identity: with `next_action` present, the STALE STATE section falls outside the `protected = 3` window and is dropped under a tight budget despite the never-dropped promise. | High |
-| [#21](https://github.com/Cyrax321/CONTINUUM/issues/21) | **OpenAI adapter cannot auto-provision runs.** `_ensure_run_exists` reads via `get_run` which raises rather than returning `None`, so its `create_run` branch is dead code and `on_agent_start` raises `RunNotFound` for any fresh run. | Medium |
-| [#17](https://github.com/Cyrax321/CONTINUUM/issues/17) | **Older-schema DB accepted silently.** A pre-v2 file opens without `SchemaVersionError` (only newer versions are rejected), `read_events` returns `[]` for a populated run, and the first write fails with a raw sqlite `OperationalError`. No migration path exists. | Medium |
-| [#19](https://github.com/Cyrax321/CONTINUUM/issues/19) | **`resume --repair` is a no-op.** Help and docstrings claim `--repair` records the repair plan (and is one of only three mutating commands); in practice it only suppresses a stderr hint, writing nothing. | Medium |
-| [#18](https://github.com/Cyrax321/CONTINUUM/issues/18) | **`events` breaks the exit-code contract.** `continuum events $MISSING` exits 0 with "No events.", while every other run-scoped command exits 2; `events` is absent from the enforcing parametrised test. Tagged `good first issue`. | Medium |
+| Issue | Summary | Priority | Status |
+|:--|:--|:--|:--|
+| [#15](https://github.com/Cyrax321/CONTINUUM/issues/15) | **Over-total progress is a partial write.** `record_progress`/event writers commit a `TASK_UPDATED` whose `completed + pending + failed > total`; the log then passes `verify_events` but every projection, checkpoint, resume and validate raises a raw pydantic `ValidationError`, permanently, with no rollback. | High | Resolved — `91aee41` rejects over-total progress before it is written, raising `ToolError`/`ValidationError` at the boundary rather than committing a corruptible event. |
+| [#20](https://github.com/Cyrax321/CONTINUUM/issues/20) | **Read-only `list_actions` writes.** Annotated `read_only` (and therefore ungated), `continuum_list_actions` calls `ensure_run`, backfilling `RUN_STARTED` into a bare run's log. Contradicts the read-only split guarantee. | High | Resolved — `71c86b3` resolves the run via `get_run` instead of `ensure_run`, so a bare run lists zero actions without appending anything. |
+| [#16](https://github.com/Cyrax321/CONTINUUM/issues/16) | **STALE STATE section droppable.** `build_recovery_context` protects sections by sorted index, not identity: with `next_action` present, the STALE STATE section falls outside the `protected = 3` window and is dropped under a tight budget despite the never-dropped promise. | High | Resolved — `e9c5f78` protects the never-dropped sections (`CURRENT GOAL`, `VERIFIED PROGRESS`, `STALE STATE — DO NOT RELY ON`) by identity via a `_NEVER_DROPPED` set, so an injected higher-priority section cannot push stale state out of the protected set. |
+| [#21](https://github.com/Cyrax321/CONTINUUM/issues/21) | **OpenAI adapter cannot auto-provision runs.** `_ensure_run_exists` reads via `get_run` which raises rather than returning `None`, so its `create_run` branch is dead code and `on_agent_start` raises `RunNotFound` for any fresh run. | Medium | Open |
+| [#17](https://github.com/Cyrax321/CONTINUUM/issues/17) | **Older-schema DB accepted silently.** A pre-v2 file opens without `SchemaVersionError` (only newer versions are rejected), `read_events` returns `[]` for a populated run, and the first write fails with a raw sqlite `OperationalError`. No migration path exists. | Medium | Open |
+| [#19](https://github.com/Cyrax321/CONTINUUM/issues/19) | **`resume --repair` is a no-op.** Help and docstrings claim `--repair` records the repair plan (and is one of only three mutating commands); in practice it only suppresses a stderr hint, writing nothing. | Medium | Open |
+| [#18](https://github.com/Cyrax321/CONTINUUM/issues/18) | **`events` breaks the exit-code contract.** `continuum events $MISSING` exits 0 with "No events.", while every other run-scoped command exits 2; `events` is absent from the enforcing parametrised test. Tagged `good first issue`. | Medium | Open |
 
 ## The CI Node 24 migration (2026-08-12)
 
