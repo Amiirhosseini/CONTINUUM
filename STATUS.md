@@ -12,9 +12,12 @@ believed, and what is neither.
 
 ## Verified
 
-575 tests pass (MCP server tests excluded — they fail to load against the
-installed `mcp` SDK version; tracked separately). CI was green on Python 3.11,
-3.12 and 3.13, plus lint (`ruff`) and strict type-check (`mypy`) — confirmed
+653 tests pass, 4 skip, run from a clean `HEAD` (0e2a43a) on Python 3.13 with
+`mcp 2.0.0` installed. The MCP server tests are no longer excluded: they load
+and pass against `mcp>=2.0` (the version pinned in `pyproject.toml`). An
+earlier note recorded them as failing to load; that incompatibility is gone
+with the newer SDK. CI was green on Python 3.11, 3.12 and 3.13, plus lint
+(`ruff`) and strict type-check (`mypy`) — confirmed
 by run
 [31355087372](https://github.com/Cyrax321/CONTINUUM/actions/runs/31355087372).
 Everything below has tests behind it; several of the safety-critical paths have
