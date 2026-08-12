@@ -19,6 +19,12 @@ All notable changes to this project are documented here. The format follows
   that does not exist; the correct URL is `git clone
   https://github.com/Cyrax321/CONTINUUM.git`.
 
+- **Stale Roadmap table.** Rows 9 (crash recovery examples) and 11
+  (framework adapters) read "Planned" despite the examples existing and
+  running to completion and the generic/LangGraph/OpenAI adapters being
+  built. Both are now marked Complete, and the "Planned framework adapters"
+  note below the table now reads "Built".
+
 - **CI Node 24 migration.** Bumped all GitHub Actions workflow pins to versions
   that run on Node 24, eliminating deprecation warnings and pre-empting the
   hard failure when GitHub ends its Node 20 grace period. `actions/checkout`

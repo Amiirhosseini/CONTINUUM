@@ -977,14 +977,14 @@ Design for evaluating long-running agent recovery under controlled failures.
 |   6   | Action ledger + Idempotency       | Complete    |
 |   7   | Recovery engine                   | Complete    |
 |   8   | CLI                               | Complete    |
-|   9   | Crash recovery examples           | Planned     |
+|   9   | Crash recovery examples           | Complete    |
 |  10   | Environment snapshots and diffs   | Complete    |
-|  11   | Framework adapters                | Planned     |
+|  11   | Framework adapters                | Complete    |
 |  12   | Benchmark suite                   | Planned     |
 |  13   | Cloud API (FastAPI + PostgreSQL)  | Planned     |
 |  14   | Dashboard                         | Planned     |
 
-Planned framework adapters: generic Python agent, OpenAI Agents SDK, LangGraph.
+Built framework adapters: generic Python agent, OpenAI Agents SDK, LangGraph.
 
 ---
 
@@ -1030,7 +1030,7 @@ mypy                      # Type check
 
 - **MCP caller authentication** — `clientInfo` is asserted by the client during the handshake and never verified. The authorization layer distinguishes honestly-named callers; it does not defend against a deliberately impersonating local process. Tracked as [#1](https://github.com/Cyrax321/CONTINUUM/issues/1).
 - **CI Node deprecation** — the workflows pin `actions/checkout@v4` and `actions/setup-python@v5` on Node 20, which GitHub is forcing onto Node 24. Works today; becomes a hard failure on GitHub's schedule. [#2](https://github.com/Cyrax321/CONTINUUM/issues/2).
-- **Unbuilt components** — the benchmark suite (Phase 12), cloud API (Phase 13), and dashboard (Phase 14) do not exist. `continuum benchmark` exits `4` saying so. Framework adapters for OpenAI Agents SDK and LangGraph are planned, not built.
+- **Unbuilt components** — the benchmark suite (Phase 12), cloud API (Phase 13), and dashboard (Phase 14) do not exist. `continuum benchmark` exits `4` saying so. Framework adapters for OpenAI Agents SDK and LangGraph are built (optional installs `continuum-agent[langgraph]` / `[openai]`).
 
 For a full account of what is verified, what is believed, and what is neither, see [STATUS.md](STATUS.md).
 
