@@ -60,7 +60,7 @@ continuum = "continuum.cli.main:main"
 continuum-mcp = "continuum.mcp.server:main"
 
 [project.urls]
-Homepage = "https://github.com/continuum-agent/continuum"
+Homepage = "https://github.com/Cyrax321/CONTINUUM"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/continuum"]
