@@ -28,6 +28,17 @@ All notable changes to this project are documented here. The format follows
   are reformatted, and the CI `ruff check`/`ruff format --check` steps now
   include `examples/`. Fixes #8.
 
+- **OpenAI adapter cannot auto-provision a fresh run (issue #21).**
+  `OpenAIAgentAdapter._ensure_run_exists` assumed `Storage.get_run` returns
+  `None` for a missing run and guarded its `create_run` call with
+  `if existing is not None`. `get_run` actually raises `RunNotFound` (it never
+  returns `None`), so the create branch was unreachable and the first contact
+  with a new run failed with `RunNotFound` instead of provisioning it. The
+  method now catches `RunNotFound` and creates the run, so a fresh OpenAI agent
+  run is auto-provisioned on `on_agent_start`. Two regression tests in
+  `tests/test_adapters_openai.py` cover the create-on-missing path and the
+  idempotent existing-run path.
+
 - **Wrong clone URL in CONTRIBUTING.md.** `git clone
   https://github.com/continuum-agent/continuum.git` pointed at a repository
   that does not exist; the correct URL is `git clone

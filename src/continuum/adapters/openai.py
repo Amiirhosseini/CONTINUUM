@@ -62,7 +62,7 @@ from continuum.models import (
     StateCheckpoint,
 )
 from continuum.recovery.engine import RecoveryDecision
-from continuum.storage.base import Storage
+from continuum.storage.base import RunNotFound, Storage
 
 __all__ = [
     "OpenAIAgentAdapter",
@@ -345,15 +345,22 @@ def wrapped_tool(ctx: ToolContext, {", ".join(f"{p.name}: Any = None" for p in p
         )
 
     def _ensure_run_exists(self, run_id: str, agent: Any) -> None:
-        """Create the run record if it doesn't already exist."""
+        """Create the run record if it doesn't already exist.
+
+        ``get_run`` raises ``RunNotFound`` for an absent run (it does not
+        return ``None``), so the missing-run case is caught here rather than
+        checked with an ``is not None`` guard. This is what lets a fresh
+        OpenAI agent run auto-provision instead of failing on first contact
+        (see issue #21).
+        """
         from continuum.models import Run, RunStatus
 
-        existing = self.storage.get_run(run_id)
-        if existing is not None:
-            return
-        goal = getattr(agent, "name", "OpenAI agent task")
-        run = Run(run_id=run_id, goal=goal, status=RunStatus.STARTED)
-        self.storage.create_run(run)
+        try:
+            self.storage.get_run(run_id)
+        except RunNotFound:
+            goal = getattr(agent, "name", "OpenAI agent task")
+            run = Run(run_id=run_id, goal=goal, status=RunStatus.STARTED)
+            self.storage.create_run(run)
 
     def _checkpoint_from_context(
         self,

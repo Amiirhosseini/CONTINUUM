@@ -187,6 +187,44 @@ class TestWithMockedOpenAIAgents:
     def test_isinstance_generic_adapter(self, adapter: Any) -> None:
         assert isinstance(adapter, GenericAgentAdapter)
 
+    def test_ensure_run_exists_creates_missing_run(
+        self, adapter: Any, store: SQLiteStorage
+    ) -> None:
+        """Regression test for issue #21.
+
+        A fresh OpenAI agent run must be auto-provisioned. ``get_run`` raises
+        ``RunNotFound`` for an absent run (it does not return ``None``), so the
+        original code never reached its ``create_run`` branch and the first
+        contact with a new run failed.
+        """
+        import types
+
+        from continuum.models import RunStatus
+        from continuum.storage import RunNotFound
+
+        with pytest.raises(RunNotFound):
+            store.get_run("run_fresh_oa")
+
+        adapter._ensure_run_exists("run_fresh_oa", types.SimpleNamespace(name="my-agent"))
+
+        run = store.get_run("run_fresh_oa")
+        assert run.run_id == "run_fresh_oa"
+        assert run.status == RunStatus.STARTED
+
+    def test_ensure_run_exists_is_idempotent(
+        self, adapter: Any, store: SQLiteStorage
+    ) -> None:
+        """An already-existing run is left untouched, with no duplicate create."""
+        import types
+
+        from continuum.models import Run
+
+        store.create_run(Run(run_id="run_existing_oa", goal="preexisting"))
+        adapter._ensure_run_exists(
+            "run_existing_oa", types.SimpleNamespace(name="my-agent")
+        )
+        assert store.get_run("run_existing_oa").goal == "preexisting"
+
     def test_start_run_and_capture_restore(self, adapter: Any) -> None:
         adapter.start_run(goal="OpenAI task", run_id="run_oa_1")
 
