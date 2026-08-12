@@ -1630,3 +1630,296 @@ Do not claim novelty that has not been established.
 Prioritize correctness, minimalism, reproducibility, and real developer usefulness over flashy features.
 
 The final goal is a project that can become a serious open-source repository and a credible AI-systems research artifact.
+
+
+# CONTINUUM: Publishing & Premium Roadmap
+
+## 0. Where things actually stand
+
+I don't have your repo checked out in this session (no network in my sandbox,
+no GitHub connector wired up here), so everything below is built from the
+three documents you attached — CHANGELOG, the original build spec, and the
+README — plus fresh web research on the competitive landscape as of August
+2026. I have not touched your code. Section 6 is a prompt written for your
+coding agent (with actual repo access) to execute, using the same
+verify-before-file rigor you set earlier.
+
+Two things worth saying plainly:
+
+- Phases 1–8 and 10 are, per your own docs, complete with real tests and real
+  crash-kill demonstrations (`os._exit(9)` mid-run, subprocess-level
+  verification). That is unusually honest for a project at this stage —
+  most READMEs at this size claim more than they've built. Keep that
+  discipline; it is itself a differentiator (see 2.3).
+- The unresolved items from our prior conversation (stale Roadmap rows,
+  untracked `demo_report.md`, missing labels, unconfirmed community files,
+  the `docs/` marketing-site question, `pricing.html`) are still open. They
+  belong in Part A of the agent prompt below, unchanged from before.
+
+## 1. Competitive landscape (August 2026)
+
+Durable execution for AI agents became a crowded, well-funded category this
+year:
+
+- **Temporal-style replay.** Event-history replay to reconstruct in-memory
+  state after a crash is now table stakes; LangGraph, Temporal, and Dagster
+  all ship it, with PostgresSaver recommended for LangGraph production and
+  MemorySaver for dev only.
+- **Framework-native durability.** Microsoft's Durable Task extension and
+  Azure's Durable Task Scheduler bring automatic per-step checkpointing to
+  agent frameworks without code changes. OpenAI's Agents SDK added
+  externalized state, snapshotting, and rehydration into fresh containers.
+  CrewAI Flow persists flow state via SQLite by default. AutoGen saves and
+  loads full message-thread and group-chat state.
+- **The new frontier is verification, not just recovery.** Dapr 1.18
+  (June 2026) shipped "Verifiable Execution": cryptographically signed
+  workflow history (SPIFFE-backed identities), lineage propagation across
+  service boundaries, and workflow attestation so downstream systems can
+  make trust decisions on *proven* provenance rather than assumed state.
+  Diagrid's Catalyst 2.0 layers this onto LangGraph, MSFT Agent Framework,
+  Google ADK, AWS Strands, OpenAI Agents SDK, CrewAI, Pydantic AI, and Dapr
+  Agents — explicitly calling out that LangGraph's own checkpointing leaves
+  "detection and recovery logic to developers."
+- **The gap they're all pointing at, and mostly not filling:** none of the
+  above independently *revalidate* checkpointed state against the current
+  environment before resuming, and none propagate staleness through a
+  dependency graph. They checkpoint and replay faithfully — which is a
+  different problem from asking "is this still true?" Most of them also
+  require a scheduler, a cluster, or a managed control plane.
+
+**Where CONTINUUM already sits differently, per your own README:**
+
+1. It is the only one in this set that treats "the checkpoint is valid" as
+   a claim to be *disproven*, not assumed — staleness propagates
+   `dependency -> evidence -> finding -> decision`, and `UNKNOWN` degrades
+   toward unsafe rather than resolving to safe.
+2. `UnknownSideEffect` plus mandatory reconciliation is a sharper, more
+   honestly-documented answer to the exactly-once problem than most of the
+   category, which quietly assumes idempotent tools.
+3. It is CPU-only, dependency-free at the core (`argparse`, stdlib), and
+   runs against a single SQLite file — no cluster, no scheduler, no managed
+   control plane. That is a real wedge against Temporal/Dapr/Diagrid, whose
+   value proposition assumes you already run their infrastructure.
+
+That combination — independent revalidation with staleness propagation,
+zero infrastructure, and an honestly-scoped guarantee set — is a legitimate,
+defensible positioning line. Don't chase Dapr's cryptographic-attestation
+category head-on; borrow the one piece of it that composes naturally with
+what you've already built (see 2.3).
+
+## 2. What "premium" should mean here
+
+Not a paywall — this is infra-trust software; open-core done badly kills
+adoption in this category. "Premium" should mean: the kind of project a
+staff engineer green-lights for a production agent without a follow-up
+meeting. Concretely:
+
+### 2.1 Close the credibility gaps first (higher leverage than any new feature)
+A reviewer's first move is to check if the README lies. Right now the
+Roadmap table, the label set, the community files, and `docs/` are all
+either stale or unverified per your own audit notes. Fixing those is the
+single highest-value "premium" action available, because it's the
+difference between "looks maintained" and "looks abandoned by phase 10."
+
+### 2.2 Ship the two demos the README promises but Phase 9 hasn't delivered
+`examples/crash_recovery_agent.py`, `context_compaction.py`, and
+`model_switch.py` are described in loving, specific detail in the README as
+if they exist and run. If Phase 9 is actually "Planned" per the Roadmap
+table, that's the single biggest trust risk in the whole repo — a technical
+reader who clones and runs the quick-start commands and gets `FileNotFoundError`
+will not come back. This is Part A, item 1, below: verify first, then either
+fix the docs or ship the examples, don't leave the gap.
+
+### 2.3 A cryptographic verification layer — natural, not bolted-on
+You already have hash-chained events, sealed checkpoints with integrity
+hashes, and canonical deterministic hashing. The entire cryptographic
+substrate Dapr just launched a feature category around, you already built
+for a different reason. The premium move is a thin, optional layer:
+
+- `continuum verify --sign` — sign the event chain's `trusted_through` hash
+  with a local Ed25519 key (stdlib `hashlib` + a small, audited dependency
+  like `pynacl`, kept behind an extra so the core stays dependency-free).
+- `continuum attest <run_id>` — emit a portable, independently-checkable
+  attestation document: run id, trusted_through, chain hash, signer public
+  key, timestamp. No SPIFFE, no cluster, no managed identity — just "here is
+  cryptographic proof this run's history has not been altered since I
+  signed it," which is exactly the trust question a compliance reviewer
+  asks and exactly what your hash chain already computes.
+- This is genuinely differentiated: it gives you the outcome Dapr 1.18
+  markets, without asking anyone to adopt Dapr.
+
+### 2.4 Turn the recovery report into something a human wants to look at
+The CLI's plaintext recovery report is good engineering; it is not
+something a founder screenshots for a launch post. A `--format rich` flag
+(using `rich`, optional dependency) that renders the same
+`RecoveryContract` as a readable panel, plus a static HTML export
+(`continuum inspect <run> --html report.html`) using only stdlib templating,
+turns your best existing artifact into your best marketing asset. This is
+cheap relative to its payoff.
+
+### 2.5 Framework adapters, ordered by real leverage, not the original list
+Phase 11 currently lists generic Python, OpenAI Agents SDK, LangGraph. Given
+where the ecosystem is now:
+- **LangGraph first** — biggest install base, and its checkpointer story is
+  explicitly the thing Diagrid criticized as "basic." An adapter that lets a
+  `SqliteSaver`/`PostgresSaver` user opt into CONTINUUM's environment
+  revalidation on top of LangGraph's own checkpointing is a clean,
+  non-competing pitch: "keep your checkpointer, add the validator."
+- **Claude Code / Claude Agent SDK** — you're already building this with
+  Claude Code; an adapter that lets a Claude Code session itself checkpoint
+  through CONTINUUM (relevant to the concurrent-write hang you mentioned)
+  doubles as your own dogfood story and a natural launch demo.
+- OpenAI Agents SDK and CrewAI Flow next; both already have their own
+  persistence, so pitch the same "add the validator" angle.
+
+### 2.6 Benchmark: ship the smallest defensible version, not the full CONTINUUM-Bench
+The README is admirably honest that no benchmark harness exists yet. Don't
+build the full 11-scenario suite before launch — build 3 scenarios (process
+crash, dataset change, unknown side effect) with the two baselines you can
+implement honestly (full transcript replay, naive checkpointing), and
+publish real numbers for just those. A small, real number beats a large,
+promised one, and it directly substantiates the compression-ratio and
+recovery-fidelity claims the README currently declines to make.
+
+### 2.7 Packaging and distribution polish (fast, mechanical, high perceived-quality)
+- Migrate to `uv` for the build/publish path; use PyPI Trusted Publishing
+  (OIDC) instead of API tokens in the release workflow — this is the 2026
+  default and its absence now reads as dated.
+- A generated docs site beats a README once the API surface is this large.
+  `mkdocs-material` (mature, in wide use) or a tool like `great-docs`
+  (newer, purpose-built for turning a README into a landing page plus
+  auto-generated API reference from docstrings) are both reasonable; either
+  closes the "no separate API-reference docs" gap flagged in the earlier
+  audit far better than hand-written pages.
+- `SECURITY.md` with a real disclosure process matters more than usual here
+  given the project's subject matter is literally "can this state be
+  trusted." Don't skip it even though it's boilerplate.
+
+## 3. Suggested sequencing
+
+1. **Part A verification + doc fixes** (below) — a few hours, removes every
+   credibility risk currently sitting in the repo.
+2. **Part B fresh audit** (below) — finds real bugs before anyone else does.
+3. **Phase 9 examples**, since the README already promises them.
+4. **Packaging/publishing polish** (2.7) — cheap, mechanical, unblocks a
+   real PyPI release.
+5. **Attestation layer** (2.3) — your strongest differentiated feature,
+   built on infrastructure you already have.
+6. **LangGraph adapter + minimal benchmark** (2.5, 2.6) — this is what
+   turns "interesting repo" into "thing people cite and adopt."
+7. Rich CLI output / HTML export (2.4) last — nice-to-have, not load-bearing.
+
+## 4. New GitHub issues to file (in addition to whatever Part A/B produce)
+
+Only file these once labels are confirmed to exist (Part A, item 3):
+
+- **"Add cryptographic attestation for event chains (`continuum attest`)"**
+  — labels: `research`, `help wanted`. Not `good first issue`; touches
+  security-sensitive code.
+- **"LangGraph adapter: environment revalidation on top of existing
+  checkpointer"** — labels: `adapter`, `help wanted`.
+- **"Minimal CONTINUUM-Bench: 3 scenarios, 2 baselines, real numbers"** —
+  labels: `benchmark`, `research`.
+- **"Migrate release workflow to uv + PyPI Trusted Publishing"** — labels:
+  `good first issue` if scoped to just the workflow file.
+- **"Generate API reference docs site from docstrings"** — labels:
+  `documentation`, `good first issue`.
+
+Don't create these until Part A confirms the label set actually exists;
+otherwise they'll land unlabeled or on the wrong labels.
+
+## 5. Things I will not help with, and why
+
+`docs/` allegedly being a marketing site and `pricing.html` sitting in a
+repo for an Apache-2.0 CPU-only local library is worth flagging as a
+positioning inconsistency, not a security issue — if the audit confirms
+it's genuinely stale template content, delete it or replace it with real
+API docs rather than polish it, since a pricing page on an unpriced OSS
+infra library undercuts the "no cloud account required" pitch the README
+leads with.
+
+---
+
+## 6. Ready-to-run prompt for your coding agent
+
+Paste this to your coding agent (with real repo access) as-is. It preserves
+the standing rules from before: verify before filing, real repo evidence,
+existing labels only, no em dashes, no AI attribution, small scoped items
+marked `good first issue`.
+
+```
+Two parts, in order, same rigor as before: reproduce every candidate before
+treating it as real, and list every confirmed candidate (title + one-line
+summary + evidence) before creating anything on GitHub.
+
+PART A — verify these specific gaps before filing anything:
+
+1. Confirm the Roadmap table's Phase 9 and Phase 11 status against actual
+   repo contents. Specifically: do examples/crash_recovery_agent.py,
+   examples/context_compaction.py, and examples/model_switch.py exist and
+   run to completion? Does adapters/ contain anything beyond base.py? If
+   Phase 9 examples don't exist but the README describes their output as
+   if they do, this is a launch-blocking credibility gap, not a routine
+   docs fix: fix the Roadmap table directly, AND either build the missing
+   examples or clearly mark the README sections as target/illustrative
+   (matching how the Continuum() API section is already marked "not
+   implemented yet"). Do not leave the README implying a working demo that
+   doesn't exist.
+
+2. Find out exactly why MCP server tests are excluded from the suite, what
+   MCP SDK version is installed vs required in pyproject.toml, and whether
+   it's a quick pin fix or a real incompatibility. Show the actual error
+   output, not a paraphrase.
+
+3. Check whether .github/labels config or repo label settings already
+   include detector, adapter, benchmark, research. If genuinely missing,
+   create them via `gh label create` (small, low-risk, no need to ask
+   first). Also create these two if missing, since they'll be needed for
+   the new candidate issues below: none beyond the four listed unless the
+   audit surfaces a real need.
+
+4. Confirm whether CONTRIBUTING.md, SECURITY.md, CODE_OF_CONDUCT.md exist
+   at repo root. If missing, list as a candidate issue rather than creating
+   them yourself. For SECURITY.md specifically, note in the issue that this
+   project's subject matter (state trust and recovery) makes a real
+   vulnerability-disclosure process more than boilerplate.
+
+5. Check docs/ contents directly. Confirm or refute that it's a marketing
+   site rather than API reference docs. Confirm whether any separate
+   API-reference documentation exists anywhere else in the repo (docstrings
+   don't count unless something renders them). If docs/ is confirmed to be
+   marketing content for an unpriced local-only OSS library, flag that as
+   a positioning inconsistency in the candidate list, not just a docs gap.
+
+6. Check pricing.html's actual content verbatim. Flag whether it reads as
+   leftover template copy (placeholder tiers, lorem-ipsum-adjacent text,
+   inconsistent with Apache-2.0 + local-only positioning) versus
+   intentional content someone meant to ship.
+
+PART B — general fresh audit: walk src/continuum/ module by module for real
+bugs, weak coverage, docstring/code mismatches, and TODO/FIXME comments.
+Reproduce every candidate with a failing test or a direct repro before
+treating it as real. Cross-check against issues #1, #6-#13 to avoid
+duplicates.
+
+PART C — new work, only after A and B are filed and confirmed:
+
+1. Draft (don't merge) a `continuum attest` command: sign the event chain's
+   trusted_through hash with a local Ed25519 key, and a `continuum verify
+   --sign` flag. Keep this behind a new optional extra (e.g. `.[attest]`)
+   so the core stays dependency-free. Write it as a design doc + a stub
+   module with tests for the signing/verification round trip before wiring
+   it into the CLI. Stop and show me the design before implementing the
+   full CLI surface.
+
+2. Audit the release workflow (release.yml) against 2026 best practice:
+   is it using uv and PyPI Trusted Publishing (OIDC), or manual API
+   tokens? If tokens, file a candidate issue (good first issue if scoped
+   to just the workflow file) rather than migrating it yourself.
+
+List every confirmed candidate first, title + one-line summary + evidence,
+before creating anything. Same standing rules: real issue templates,
+correct existing labels only (plus the four just created if you added
+them), no em dashes, no AI attribution.
+```
+
