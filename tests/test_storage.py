@@ -6,7 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from continuum.events import EventType
+from continuum.adapters.generic import GenericAgentAdapter
+from continuum.checkpoint import CheckpointManager
+from continuum.environment import StaticProvider, capture
+from continuum.events import EventType, Origin
 from continuum.models import (
     Decision,
     Goal,
@@ -295,6 +298,52 @@ def test_duplicate_checkpoint_ids_are_refused(storage: SQLiteStorage, run: Run) 
     storage.put_checkpoint(checkpoint)
     with pytest.raises(ConcurrentWriteError):
         storage.put_checkpoint(checkpoint)
+
+
+def test_checkpoint_environment_survives_reload_and_validates_dependency(
+    tmp_path: Path,
+) -> None:
+    db = tmp_path / "reload.db"
+    rid = "run_reload"
+
+    store1 = SQLiteStorage(db)
+    adapter1 = GenericAgentAdapter(store1)
+    store1.create_run(Run(run_id=rid, goal="trusted task", status=RunStatus.STARTED))
+    store1.append_event(
+        rid, EventType.RUN_STARTED, {"goal": "trusted task"}, source=Origin.DETERMINISTIC
+    )
+    for _ in range(50):
+        store1.append_event(
+            rid, EventType.WORK_COMPLETED, {"count": 1}, source=Origin.DETERMINISTIC
+        )
+    store1.append_event(
+        rid,
+        EventType.DEPENDENCY_DECLARED,
+        {"resource": "dataset", "version": "v1"},
+        source=Origin.DETERMINISTIC,
+    )
+    env = capture(rid, StaticProvider(dataset="v1"))
+    adapter1.capture_state(
+        rid, adapter1.restore_state(rid), environment=env, reason="trusted checkpoint"
+    )
+    store1.close()
+
+    store2 = SQLiteStorage(db)
+    restored = CheckpointManager(store2).restore(rid, replay=False)
+    assert restored.checkpoint is not None
+    assert restored.checkpoint.environment is not None
+    assert restored.checkpoint.environment.resources["dataset"].version == "v1"
+
+    adapter2 = GenericAgentAdapter(store2)
+    decision = adapter2.resume(rid, current_environment=env)
+    assert decision.mode.value == "resume"
+    assert decision.safe is True
+    dep_entries = [
+        e for e in decision.validation.report.statuses if e.component.value == "external_dependency"
+    ]
+    assert dep_entries
+    assert all(e.status.value == "valid" for e in dep_entries)
+    store2.close()
 
 
 # --- corruption is refused, never returned --------------------------------- #

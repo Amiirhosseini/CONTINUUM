@@ -19,6 +19,19 @@ All notable changes to this project are documented here. The format follows
   v3 and `pypa/gh-action-pypi-publish@release/v1` left unchanged: both run as
   composite actions, not on Node, so they are not affected.
 
+### Added
+
+- **Regression test for the checkpoint environment round-trip.** `tests/test_storage.py`
+  exercises the checkpoint/reload path end to end: a checkpoint is written with a
+  declared dependency and a captured `EnvironmentSnapshot`, the `SQLiteStorage` handle is
+  closed, a *fresh* `SQLiteStorage` is opened on the same file, and the environment is
+  asserted to survive the round-trip. The reloaded run is then assessed against an
+  unchanged environment and must resume as safe — proving `StateValidator.validate_dependency`
+  sees the dependency as unchanged rather than treating a missing baseline as
+  *added/breaking*. This path (serialising `StateCheckpoint.environment` through the
+  checkpoint `body` column and restoring it) had no coverage; this is added test
+  coverage for an untested path, not a fix for a defect.
+
 ### Added — Phase 8: command-line interface
 
 - `continuum` CLI covering `init`, `runs`, `inspect`, `history`, `events`, `diff`, `validate`,
