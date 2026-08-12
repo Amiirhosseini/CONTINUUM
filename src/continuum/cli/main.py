@@ -292,6 +292,7 @@ def cmd_history(args: argparse.Namespace, storage: Storage, out: Any, err: Any) 
 
 
 def cmd_events(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    storage.get_run(args.run_id)  # raises RunNotFound for a run that was never created
     events = storage.read_events(args.run_id, after_sequence=args.after, upto=args.upto)
     payload = [
         {

@@ -121,6 +121,7 @@ def test_a_missing_run_is_distinguishable(db: str) -> None:
     [
         "inspect",
         "history",
+        "events",
         "verify",
         "actions",
         "replay",
