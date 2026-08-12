@@ -25,7 +25,7 @@ CONTINUUM remembers what actually matters.
 
 ## The Problem
 
-Modern AI agents perform long-running tasks — hundreds of LLM calls, tool invocations, API sessions, file mutations, database writes. When they crash (and they will crash), the typical response is to replay everything from scratch.
+Modern AI agents perform long-running tasks - hundreds of LLM calls, tool invocations, API sessions, file mutations, database writes. When they crash (and they will crash), the typical response is to replay everything from scratch.
 
 That means duplicated work, duplicated API calls, duplicated side effects, higher cost, lost decisions, and inconsistent state.
 
@@ -41,7 +41,7 @@ CONTINUUM's differentiator is three-part: **semantic checkpointing** (a compact,
 
 ## How It Works
 
-CONTINUUM separates **LLM context** (temporary) from **durable task state** (permanent). Instead of saving conversation history or full agent state, it constructs a **semantic checkpoint** — the minimum verified information required to continue the task.
+CONTINUUM separates **LLM context** (temporary) from **durable task state** (permanent). Instead of saving conversation history or full agent state, it constructs a **semantic checkpoint** - the minimum verified information required to continue the task.
 
 ```
                    AI AGENT
@@ -84,7 +84,7 @@ CONTINUUM separates **LLM context** (temporary) from **durable task state** (per
 > ```
 >
 > Two entrypoints are installed: `continuum` (the CLI) and `continuum-mcp`
-> (the MCP server). The core library and CLI use only the standard library —
+> (the MCP server). The core library and CLI use only the standard library -
 > the `mcp` extra is required solely for the server.
 
 What runs today (Phases 1–11): record events, project state, checkpoint, survive a crash, validate against the current environment, never duplicate an external side effect, decide how it is safe to resume, expose a stdio MCP server, and plug into agent frameworks.
@@ -109,8 +109,8 @@ The process dies. A new one picks up exactly where it stopped:
 store = SQLiteStorage("agent.db")
 state = project("run_4821", store.read_events("run_4821"))
 
-print(state.progress.completed)  # 3421 — already done, not repeated
-print(store.verify_events("run_4821").ok)  # True — chain intact after the crash
+print(state.progress.completed)  # 3421 - already done, not repeated
+print(store.verify_events("run_4821").ok)  # True - chain intact after the crash
 
 for i, doc in enumerate(documents[state.progress.completed :], state.progress.completed):
     ...
@@ -129,13 +129,13 @@ python scripts/mcp_smoke.py               # real subprocess, real JSON-RPC traff
 ```
 
 `crash_recovery_agent.py` starts a run, performs an external side effect, then
-terminates the process with `os._exit(9)` — no cleanup, no flush — while the
+terminates the process with `os._exit(9)` - no cleanup, no flush - while the
 dataset it depends on changes underneath it. It restarts, detects the change,
 refuses to resume until the uncertain side effect is reconciled, and finishes
 with the work not repeated and the side effect not duplicated.
 
 `context_compaction.py` simulates a long-running agent whose context window
-fills up and is compacted — the full conversation history is discarded. The
+fills up and is compacted - the full conversation history is discarded. The
 semantic checkpoint survives. It measures the actual compression: full
 transcript size versus the bounded recovery context, and confirms the task can
 continue correctly from the checkpoint alone.
@@ -143,7 +143,7 @@ continue correctly from the checkpoint alone.
 `model_switch.py` runs a task under Model A, checkpoints (including
 model-specific assumptions), then simulates Model A becoming unavailable. Model
 B attempts to resume. CONTINUUM flags the model-specific state as needing
-revalidation — it does not silently assume the switch is safe.
+revalidation - it does not silently assume the switch is safe.
 
 `mcp_smoke.py` drives the MCP server as a subprocess over stdio and prints every
 JSON-RPC frame as it crosses the wire. It asserts, rather than reports, that the
@@ -153,7 +153,7 @@ Both exit non-zero if their guarantees fail.
 
 ### The API this is being built toward
 
-The ergonomic wrapper below is **not implemented yet** — it arrives with the runtime and CLI in
+The ergonomic wrapper below is **not implemented yet** - it arrives with the runtime and CLI in
 Phases 4–8. It is shown so the direction is clear, not because it works today:
 
 ```python
@@ -180,11 +180,11 @@ Checkpoint: v17
 
 State validation:
   [ok] Goal
-  [ok] Progress — 3,421 documents already processed
+  [ok] Progress - 3,421 documents already processed
   [ok] 127 findings preserved
   [ok] 14 decisions preserved
   [!!] Dataset version changed (v3 -> v4)
-  [ok] Action ledger — no duplicate side effects
+  [ok] Action ledger - no duplicate side effects
 
 Recovery decision: REPAIR_AND_RESUME
 Repair: Revalidate experiments 14-17
@@ -242,7 +242,7 @@ CONTINUUM will still refuse to call the run safe to resume.
 never verified. A caller that wants to be seen as `claude-code` simply says so.
 
 This is **authorization by declared identity, not authentication**. It keeps
-honestly-named coexisting agents out of each other's runs — the situation this
+honestly-named coexisting agents out of each other's runs - the situation this
 project has actually been in, with several clients pointed at one database. It
 does not defend against a deliberately impersonating local process, which in any
 case can read and write the SQLite file directly.
@@ -275,7 +275,7 @@ correct. Tests cover each adapter without its SDK installed (mocked), with it
 installed (integration, skip-guarded), and against the shared contract.
 
 **Known limitation (open):** `OpenAIAgentAdapter` cannot yet auto-provision a
-run for a fresh agent — `_ensure_run_exists` reads via `get_run` (which raises)
+run for a fresh agent - `_ensure_run_exists` reads via `get_run` (which raises)
 and never reaches its `create_run` branch, so `on_agent_start` raises
 `RunNotFound` for a new run. Tracked as
 [#21](https://github.com/Cyrax321/CONTINUUM/issues/21).
@@ -398,7 +398,7 @@ Before allowing resume, CONTINUUM generates a deterministic, machine-readable co
 
 ## API
 
-### Python — available now
+### Python - available now
 
 ```python
 from continuum import EventType, Run, SQLiteStorage, VersionChain, diff_states, project
@@ -413,7 +413,7 @@ store.verify_events("run_4821")  # audit the chain
 diff_states(previous, state)  # what changed, semantically
 ```
 
-### Python — planned (Phases 4–7)
+### Python - planned (Phases 4–7)
 
 ```python
 from continuum import Continuum  # not implemented yet
@@ -434,7 +434,7 @@ if status.safe:
 
 ### CLI
 
-Standard library only — a recovery tool must not fail to import when you most need it.
+Standard library only - a recovery tool must not fail to import when you most need it.
 
 ```bash
 continuum init                                   # create storage
@@ -481,10 +481,10 @@ Recovery decision: REQUEST_HUMAN
   because 1 external side effect(s) have unknown outcomes
 
 Repairs required:
-  1. [auto]  reconcile_action action_cda6e307 — github.create_issue was interrupted
-  2. [auto]  revalidate_dependency dataset — v3 -> v4
-  3. [auto]  rederive_evidence paper_128 — source 'dataset' changed
-  4. [auto]  rederive_finding finding_17 — rests on changed evidence: paper_128
+  1. [auto]  reconcile_action action_cda6e307 - github.create_issue was interrupted
+  2. [auto]  revalidate_dependency dataset - v3 -> v4
+  3. [auto]  rederive_evidence paper_128 - source 'dataset' changed
+  4. [auto]  rederive_finding finding_17 - rests on changed evidence: paper_128
 
 Next permitted action: reconcile_action:action_cda6e307...
 $ echo $?
@@ -508,7 +508,7 @@ continuum diff checkpoint_a checkpoint_b
 
 ## Architecture
 
-### Data Model (Phase 1 — Complete)
+### Data Model (Phase 1 - Complete)
 
 
 Built on immutable, frozen Pydantic v2 models with cryptographic hash chains:
@@ -541,7 +541,7 @@ Tamper detection built in. `EventLog.verify()` recomputes every digest and re-wa
 
 29 event types covering the full lifecycle: `RUN_STARTED`, `TOOL_CALLED`, `DECISION_CREATED`, `STATE_CHECKPOINTED`, `ENVIRONMENT_CHANGED`, `RECOVERY_STARTED`, `ACTION_RECONCILED`, and more.
 
-### Semantic State Projection (Phase 2 — Complete)
+### Semantic State Projection (Phase 2 - Complete)
 
 State is not stored and mutated. It is *projected* from the event log by a pure fold:
 
@@ -551,8 +551,8 @@ state = reduce(apply, events, empty_state)
 
 Two properties make this safe to recover from, and both are tested:
 
-- **Reproducibility** — folding the same prefix twice yields an equal state. Timestamps come from the events, never from `now()`.
-- **Prefix-closure** — `project(events, upto=n)` equals the state that existed after event `n`.
+- **Reproducibility** - folding the same prefix twice yields an equal state. Timestamps come from the events, never from `now()`.
+- **Prefix-closure** - `project(events, upto=n)` equals the state that existed after event `n`.
 
 Together with the log's `trusted_through`, a run whose tail was tampered with can still be recovered up to its last verified event:
 
@@ -562,7 +562,7 @@ trusted = report.trusted_through["run_4821"]
 state = project("run_4821", log.events("run_4821"), upto=trusted)
 ```
 
-Unknown event types are counted, not fatal — a newer writer's vocabulary must never render a run unrecoverable.
+Unknown event types are counted, not fatal - a newer writer's vocabulary must never render a run unrecoverable.
 
 ### State Extraction
 
@@ -575,9 +575,9 @@ class StateExtractor(Protocol):
     def extract(self, context: ExtractionContext) -> SemanticState: ...
 ```
 
-`DeterministicExtractor` is the default and the only one required. It folds the event log — no model, no network, no clock.
+`DeterministicExtractor` is the default and the only one required. It folds the event log - no model, no network, no clock.
 
-`LLMExtractor` is optional and deliberately constrained. The caller supplies the callable; CONTINUUM has no provider dependency, no API key handling, no network default. The model may only **add** components, never modify or delete recorded facts. Everything it produces is tagged `Origin.LLM` and forced to `REQUIRES_REVIEW`. If it raises, extraction degrades to the deterministic result — losing an optional enrichment must never cost a recovery.
+`LLMExtractor` is optional and deliberately constrained. The caller supplies the callable; CONTINUUM has no provider dependency, no API key handling, no network default. The model may only **add** components, never modify or delete recorded facts. Everything it produces is tagged `Origin.LLM` and forced to `REQUIRES_REVIEW`. If it raises, extraction degrades to the deterministic result - losing an optional enrichment must never cost a recovery.
 
 The deterministic layer is authoritative. The model is an advisor.
 
@@ -592,9 +592,9 @@ chain.commit(state, reason="timer")  # -> None: semantically unchanged
 chain.verify()  # recompute fingerprints, re-walk links
 ```
 
-`commit` returns `None` when nothing meaningful changed, so timer-driven checkpoint policies cannot inflate history with noise. Fingerprints ignore bookkeeping fields — a state means the same thing regardless of when it was projected.
+`commit` returns `None` when nothing meaningful changed, so timer-driven checkpoint policies cannot inflate history with noise. Fingerprints ignore bookkeeping fields - a state means the same thing regardless of when it was projected.
 
-### Durable Storage (Phase 3 — Complete)
+### Durable Storage (Phase 3 - Complete)
 
 SQLite by default. No server, no cloud account, no daemon:
 
@@ -610,7 +610,7 @@ with SQLiteStorage("agent.db") as store:
     store.verify_events("run_4821").ok
 ```
 
-**What the engine guarantees:** append-only events, atomic sequence allocation, and durability once `append_event` returns. WAL journaling keeps readers unblocked while the agent writes. `synchronous=FULL` costs an fsync per append — the alternative can lose the last commits on a crash, silently reintroducing exactly the duplicate-work problem CONTINUUM exists to prevent.
+**What the engine guarantees:** append-only events, atomic sequence allocation, and durability once `append_event` returns. WAL journaling keeps readers unblocked while the agent writes. `synchronous=FULL` costs an fsync per append - the alternative can lose the last commits on a crash, silently reintroducing exactly the duplicate-work problem CONTINUUM exists to prevent.
 
 **What it does not guarantee:** exactly-once semantics. A crash between an external side effect and its ledger write leaves the ledger behind reality. Storage cannot close that gap alone; the action ledger reconciles it in Phase 6. The engine is also single-host and not encrypted at rest.
 
@@ -618,7 +618,7 @@ with SQLiteStorage("agent.db") as store:
 
 **Corruption is refused, never returned.** Runs, versions and checkpoints are validated and hash-checked on read; a mismatch raises `CorruptedRecord` rather than handing back state an agent might act on.
 
-Verified end to end — a worker killed with `os._exit(9)` mid-run, then restarted against the same file:
+Verified end to end - a worker killed with `os._exit(9)` mid-run, then restarted against the same file:
 
 ```text
 [pid 58807] started at 0 completed
@@ -631,7 +631,7 @@ events        102, integrity ok=True, trusted_through=102
 docs written  100 events, 100 unique -> duplicates=0
 ```
 
-### Checkpointing (Phase 4 — Complete)
+### Checkpointing (Phase 4 - Complete)
 
 Checkpointing every turn is the obvious design and the wrong one: it costs an fsync per step and fills history with versions that mean nothing. A policy decides instead.
 
@@ -656,7 +656,7 @@ for doc in documents:
 
 `SemanticPolicy` is the interesting one. Grinding from document 3,400 to 3,401 changes progress but nothing structural. Invalidating a single decision changes what the agent may safely do next. The first is ignored; the second always checkpoints.
 
-Policies are pure functions of an explicit context — including the clock — so checkpoint timing is testable rather than a source of flaky tests.
+Policies are pure functions of an explicit context - including the clock - so checkpoint timing is testable rather than a source of flaky tests.
 
 **Restore replays the gap.** A checkpoint plus the events recorded after it, so a crash *between* checkpoints does not discard the work in between:
 
@@ -701,11 +701,11 @@ EXTERNAL DEPENDENCIES
   dataset: v3 [valid]
 ```
 
-That is a 228-event run rendered in 410 characters. **Stale state is shown, never hidden** — an agent that is not told its dataset changed will confidently continue on invalid assumptions. Under a token budget, sections drop from the least important end, but goal, verified progress and stale state are never sacrificed.
+That is a 228-event run rendered in 410 characters. **Stale state is shown, never hidden** - an agent that is not told its dataset changed will confidently continue on invalid assumptions. Under a token budget, sections drop from the least important end, but goal, verified progress and stale state are never sacrificed.
 
 Token figures reported by `estimate_tokens` are a **character-based heuristic, not a tokenizer**. CONTINUUM takes no model-provider dependency for a size hint. No compression ratio is claimed until the benchmark measures real tokens.
 
-### State Validation (Phase 5 — Complete)
+### State Validation (Phase 5 - Complete)
 
 **A persisted checkpoint is not trustworthy merely because it was persisted.** Before an agent resumes, every component is checked against the environment as it is now.
 
@@ -723,15 +723,15 @@ outcome.safe  # False
 outcome.state  # same state, with statuses already revised
 ```
 
-**Staleness propagates.** A dataset moving v3 to v4 does not only invalidate the dependency — it invalidates the reasoning built on it. The validator walks `dependency -> evidence -> finding -> decision`:
+**Staleness propagates.** A dataset moving v3 to v4 does not only invalidate the dependency - it invalidates the reasoning built on it. The validator walks `dependency -> evidence -> finding -> decision`:
 
 ```text
-[!!] external dependency dataset: conflicted — v3 -> v4
-[!!] evidence paper_128: stale — source 'dataset' changed
-[!!] finding finding_17: stale — rests on changed evidence: paper_128
-[!!] decision d_12: stale — rests on changed support: finding_17
-[ok] goal: valid — v1
-[ok] progress: valid — 60 completed
+[!!] external dependency dataset: conflicted - v3 -> v4
+[!!] evidence paper_128: stale - source 'dataset' changed
+[!!] finding finding_17: stale - rests on changed evidence: paper_128
+[!!] decision d_12: stale - rests on changed support: finding_17
+[ok] goal: valid - v1
+[ok] progress: valid - 60 completed
 
 Safe to resume: no
 ```
@@ -741,15 +741,15 @@ Marking only the dependency would leave the agent reasoning from conclusions it 
 With the same dataset still in place, the identical run resumes cleanly:
 
 ```text
-[ok] external dependency dataset: valid — verified unchanged
+[ok] external dependency dataset: valid - verified unchanged
 Safe to resume: yes
 ```
 
-**Uncertainty degrades, it does not resolve.** A resource that could not be inspected — an API that timed out, a file now unreadable — becomes `UNKNOWN`, never `VALID`. `UNKNOWN` is enough to withhold a clean resume. The system may say "I cannot tell"; it may not guess in its own favour. Callers who genuinely tolerate uncertainty opt in with `strict_unknown=False`, and it stays visible in the report.
+**Uncertainty degrades, it does not resolve.** A resource that could not be inspected - an API that timed out, a file now unreadable - becomes `UNKNOWN`, never `VALID`. `UNKNOWN` is enough to withhold a clean resume. The system may say "I cannot tell"; it may not guess in its own favour. Callers who genuinely tolerate uncertainty opt in with `strict_unknown=False`, and it stays visible in the report.
 
 **Model switches are never assumed safe.** State produced under one model that carries model-specific assumptions is marked `STALE` when another model takes over, and requires revalidation.
 
-### Action Ledger (Phase 6 — Complete)
+### Action Ledger (Phase 6 - Complete)
 
 Storage gives durability for *state*. It cannot give exactly-once semantics for effects on other systems, because the effect and the record of it are two separate writes with a gap between them. The ledger makes that gap observable instead of invisible.
 
@@ -763,7 +763,7 @@ if outcome.fresh:
     issue = github.create_issue(...)
     ledger.complete(outcome.key, external_id=issue.id, result={"url": issue.url})
 else:
-    issue_id = outcome.external_id  # already done — previous result returned
+    issue_id = outcome.external_id  # already done - previous result returned
 ```
 
 **Every crash interleaving is accounted for:**
@@ -775,7 +775,7 @@ else:
 | between effect and record | `STARTED`, no result | **outcome unknown** |
 | after recording | `COMPLETED` | repeat returns stored result |
 
-The middle two are indistinguishable from the ledger alone — which is exactly why they must not be resolved by assumption. `claim` raises `UnknownSideEffect` and requires a reconciler:
+The middle two are indistinguishable from the ledger alone - which is exactly why they must not be resolved by assumption. `claim` raises `UnknownSideEffect` and requires a reconciler:
 
 ```python
 from continuum import ProbeReconciler, Resolution, reconcile_pending
@@ -790,11 +790,11 @@ reconcile_pending(
 
 `ProbeReconciler` asks the external system and is the only strategy that produces evidence. `AssumeNotOccurredReconciler` retries, and requires you to assert `idempotent=True` explicitly so nobody reaches for it by reflex. `ManualReconciler` escalates.
 
-There is deliberately **no `AssumeOccurred` strategy**. Assuming success without evidence silently drops work, and a dropped side effect is invisible — nothing in the system will ever contradict it. A probe that raises is treated as "could not determine", never as evidence of absence: an unreachable API tells you nothing about whether your earlier request landed.
+There is deliberately **no `AssumeOccurred` strategy**. Assuming success without evidence silently drops work, and a dropped side effect is invisible - nothing in the system will ever contradict it. A probe that raises is treated as "could not determine", never as evidence of absence: an unreachable API tells you nothing about whether your earlier request landed.
 
 This is honest **at-least-once with mandatory reconciliation**, not exactly-once. The gap is documented rather than marketed away.
 
-Verified with real subprocesses — a worker that creates a GitHub issue then dies with `os._exit(9)` before recording it:
+Verified with real subprocesses - a worker that creates a GitHub issue then dies with `os._exit(9)` before recording it:
 
 ```text
 === RECOVERY ===
@@ -803,10 +803,10 @@ uncertain side effects: 1 -> ['github.create_issue']
 refused blind retry (UNKNOWN_SIDE_EFFECT)
 reconciled: confirmed as performed: github.create_issue
 
-[!!] external dependency dataset: conflicted — v3 -> v4
-[!!] evidence paper_128: stale — source 'dataset' changed
-[!!] finding finding_17: stale — rests on changed evidence: paper_128
-[ok] progress: valid — 60 completed
+[!!] external dependency dataset: conflicted - v3 -> v4
+[!!] evidence paper_128: stale - source 'dataset' changed
+[!!] finding finding_17: stale - rests on changed evidence: paper_128
+[ok] progress: valid - 60 completed
 
 repeat claim -> fresh=False, external_id=481
 completed 100/100 | events verified: True
@@ -817,7 +817,7 @@ issue count: 1
 
 Sixty documents not reprocessed, one dataset change detected and propagated, and **exactly one issue created** despite the crash.
 
-### Recovery Engine (Phase 7 — Complete)
+### Recovery Engine (Phase 7 - Complete)
 
 Validation says what is wrong. The ledger says what may have happened. The engine turns both into one decision.
 
@@ -837,7 +837,7 @@ decision.permits("rederive_finding:finding_17")  # False
 RESUME < REPAIR_AND_RESUME < REPLAN < WAIT < REQUEST_HUMAN < ROLLBACK < ABORT
 ```
 
-This matters because the signals co-occur. A run can have a stale dataset *and* an uncertain side effect at the same time. Returning whichever was noticed first would make recovery depend on iteration order — and the unsafe answer would win about half the time.
+This matters because the signals co-occur. A run can have a stale dataset *and* an uncertain side effect at the same time. Returning whichever was noticed first would make recovery depend on iteration order - and the unsafe answer would win about half the time.
 
 **Repairs are ordered by dependency, not discovery.** Reconciling an uncertain side effect always comes first: nothing else is safe while the world may or may not have been modified. A dependency is re-pinned before the evidence and findings derived from it, since repairing in the wrong order produces work that is stale the moment it finishes.
 
@@ -858,11 +858,11 @@ required_actions:
 next_allowed:      reconcile_action:action_011f511df03cf454
 ```
 
-Contracts are deterministic and sealed with an integrity hash — one that could be edited between issue and enforcement would gate nothing.
+Contracts are deterministic and sealed with an integrity hash - one that could be edited between issue and enforcement would gate nothing.
 
 The engine is **read-only**. It computes and explains a decision without mutating the run, which is what makes assessment safe to perform against a live database.
 
-Full run — crash, dataset change, and an interrupted side effect together:
+Full run - crash, dataset change, and an interrupted side effect together:
 
 ```text
 Recovery decision: REQUEST_HUMAN
@@ -876,10 +876,10 @@ after reconciling         -> REPAIR_AND_RESUME, next: revalidate_dependency:data
 
 ### Security
 
-- **Deterministic canonical hashing** — sorted keys, UTC-normalized timestamps, enum-by-value serialization, rejection of non-finite floats
-- **Hash-chained events** — tamper-evident audit trail
-- **Credentials never serialized** into state — referenced only, never stored
-- **Provenance tracking** — every state component traces back to its origin event
+- **Deterministic canonical hashing** - sorted keys, UTC-normalized timestamps, enum-by-value serialization, rejection of non-finite floats
+- **Hash-chained events** - tamper-evident audit trail
+- **Credentials never serialized** into state - referenced only, never stored
+- **Provenance tracking** - every state component traces back to its origin event
 
 ---
 
@@ -1034,26 +1034,26 @@ Built framework adapters: generic Python agent, OpenAI Agents SDK, LangGraph.
 The roadmap above tracks the original 14-phase plan. Several substantial
 capabilities have since been built that are not phase-numbered there:
 
-- **MCP server** — a stdio server exposing nine tools (three read-only:
+- **MCP server** - a stdio server exposing nine tools (three read-only:
   `validate`, `resume`, `list_actions`; six mutating). The read-only/mutating
   split is driven by each tool's own `read_only_hint` annotation, so the two
   cannot drift apart.
-- **MCP authorization layer** — mutating tools deny by default and match
+- **MCP authorization layer** - mutating tools deny by default and match
   callers against an allowlist resolved from `CONTINUUM_MCP_MUTATING_CLIENTS`
   (or its alias `CONTINUUM_MCP_ALLOW`) or `.continuum/mcp-policy.json`.
   Read-only tools stay open to everyone. Authorization is by declared client
   identity; see the authentication limitation below.
-- **Provenance and anti-self-certification** — every event records who asserted
+- **Provenance and anti-self-certification** - every event records who asserted
   it (`Event.source`), folded into projected state and signed into the hash
   chain. Agent-reported progress and goals carry `Origin.EXTERNAL_AGENT`
   provenance and are marked `REQUIRES_REVIEW`, so an agent cannot certify its
   own safety.
-- **Schema versioning** — the storage schema is versioned (`SCHEMA_VERSION =
+- **Schema versioning** - the storage schema is versioned (`SCHEMA_VERSION =
   2`). A database written by a *newer* CONTINUUM build is rejected on open with
   `SchemaVersionError`. Rejecting *older* files is incomplete: a pre-v2 database
   currently opens silently and fails later on first write (open issue
   [#17](https://github.com/Cyrax321/CONTINUUM/issues/17)).
-- **Bounded recovery context** — `build_recovery_context` renders the minimum
+- **Bounded recovery context** - `build_recovery_context` renders the minimum
   sufficient briefing under a token budget, truncating from the least important
   end while never dropping the goal, verified progress, or stale state.
 
@@ -1062,28 +1062,28 @@ capabilities have since been built that are not phase-numbered there:
 Drawn from the project spec (`project.md`) but outside the original 1–14
 phases:
 
-- **Cryptographic attestation** — sign the event chain's `trusted_through`
+- **Cryptographic attestation** - sign the event chain's `trusted_through`
   hash (e.g. Ed25519, behind an optional extra so the core stays
   dependency-free) and emit a portable `continuum attest` document, so a run's
   history can be independently verified as unaltered. Builds directly on the
   existing hash chain and canonical hashing; tracked as
   [#24](https://github.com/Cyrax321/CONTINUUM/issues/24).
-- **PostgreSQL storage + object storage** — an optional `postgres.py` backend
+- **PostgreSQL storage + object storage** - an optional `postgres.py` backend
   and S3-compatible object storage, behind the existing `open_storage()` URL
   dispatch (spec §22–§23; the coordinating Cloud API is Phase 13).
-- **Generated API reference** — render the docstring API surface into a docs
+- **Generated API reference** - render the docstring API surface into a docs
   site (e.g. `mkdocs-material`), closing the "no separate API reference" gap
   (issue [#23](https://github.com/Cyrax321/CONTINUUM/issues/23)).
-- **Packaging and distribution polish** — migrate the build/release path to
+- **Packaging and distribution polish** - migrate the build/release path to
   `uv` with PyPI Trusted Publishing (OIDC), add a `Dockerfile` /
   `docker-compose.yml`, and validate `SECURITY.md` (spec §32, §2.7; issue
   [#27](https://github.com/Cyrax321/CONTINUUM/issues/27)).
-- **Community files** — `CODE_OF_CONDUCT.md` at repo root (spec §32; issues
+- **Community files** - `CODE_OF_CONDUCT.md` at repo root (spec §32; issues
   [#22](https://github.com/Cyrax321/CONTINUUM/issues/22) / #28).
-- **LangGraph revalidation adapter** — layer CONTINUUM's environment
+- **LangGraph revalidation adapter** - layer CONTINUUM's environment
   revalidation on top of a LangGraph checkpointer rather than replacing it
   (issue [#25](https://github.com/Cyrax321/CONTINUUM/issues/25)).
-- **Minimal CONTINUUM-Bench** — the first defensible slice of Phase 12: three
+- **Minimal CONTINUUM-Bench** - the first defensible slice of Phase 12: three
   scenarios (process crash, dataset change, unknown side effect), two baselines
   (full transcript replay, naive checkpointing), and real measured numbers
   (issue [#26](https://github.com/Cyrax321/CONTINUUM/issues/26)).
@@ -1130,10 +1130,10 @@ mypy                      # Type check
 
 ## Known Limitations
 
-- **MCP caller authentication** — `clientInfo` is asserted by the client during the handshake and never verified. The authorization layer distinguishes honestly-named callers; it does not defend against a deliberately impersonating local process. Tracked as [#1](https://github.com/Cyrax321/CONTINUUM/issues/1).
-- **OpenAI adapter auto-provisioning** — `OpenAIAgentAdapter` cannot create a run for a fresh agent; `on_agent_start` raises `RunNotFound` because `_ensure_run_exists` raises instead of creating. Tracked as [#21](https://github.com/Cyrax321/CONTINUUM/issues/21).
-- **Unbuilt components** — the benchmark suite (Phase 12), cloud API (Phase 13), and dashboard (Phase 14) do not exist. `continuum benchmark` exits `4` saying so. Framework adapters (Phase 11) and the MCP server are built.
-- **CI Node 24 migration** — the earlier Node 20 deprecation has been resolved; the workflows now run on Node 24.
+- **MCP caller authentication** - `clientInfo` is asserted by the client during the handshake and never verified. The authorization layer distinguishes honestly-named callers; it does not defend against a deliberately impersonating local process. Tracked as [#1](https://github.com/Cyrax321/CONTINUUM/issues/1).
+- **OpenAI adapter auto-provisioning** - `OpenAIAgentAdapter` cannot create a run for a fresh agent; `on_agent_start` raises `RunNotFound` because `_ensure_run_exists` raises instead of creating. Tracked as [#21](https://github.com/Cyrax321/CONTINUUM/issues/21).
+- **Unbuilt components** - the benchmark suite (Phase 12), cloud API (Phase 13), and dashboard (Phase 14) do not exist. `continuum benchmark` exits `4` saying so. Framework adapters (Phase 11) and the MCP server are built.
+- **CI Node 24 migration** - the earlier Node 20 deprecation has been resolved; the workflows now run on Node 24.
 
 For a full account of what is verified, what is believed, and what is neither, see [STATUS.md](STATUS.md). The current set of open correctness bugs (a 2026-08-12 code audit) is tracked there: `resume --repair` records nothing (#19), `continuum events` on a missing run exits 0 instead of 2 (#18), and a pre-v2 database opens silently then fails on first write (#17), in addition to #21 above.
 
@@ -1147,4 +1147,4 @@ Open an issue before submitting large PRs.
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE).
+Apache 2.0 - see [LICENSE](LICENSE).
