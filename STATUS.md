@@ -12,7 +12,7 @@ believed, and what is neither.
 
 ## Verified
 
-657 tests pass, 4 skip, run from a clean `HEAD` (e9c5f78) on Python 3.13 with
+659 tests pass, 4 skipped, run from a clean `HEAD` (e9c5f78) on Python 3.13 with
 `mcp 2.0.0` installed. The MCP server tests are no longer excluded: they load
 and pass against `mcp>=2.0` (the version pinned in `pyproject.toml`). An
 earlier note recorded them as failing to load; that incompatibility is gone
@@ -300,9 +300,10 @@ selected versions are the highest stable semver release for each action as of
 
 ## Not built
 
-Phases 12–14 of the original plan: benchmark suite (CONTINUUM-Bench), cloud API,
-dashboard. **No benchmark numbers have been measured**, and `continuum benchmark`
-exits `4` saying so.
+Phases 13–14 of the original plan: cloud API, dashboard. The minimal
+CONTINUUM-Bench harness (Phase 12) now ships: `continuum benchmark` runs and
+prints measured numbers across three scenarios and three strategies. The fuller
+suite, published baselines, and a dashboard view remain a Phase 12 goal.
 
 ### Framework adapters (Phase 11)
 

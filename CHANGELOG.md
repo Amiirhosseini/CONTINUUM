@@ -49,6 +49,26 @@ All notable changes to this project are documented here. The format follows
   checkpoint `body` column and restoring it) had no coverage; this is added test
   coverage for an untested path, not a fix for a defect.
 
+### Added — Phase 12: CONTINUUM-Bench (minimal harness)
+
+- **`continuum benchmark` now runs a real benchmark instead of exiting 4.** The
+  harness (`src/continuum/benchmark/__init__.py`) measures three scenarios that
+  break naive recovery (process crash, dataset change while the agent is down,
+  interrupted external side effect) across three strategies: `continuum`
+  (semantic checkpoint plus environment revalidation plus action ledger),
+  `replay` (full transcript replay from scratch), and `naive_checkpoint`
+  (resume from the saved progress count, no validation).
+- **Numbers are measured, not invented.** Each run drives the actual library
+  (`SQLiteStorage`, `CheckpointManager`, `ActionLedger`, `StateValidator`,
+  `build_recovery_context`) against an in-process simulated agent; nothing is
+  mocked. Reported per run: duplicate work ratio, duplicated external side
+  effects, whether the strategy detected the stale environment, and the size of
+  the recovery briefing versus the full event log (compression ratio).
+- `benchmark` takes `--total N` (documents per run, default 200) and `--json`
+  for machine consumption. `tests/test_benchmark.py` asserts the continuum
+  strategy shows zero duplicate work, exactly one side effect, detects the
+  dataset change while the naive strategy does not, and that replay wastes work.
+
 ### Added — Phase 8: command-line interface
 
 - `continuum` CLI covering `init`, `runs`, `inspect`, `history`, `events`, `diff`, `validate`,
