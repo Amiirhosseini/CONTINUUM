@@ -25,19 +25,18 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from continuum import (
+from continuum import (  # noqa: E402
     CheckpointManager,
     RecoveryEngine,
     SemanticPolicy,
     SemanticState,
     SQLiteStorage,
-    StateValidator,
     build_recovery_context,
     capture_environment,
 )
-from continuum.checkpoint.context import estimate_tokens
-from continuum.environment import StaticProvider
-from continuum.models import (
+from continuum.checkpoint.context import estimate_tokens  # noqa: E402
+from continuum.environment import StaticProvider  # noqa: E402
+from continuum.models import (  # noqa: E402
     Approval,
     ApprovalStatus,
     Decision,
@@ -137,7 +136,9 @@ def build_rich_state(run_id: str) -> SemanticState:
     ]
 
     pending_work = [
-        PendingWork(task_id="task_001", description="Resolve contradictory evidence from Jones et al."),
+        PendingWork(
+            task_id="task_001", description="Resolve contradictory evidence from Jones et al."
+        ),
         PendingWork(task_id="task_002", description="Complete analysis of papers 1,248–1,500"),
         PendingWork(task_id="task_003", description="Finalize confidence weighting methodology"),
     ]
@@ -197,9 +198,9 @@ def build_rich_state(run_id: str) -> SemanticState:
 def simulate_transcript(state: SemanticState) -> str:
     """Build a plausible full transcript from the state (what compaction loses)."""
     lines = [
-        f"System: You are a research analysis agent.",
+        "System: You are a research analysis agent.",
         f"User: {state.goal.description}",
-        f"Assistant: I'll analyze the papers systematically. Let me start.",
+        "Assistant: I'll analyze the papers systematically. Let me start.",
     ]
 
     for i in range(state.progress.completed):
@@ -240,7 +241,9 @@ def main() -> int:
     storage.create_run(Run(run_id=run_id, goal=state.goal.description, status=RunStatus.STARTED))
 
     env = capture_environment(run_id, StaticProvider(dataset="v2", openai_api="2024-01"))
-    checkpoint = manager.checkpoint(run_id, state=state, environment=env, reason="semantic checkpoint")
+    checkpoint = manager.checkpoint(
+        run_id, state=state, environment=env, reason="semantic checkpoint"
+    )
 
     say(f"    Goal: {state.goal.description}")
     say(f"    Progress: {state.progress.completed}/{state.progress.total} papers analyzed")
@@ -256,7 +259,7 @@ def main() -> int:
     transcript_chars = len(transcript)
     transcript_tokens = estimate_tokens(transcript)
 
-    say(f"    Original transcript size:")
+    say("    Original transcript size:")
     say(f"      characters:         {transcript_chars:,}")
     say(f"      est. tokens (heuristic, chars/4): {transcript_tokens:,}")
     say()
@@ -273,11 +276,13 @@ def main() -> int:
     say(f"      - {len(state.pending_work)} pending work items")
     say(f"      - {len(state.external_dependencies)} external dependencies")
     say(f"      - Model: {state.model.model if state.model else 'none'}")
-    say(f"      - {len(state.model.model_specific_state) if state.model else 0} model-specific assumption(s)")
+    say(
+        f"      - {len(state.model.model_specific_state) if state.model else 0} model-specific assumption(s)"
+    )
     say()
 
     heading("4. Recovery context reconstructed from checkpoint alone")
-    restored = manager.restore(run_id)
+    manager.restore(run_id)
     engine = RecoveryEngine(storage)
     decision = engine.assess(run_id, current_environment=env)
 
@@ -295,19 +300,31 @@ def main() -> int:
 
     heading("5. Measured compression")
     ratio = transcript_chars / recovery_chars if recovery_chars > 0 else float("inf")
-    say(f"    Original transcript:  {transcript_chars:>8,} chars (~{transcript_tokens:>6,} tokens est.)")
-    say(f"    Recovery context:     {recovery_chars:>8,} chars (~{recovery_tokens:>6,} tokens est.)")
+    say(
+        f"    Original transcript:  {transcript_chars:>8,} chars (~{transcript_tokens:>6,} tokens est.)"
+    )
+    say(
+        f"    Recovery context:     {recovery_chars:>8,} chars (~{recovery_tokens:>6,} tokens est.)"
+    )
     say(f"    Compression ratio:    {ratio:>8.1f}x  (characters)")
     say()
 
     heading("6. Can the task correctly continue?")
     say("    From the recovery context alone, a resuming agent knows:")
     say(f"      1. What it was doing: {decision.state.goal.description}")
-    say(f"      2. How far it got:    {decision.state.progress.completed}/{decision.state.progress.total}")
+    say(
+        f"      2. How far it got:    {decision.state.progress.completed}/{decision.state.progress.total}"
+    )
     say(f"      3. What's pending:    {len(decision.state.open_work())} items")
-    say(f"      4. What to distrust:  {len([d for d in decision.state.decisions if d.status.value != 'valid'])} stale decisions")
-    say(f"      5. What needs review: {len([f for f in decision.state.findings if f.status.value == 'requires_review'])} findings")
-    say(f"      6. Safe to resume:    {'yes' if decision.safe else 'no — ' + '; '.join(decision.rationale)}")
+    say(
+        f"      4. What to distrust:  {len([d for d in decision.state.decisions if d.status.value != 'valid'])} stale decisions"
+    )
+    say(
+        f"      5. What needs review: {len([f for f in decision.state.findings if f.status.value == 'requires_review'])} findings"
+    )
+    say(
+        f"      6. Safe to resume:    {'yes' if decision.safe else 'no - ' + '; '.join(decision.rationale)}"
+    )
     say()
 
     if decision.safe and decision.state.progress.completed == state.progress.completed:

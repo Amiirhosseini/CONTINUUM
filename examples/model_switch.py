@@ -22,7 +22,7 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from continuum import (
+from continuum import (  # noqa: E402
     CheckpointManager,
     RecoveryEngine,
     SemanticPolicy,
@@ -32,9 +32,9 @@ from continuum import (
     build_recovery_context,
     capture_environment,
 )
-from continuum.checkpoint.context import estimate_tokens
-from continuum.environment import StaticProvider
-from continuum.models import (
+from continuum.checkpoint.context import estimate_tokens  # noqa: E402
+from continuum.environment import StaticProvider  # noqa: E402
+from continuum.models import (  # noqa: E402
     Decision,
     Evidence,
     ExternalDependency,
@@ -197,7 +197,9 @@ def main() -> int:
     storage.create_run(Run(run_id=run_id, goal=state_a.goal.description, status=RunStatus.STARTED))
 
     env = capture_environment(run_id, StaticProvider(ehr_system="v3.2", criteria_db="2024.1"))
-    checkpoint = manager.checkpoint(run_id, state=state_a, environment=env, reason="model A checkpoint")
+    checkpoint = manager.checkpoint(
+        run_id, state=state_a, environment=env, reason="model A checkpoint"
+    )
 
     say(f"    Model: {MODEL_A}")
     say(f"    Goal: {state_a.goal.description}")

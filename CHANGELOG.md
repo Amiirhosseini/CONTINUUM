@@ -8,6 +8,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`examples/` fail `ruff check`.** The three example scripts carried 13 lint
+  violations (E402, F401, F541, E841) that CI never saw because the lint and
+  format steps only checked `src/ tests/`. The violations are fixed, the scripts
+  are reformatted, and the CI `ruff check`/`ruff format --check` steps now
+  include `examples/`. Fixes #8.
+
 - **CI Node 24 migration.** Bumped all GitHub Actions workflow pins to versions
   that run on Node 24, eliminating deprecation warnings and pre-empting the
   hard failure when GitHub ends its Node 20 grace period. `actions/checkout`
