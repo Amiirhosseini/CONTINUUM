@@ -198,6 +198,64 @@ def test_the_goal_and_stale_state_survive_even_a_tiny_budget() -> None:
     assert "dataset changed" in rendered
 
 
+def test_stale_state_survives_a_tight_budget_even_with_a_next_action() -> None:
+    """Regression test for issue #16.
+
+    When a NEXT SAFE ACTION section (priority 0) is present it sorts ahead of
+    STALE STATE (priority 2). Protection used to be by sorted position, so the
+    injected section pushed STALE STATE out of the protected prefix and it was
+    dropped. Protection is now by section identity, so the agent is never handed
+    its next action without also being told what it must distrust.
+    """
+    stale = state(
+        decisions=[
+            Decision(
+                decision_id=f"d{i}",
+                decision="analysis",
+                status=StateStatus.INVALID,
+                invalidated_reason="dataset v3 -> v4",
+            )
+            for i in range(3)
+        ],
+    )
+    context = build_recovery_context(stale, token_budget=60, next_action="reconcile_action:x")
+    assert "STALE STATE" in context.render()
+    assert "STALE STATE — DO NOT RELY ON" not in context.dropped_sections
+    titles = [section.title for section in context.sections]
+    assert "STALE STATE — DO NOT RELY ON" in titles
+    assert "CURRENT GOAL" in titles
+    assert "VERIFIED PROGRESS" in titles
+
+
+def test_the_protected_sections_are_never_dropped_across_budgets() -> None:
+    """The goal, verified progress and stale state must survive truncation
+    regardless of whether NEXT SAFE ACTION or ENVIRONMENT CHANGES are present."""
+    stale = state(
+        decisions=[
+            Decision(
+                decision_id=f"d{i}",
+                decision="analysis",
+                status=StateStatus.INVALID,
+                invalidated_reason="dataset v3 -> v4",
+            )
+            for i in range(3)
+        ],
+    )
+    for budget in range(1, 200):
+        for next_action in (None, "reconcile_action:x"):
+            context = build_recovery_context(
+                stale,
+                token_budget=budget,
+                next_action=next_action,
+                environment_changes=("data pipeline redeployed",),
+            )
+            assert "STALE STATE — DO NOT RELY ON" not in context.dropped_sections
+            titles = [section.title for section in context.sections]
+            assert "STALE STATE — DO NOT RELY ON" in titles
+            assert "CURRENT GOAL" in titles
+            assert "VERIFIED PROGRESS" in titles
+
+
 def test_an_unbounded_context_is_never_marked_truncated() -> None:
     context = build_recovery_context(
         state(findings=[Finding(finding_id=f"f{i}", claim="c") for i in range(50)])

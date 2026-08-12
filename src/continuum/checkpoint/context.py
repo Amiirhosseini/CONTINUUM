@@ -45,6 +45,16 @@ _CHARS_PER_TOKEN = 4
 
 _TERMINAL = frozenset({StateStatus.INVALID, StateStatus.STALE, StateStatus.CONFLICTED})
 
+#: Sections that survive budget truncation unconditionally, by exact title. The
+#: stale state must reach a resuming agent even if nothing else does.
+_NEVER_DROPPED = frozenset(
+    {
+        "CURRENT GOAL",
+        "VERIFIED PROGRESS",
+        "STALE STATE — DO NOT RELY ON",
+    }
+)
+
 
 def estimate_tokens(text: str) -> int:
     """Approximate token count. A heuristic, not a tokenizer."""
@@ -233,11 +243,15 @@ def build_recovery_context(
 
     kept: list[ContextSection] = []
     dropped: list[str] = []
-    protected = 3  # goal, progress, stale state are never sacrificed
+    # The goal, verified progress and stale state are never sacrificed, regardless
+    # of where they land in the priority sort. Protection is by section identity so
+    # that an injected higher-priority section (e.g. NEXT SAFE ACTION at priority 0)
+    # cannot push STALE STATE out of the protected set.
+    never_dropped = _NEVER_DROPPED
 
-    for index, section in enumerate(populated):
+    for section in populated:
         candidate = RecoveryContext(run_id=state.run_id, sections=(*kept, section))
-        if candidate.estimated_tokens <= token_budget or index < protected:
+        if candidate.estimated_tokens <= token_budget or section.title in never_dropped:
             kept.append(section)
         else:
             dropped.append(section.title)
