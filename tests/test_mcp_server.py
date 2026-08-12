@@ -12,6 +12,8 @@ is plumbing by comparison.
 from __future__ import annotations
 
 import json
+import os
+import sqlite3
 from collections.abc import Iterator
 from typing import Any
 
@@ -22,7 +24,13 @@ from continuum.checkpoint import CheckpointManager
 from continuum.environment import StaticProvider, capture
 from continuum.events import EventType
 from continuum.mcp.authz import AuthorizationPolicy
-from continuum.mcp.server import DEFAULT_DB, build_server, resolve_database
+from continuum.mcp.server import (
+    DEFAULT_DB,
+    ContinuumMCP,
+    _open_server_storage,
+    build_server,
+    resolve_database,
+)
 from continuum.models import ActionStatus, RecoveryMode, Run
 from continuum.storage import SQLiteStorage
 from tests.mcp_helpers import fake_context as _ctx
@@ -661,6 +669,123 @@ def test_an_explicit_argument_wins_over_the_env_var(
 ) -> None:
     monkeypatch.setenv("CONTINUUM_DB", "/tmp/from-env.db")
     assert resolve_database("/tmp/explicit.db") == "/tmp/explicit.db"
+
+
+def _orphan_wal_sidecars(path: str) -> None:
+    """Recreate the sidecar files a hard-killed server leaves behind.
+
+    SIGKILL denies SQLite its WAL checkpoint, so ``<db>-wal`` and ``<db>-shm``
+    survive next to the database. On the affected platform reopening in WAL mode
+    then failed with a disk I/O error; here the files stand in for that state so
+    the recovery has something concrete to remove. The OS-level error itself is
+    injected by the tests, because a crafted sidecar does not raise it on every
+    filesystem (SQLite often just rebuilds it).
+    """
+    with open(f"{path}-wal", "wb"):
+        pass
+    with open(f"{path}-shm", "wb") as shm:
+        shm.write(b"\x00" * 32768)
+
+
+def test_server_startup_recovers_from_orphaned_wal_sidecars(tmp_path: Any) -> None:
+    """A hard-killed predecessor must not wedge the next server launch.
+
+    The first WAL-mode open raises the disk I/O error a crashed predecessor's
+    sidecars provoke; the server's open path must then clear those sidecars and
+    retry, coming up with the database's prior contents still readable. The
+    ``ContinuumMCP`` constructor is checked too, since that is what the entry
+    point builds.
+
+    The error is injected rather than provoked from the crafted sidecars: they
+    reliably reproduce it only on the filesystem the bug was seen on, so forcing
+    the first open to fail while a sidecar is present keeps the test
+    deterministic while still driving the exact recovery branch.
+    """
+    path = str(tmp_path / "agent.db")
+    seed = SQLiteStorage(path)
+    seed.create_run(Run(run_id="survivor", goal="pre-crash work"))
+    seed.append_event("survivor", EventType.RUN_STARTED, {"goal": "pre-crash work"})
+    seed.close()
+
+    _orphan_wal_sidecars(path)
+    assert os.path.exists(f"{path}-wal") and os.path.exists(f"{path}-shm")
+
+    real_init = SQLiteStorage.__init__
+    calls = {"n": 0}
+
+    def _fail_while_sidecar_present(self: Any, database: str, *args: Any, **kwargs: Any) -> None:
+        # Fail as an orphaned-WAL open does, but only while the stale sidecar is
+        # still there. Once recovery removes it, the retry runs the real
+        # constructor and succeeds.
+        calls["n"] += 1
+        if os.path.exists(f"{database}-wal"):
+            raise sqlite3.OperationalError("disk I/O error")
+        real_init(self, database, *args, **kwargs)
+
+    SQLiteStorage.__init__ = _fail_while_sidecar_present  # type: ignore[method-assign]
+    try:
+        # The wal was removed between the two opens: the mid-open callback saw
+        # it present on the failing attempt and absent on the succeeding one.
+        removed_between: list[bool] = []
+        real_remove = os.remove
+
+        def _record_remove(target: str) -> None:
+            removed_between.append(True)
+            real_remove(target)
+
+        os.remove = _record_remove  # type: ignore[assignment]
+        try:
+            storage = _open_server_storage(path)
+        finally:
+            os.remove = real_remove  # type: ignore[assignment]
+        try:
+            # The recovery ran: a failed open, a sidecar removal, then a retry.
+            assert calls["n"] == 2
+            assert removed_between  # at least one stale sidecar was cleared
+            # And the pre-crash work survived the sidecar removal.
+            assert storage.get_run("survivor").goal == "pre-crash work"
+            assert [e.type for e in storage.read_events("survivor")] == [EventType.RUN_STARTED]
+        finally:
+            storage.close()
+
+        # The full server object routes through the same recovery.
+        _orphan_wal_sidecars(path)
+        calls["n"] = 0
+        ctx = ContinuumMCP(path)
+        try:
+            assert calls["n"] == 2
+            assert ctx.storage.get_run("survivor").goal == "pre-crash work"
+        finally:
+            ctx.close()
+    finally:
+        SQLiteStorage.__init__ = real_init  # type: ignore[method-assign]
+
+
+def test_server_open_reraises_a_disk_error_with_no_sidecars(tmp_path: Any) -> None:
+    """A disk I/O error that is not a stale sidecar must still surface.
+
+    With nothing to remove, the recovery has no business swallowing the error
+    or retrying an open that would fail identically.
+    """
+    path = str(tmp_path / "agent.db")
+    SQLiteStorage(path).close()
+
+    calls = {"n": 0}
+    real_init = SQLiteStorage.__init__
+
+    def _always_disk_error(self: Any, database: str, *args: Any, **kwargs: Any) -> None:
+        calls["n"] += 1
+        raise sqlite3.OperationalError("disk I/O error")
+
+    SQLiteStorage.__init__ = _always_disk_error  # type: ignore[method-assign]
+    try:
+        with pytest.raises(sqlite3.OperationalError):
+            _open_server_storage(path)
+    finally:
+        SQLiteStorage.__init__ = real_init  # type: ignore[method-assign]
+
+    # One attempt, then re-raise: no retry when there was nothing to clear.
+    assert calls["n"] == 1
 
 
 @pytest.mark.asyncio

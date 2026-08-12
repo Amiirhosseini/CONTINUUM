@@ -12,12 +12,11 @@ believed, and what is neither.
 
 ## Verified
 
-659 tests pass, 4 skipped, run from a clean `HEAD` (e9c5f78) on Python 3.13 with
-`mcp 2.0.0` installed. The MCP server tests are no longer excluded: they load
-and pass against `mcp>=2.0` (the version pinned in `pyproject.toml`). An
-earlier note recorded them as failing to load; that incompatibility is gone
-with the newer SDK. CI was green on Python 3.11, 3.12 and 3.13, plus lint
-(`ruff`) and strict type-check (`mypy`) — confirmed
+662 tests pass, 4 skipped, on Python 3.13 with `mcp 2.0.0` installed. The MCP
+server tests are no longer excluded: they load and pass against `mcp>=2.0` (the
+version pinned in `pyproject.toml`). An earlier note recorded them as failing to
+load; that incompatibility is gone with the newer SDK. CI was green on Python
+3.11, 3.12 and 3.13, plus lint (`ruff`) and strict type-check (`mypy`), confirmed
 by run
 [31355087372](https://github.com/Cyrax321/CONTINUUM/actions/runs/31355087372).
 Everything below has tests behind it; several of the safety-critical paths have
@@ -238,7 +237,7 @@ A module-by-module audit filed seven issues, each reproduced against clean
 | [#17](https://github.com/Cyrax321/CONTINUUM/issues/17) | **Older-schema DB accepted silently.** A pre-v2 file opens without `SchemaVersionError` (only newer versions are rejected), `read_events` returns `[]` for a populated run, and the first write fails with a raw sqlite `OperationalError`. No migration path exists. | Medium | Open |
 | [#19](https://github.com/Cyrax321/CONTINUUM/issues/19) | **`resume --repair` is a no-op.** Help and docstrings claim `--repair` records the repair plan (and is one of only three mutating commands); in practice it only suppresses a stderr hint, writing nothing. | Medium | Open |
 | [#18](https://github.com/Cyrax321/CONTINUUM/issues/18) | **`events` breaks the exit-code contract.** `continuum events $MISSING` exits 0 with "No events.", while every other run-scoped command exits 2; `events` is absent from the enforcing parametrised test. Tagged `good first issue`. | Medium | Resolved: `1bcc933` gates `cmd_events` on `get_run` (which raises `RunNotFound`, mapped to `NOT_FOUND` by the dispatcher) and adds `events` to the missing-run parametrised test. |
-| Orphaned-WAL startup crash | **MCP server fails to connect after a hard-kill.** A killed server leaves `<db>-wal`/`<db>-shm` sidecars that make `PRAGMA journal_mode=WAL` throw `disk I/O error` on the next launch. Manual fix (delete sidecars) applied 2026-08-13; a self-heal code fix in `src/continuum/mcp/server.py` is designed but not yet implemented (see the MCP server section). | Medium | Open |
+| Orphaned-WAL startup crash | **MCP server fails to connect after a hard-kill.** A killed server leaves `<db>-wal`/`<db>-shm` sidecars that make `PRAGMA journal_mode=WAL` throw `disk I/O error` on the next launch. | Medium | Resolved: `_open_server_storage` in `src/continuum/mcp/server.py` clears orphaned sidecars and retries the open once on `OperationalError` (re-raising when there was nothing to clear), with two regression tests in `tests/test_mcp_server.py`. See the MCP server section. |
 | Stale editable metadata | `pip show continuum-agent` reports its editable location as `Desktop/untitled folder 2` (the pre-move path); imports still resolve correctly, so it is cosmetic. A clean `pip install -e ".[mcp]"` from the current project root fixes it. | Low | Open |
 
 ## The CI Node 24 migration (2026-08-12)
@@ -584,19 +583,30 @@ Opening the server imports `continuum.adapters`, which eagerly imports `langgrap
 is within Claude Code's health-check tolerance today, but deferring the adapter
 imports until first use would be a worthwhile follow-up.
 
-### Open: the crash will recur (pending code fix)
+### Resolved: startup self-heal for orphaned WAL sidecars
 
-Deleting the sidecars is a band-aid. The next hard-kill leaves them again, so the
-server will fail to connect on the following launch until a code fix lands.
-Designed fix (Option 1, not yet implemented): self-heal at MCP-server startup, in
-`src/continuum/mcp/server.py` where storage is opened
-(`ContinuumMCP.__init__` builds `SQLiteStorage(self.database)`); on
-`sqlite3.OperationalError` from `PRAGMA journal_mode=WAL`, drop the orphaned
-`<db>-wal` and `<db>-shm` sidecars and retry opening once. Scope the change to the
-server; do not alter the library's `journal_mode=WAL`, `synchronous=FULL`, or
-IMMEDIATE-transaction guarantees in `src/continuum/storage/sqlite.py`. A regression
-test belongs in `tests/test_mcp_server.py` (write events, plant orphaned sidecars,
-assert the server's open path recovers). Tracked as a planned fix, not yet coded.
+Deleting the sidecars by hand was a band-aid: the next hard-kill left them again,
+so the server would fail to connect on the following launch. This is now fixed in
+code (Option 1). `src/continuum/mcp/server.py` gains `_open_server_storage(database)`,
+which `ContinuumMCP.__init__` uses in place of a direct `SQLiteStorage(...)` open. On
+a `sqlite3.OperationalError` it removes any orphaned `<db>-wal`/`<db>-shm` sidecars
+and retries opening exactly once; if no sidecar was present to remove it re-raises,
+so an unrelated disk error still surfaces rather than being swallowed. The recovery
+is scoped to the server startup path only: the library's `journal_mode=WAL`,
+`synchronous=FULL`, and IMMEDIATE-transaction guarantees in
+`src/continuum/storage/sqlite.py` are untouched.
+
+Two regression tests in `tests/test_mcp_server.py` cover it:
+`test_server_startup_recovers_from_orphaned_wal_sidecars` drives the full recovery
+branch (a failing open, sidecar removal, a succeeding retry, the pre-crash run and
+events still readable, and the `ContinuumMCP` constructor routing through the same
+path), and `test_server_open_reraises_a_disk_error_with_no_sidecars` proves an
+unrelated disk error is re-raised after a single attempt. The tests inject the
+`OperationalError` while a sidecar is present rather than crafting a blocking
+sidecar on disk, because a hand-written `-wal`/`-shm` pair does not reproduce the
+error on every filesystem (on the APFS volume used here SQLite simply rebuilds the
+sidecars and opens cleanly, verified including after a real `kill -9`). Injecting
+the error drives the identical recovery branch deterministically on any filesystem.
 
 ---
 

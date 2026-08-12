@@ -32,6 +32,7 @@ import functools
 import inspect
 import json
 import os
+import sqlite3
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -81,6 +82,39 @@ def resolve_database(explicit: str | None = None) -> str:
     return explicit or os.environ.get(_DB_ENV_VAR) or DEFAULT_DB
 
 
+def _open_server_storage(database: str) -> SQLiteStorage:
+    """Open the server's store, recovering from a hard-killed predecessor.
+
+    A server process killed with SIGKILL cannot run SQLite's WAL cleanup, so it
+    can leave ``<db>-wal`` and ``<db>-shm`` sidecars in an inconsistent state.
+    The next launch then fails to reopen the database in WAL mode with a disk
+    I/O error before it can serve a single request. Those sidecars are
+    reconstructable from the main database, so on that specific error we remove
+    them and retry opening exactly once.
+
+    Deliberately scoped to the server's startup rather than ``SQLiteStorage``
+    itself: an in-process caller that hits a disk I/O error wants it raised, not
+    papered over by deleting files next to its database. The MCP server is the
+    one place where a stale sidecar from a crashed predecessor is the expected
+    cause and clearing it is the right recovery.
+    """
+    try:
+        return SQLiteStorage(database)
+    except sqlite3.OperationalError:
+        removed = False
+        for sidecar in (f"{database}-wal", f"{database}-shm"):
+            try:
+                os.remove(sidecar)
+                removed = True
+            except FileNotFoundError:
+                pass
+        # Nothing to clear means the error was something else; re-raise it
+        # rather than retrying an open that will fail the same way.
+        if not removed:
+            raise
+        return SQLiteStorage(database)
+
+
 def _environment(run_id: str, env: Mapping[str, str] | None) -> EnvironmentSnapshot | None:
     """Build a snapshot from a ``{name: version}`` mapping.
 
@@ -101,7 +135,7 @@ class ContinuumMCP:
 
     def __init__(self, database: str | None = None, *, storage: Storage | None = None) -> None:
         self.database = resolve_database(database)
-        self.storage: Storage = storage or SQLiteStorage(self.database)
+        self.storage: Storage = storage or _open_server_storage(self.database)
         self.adapter = GenericAgentAdapter(self.storage)
 
     def close(self) -> None:

@@ -8,6 +8,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **MCP server fails to connect after a hard-kill (orphaned WAL sidecars).** A
+  server process killed with `SIGKILL` cannot run SQLite's WAL cleanup, so it
+  leaves `<db>-wal` and `<db>-shm` sidecars behind. On the next launch, opening
+  the database in WAL mode could raise `sqlite3.OperationalError: disk I/O error`
+  at `PRAGMA journal_mode=WAL`, crashing the server before it served a single
+  request and surfacing to the client as `Failed to connect`. `ContinuumMCP` now
+  opens its store through a new `_open_server_storage(database)` helper that, on
+  that error, removes the orphaned sidecars and retries the open exactly once;
+  when there is nothing to remove it re-raises, so an unrelated disk error still
+  surfaces. The recovery is confined to the MCP server startup path: the
+  library's `journal_mode=WAL`, `synchronous=FULL`, and IMMEDIATE-transaction
+  guarantees in `storage/sqlite.py` are unchanged. Two regression tests in
+  `tests/test_mcp_server.py` cover the recovery and the re-raise.
+
 - **`examples/` fail `ruff check`.** The three example scripts carried 13 lint
   violations (E402, F401, F541, E841) that CI never saw because the lint and
   format steps only checked `src/ tests/`. The violations are fixed, the scripts
