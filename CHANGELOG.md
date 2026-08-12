@@ -25,6 +25,13 @@ All notable changes to this project are documented here. The format follows
   built. Both are now marked Complete, and the "Planned framework adapters"
   note below the table now reads "Built".
 
+- **`continuum events` now honours the not-found exit code (issue #18).** It
+  previously printed "No events." and exited 0 for a run that was never created,
+  unlike every other run-scoped command which exits 2. `cmd_events` now gates on
+  `get_run` (which raises `RunNotFound`, mapped to `NOT_FOUND` by the dispatcher),
+  and `events` is added to the missing-run parametrised test so the contract is
+  enforced.
+
 - **CI Node 24 migration.** Bumped all GitHub Actions workflow pins to versions
   that run on Node 24, eliminating deprecation warnings and pre-empting the
   hard failure when GitHub ends its Node 20 grace period. `actions/checkout`
