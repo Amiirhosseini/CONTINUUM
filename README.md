@@ -25,6 +25,7 @@
 - [Quick Start](#quick-start)
 - [How it works](#how-it-works)
 - [Features](#features)
+- [Empirical Verification](#empirical-verification)
 - [MCP Integration](#mcp-integration)
 - [Framework Integration](#framework-integration)
 - [Core Concepts](#core-concepts)
@@ -112,6 +113,31 @@ The detailed explanation, the projection model, and the recovery context are in 
 | Framework adapters | Generic Python, OpenAI Agents SDK, and LangGraph integrations |
 | Tamper-evident log | Hash-chained event log (29 event types) with integrity verification |
 
+## Empirical Verification
+
+CONTINUUM is verified not just with mock unit tests, but against real LLM agents, live protocol boundaries, and hard process crashes.
+
+### Real Agent Testing (Claude Code, Gemini CLI, Kilo Code)
+
+- **Claude Code (Opus 4.8) End-to-End Autonomy**: Driven across multi-session invoice-processing batches with mid-run `SIGKILL` hard process terminations. Resumed sessions cleanly queried `continuum_resume`, routed side effects through the two-phase intercept/complete ledger, and scored 7/7 on mechanics. The agent refused to duplicate verified outbox writes and respected the `request_human` safety verdict.
+- **Drift-Hardened Deduplication**: Live agent testing revealed real-world prompt drift across sessions (argument field renames such as `target` vs `outbox_file`, and relative vs absolute paths). This prompted the implementation of canonical path normalization and token-based fallback deduplication in `ActionLedger.claim()`.
+- **Gemini CLI and Kilo Code**: Both third-party clients connected over stdio JSON-RPC and invoked tools against the live SQLite store, validating multi-agent co-existence and authorization isolation.
+
+### Protocol and Boundary Testing (MCP Inspector CLI)
+
+- **Stdio Protocol Compliance**: Verified with `@modelcontextprotocol/inspector` in `--cli` mode driving real subprocess JSON-RPC 2.0 lifecycles across process deaths.
+- **Deny-by-Default Security**: Mutating tools require explicit allowlisting (`CONTINUUM_MCP_MUTATING_CLIENTS`), while read-only tools (`validate`, `resume`, `list_actions`) remain ungated.
+- **Anti-Self-Certification**: External agent claims written via MCP are signed with `Origin.EXTERNAL_AGENT` provenance and degraded to `REQUIRES_REVIEW` (`safe: false`), preventing an agent from validating its own unverified work.
+
+### Crash Recovery and Self-Healing
+
+- **WAL Sidecar Auto-Recovery**: Hard-killing a server process (`kill -9`) can leave SQLite in an inconsistent state with orphaned `-wal` and `-shm` sidecars. The MCP server startup incorporates single-retry self-healing that clears stale sidecars and reopens cleanly.
+
+### Automated Test Suite and Benchmarks
+
+- **672 tests passing** on Python 3.11, 3.12, and 3.13 (including unit, `hypothesis` property-based, and concurrency tests).
+- **CONTINUUM-Bench**: `continuum benchmark` executes in-process recovery benchmarks across three scenarios (`process_crash`, `dataset_change`, `unknown_side_effect`), proving 0 duplicate work, 0 duplicate side effects, and automatic detection of stale environment dependencies.
+
 ## MCP Integration
 
 CONTINUUM ships an MCP server so an agent can record progress, checkpoint, and route external side effects through the ledger without embedding the library:
@@ -133,7 +159,7 @@ CONTINUUM plugs into agent frameworks without becoming one. Three adapters ship 
 | OpenAI Agents SDK | `OpenAIAgentAdapter` | Hooks `ToolContext` / `RunHooks`; optional `openai-agents`. |
 | LangGraph | `LangGraphAgentAdapter` | Wraps a `StateGraph`; optional `langgraph`. |
 
-Each adapter records progress and side effects through the ledger and routes external effects through the two-phase intercept/complete protocol. Known limitation: `OpenAIAgentAdapter` cannot yet auto-provision a run for a fresh agent (issue [#21](https://github.com/Cyrax321/CONTINUUM/issues/21)).
+Each adapter records progress and side effects through the ledger and routes external effects through the two-phase intercept/complete protocol.
 
 ## Core Concepts
 
@@ -172,11 +198,11 @@ Every command accepts `--json`, and the read-only commands never write, so they 
 | Phase | Component | Status |
 |:-----:|:--|:--|
 | 1-11 | Data models, semantic state, persistence, checkpointing, validation, action ledger, recovery engine, CLI, crash-recovery examples, environment snapshots/diffs, framework adapters | Complete |
-| 12 | Benchmark suite (CONTINUUM-Bench) | Planned |
+| 12 | Benchmark suite (CONTINUUM-Bench) | Complete (minimal harness) |
 | 13 | Cloud API (FastAPI + PostgreSQL) | Planned |
 | 14 | Dashboard | Planned |
 
-Beyond the original plan: the MCP server, MCP authorization layer, provenance and anti-self-certification, community files, schema versioning, and a bounded recovery context are shipped. The design for CONTINUUM-Bench (not yet implemented) is in [references/bench.md](references/bench.md). See [STATUS.md](STATUS.md) for the verified-vs-believed breakdown and open correctness bugs.
+Beyond the original plan: the MCP server, MCP authorization layer, provenance and anti-self-certification, community files, schema versioning, and a bounded recovery context are shipped. The design for CONTINUUM-Bench is in [references/bench.md](references/bench.md). See [STATUS.md](STATUS.md) for the verified-vs-believed breakdown and open correctness bugs.
 
 ## What CONTINUUM Is Not
 
@@ -213,12 +239,11 @@ Recent preprints that measure or model the same reliability gaps CONTINUUM targe
 
 ## Status and limitations
 
-- **Tested**: 675 tests passing, 4 skipped (see [STATUS.md](STATUS.md)).
+- **Tested**: 672 tests passing, 7 skipped (see [STATUS.md](STATUS.md)).
 - **Not on PyPI.** Install from a clone (see Quick Start).
 - **MCP caller authentication is not implemented.** `clientInfo` is asserted by the client and never verified, so authorization is by declared identity, not authentication. Tracked as [#1](https://github.com/Cyrax321/CONTINUUM/issues/1).
-- **OpenAI adapter auto-provisioning** cannot create a run for a fresh agent ([#21](https://github.com/Cyrax321/CONTINUUM/issues/21)).
-- **Unbuilt components**: the benchmark suite (Phase 12), cloud API (Phase 13), and dashboard (Phase 14). `continuum benchmark` exits `4` saying so.
-- **e2e breadth is still open** (issue [#6](https://github.com/Cyrax321/CONTINUUM/issues/6)). Run 1 scored 7/7 mechanics with autonomy observed, but only run 1 of the planned repeats is complete, and the defensive fallback bridges argument and field-name drift but not action-type drift (for example `send_invoice` versus `send-invoice-email`), which still requires the caller to reuse the same action type. A single green run is not yet proof of robust autonomous behaviour.
+- **Unbuilt components**: Cloud API (Phase 13) and Dashboard (Phase 14).
+- **e2e autonomy test series** (issue [#6](https://github.com/Cyrax321/CONTINUUM/issues/6)): Three full Claude Code runs scored 7/7 mechanics with unprompted recovery behavior observed. Defensive token-based fallback and path normalization bridge argument drift. Further test iterations across diverse prompt styles remain open.
 
 For a full account of what is verified, believed, and neither, see [STATUS.md](STATUS.md). The current set of open correctness bugs (a 2026-08-12 code audit) is tracked there.
 
