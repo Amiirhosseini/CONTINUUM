@@ -710,8 +710,7 @@ body { background: var(--bg); color: var(--text); font-family: 'Inter', system-u
 
 .footer-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 50px; }
 .footer-brand { display: flex; align-items: center; gap: 10px; }
-.footer-logo-dot { width: 12px; height: 12px; border-radius: 50%; background: #fff; }
-.footer-label { font-family: var(--mono); font-size: 12px; font-weight: 600; color: #4382AD; letter-spacing: 1.5px; text-transform: uppercase; }
+.footer-logo { width: auto; height: 32px; object-fit: contain; }
 .scroll-top-btn { width: 58px; height: 58px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.2); background: transparent; color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.3s ease; }
 .scroll-top-btn:hover { border-color: #fff; transform: rotate(-45deg); }
 
@@ -734,8 +733,8 @@ body { background: var(--bg); color: var(--text); font-family: 'Inter', system-u
 .footer-nav-col a { color: rgba(255,255,255,0.6); font-size: 16px; font-weight: 500; text-decoration: none; transition: all 0.2s ease; }
 .footer-nav-col a:hover { color: #F7F7F5; transform: translateX(4px); }
 
-.footer-giant { display: flex; justify-content: center; margin-top: auto; padding-top: 40px; }
-.footer-giant-logo { max-width: min(560px, 70vw); width: 100%; height: auto; display: block; }
+.footer-giant { font-size: clamp(80px, 10vw, 180px); font-weight: 800; letter-spacing: -0.07em; line-height: 0.8; color: #F7F7F5; margin-top: auto; padding-top: 40px; }
+.giant-o { color: var(--accent); }
 .footer-divider { border-top: 1px solid rgba(255,255,255,0.08); margin-top: 30px; }
 .footer-meta { display: flex; justify-content: space-between; align-items: center; padding-top: 24px; gap: 20px; }
 .meta-left { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 12px; color: #8899AA; }
