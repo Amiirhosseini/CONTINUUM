@@ -95,21 +95,7 @@ The `e2e-autonomy-test/` kit scripts a real invoice-batch task, a hard-kill mid-
 
 CONTINUUM separates **LLM context** (temporary) from **durable task state** (permanent). Instead of saving conversation history, it constructs a semantic checkpoint, the minimum verified information required to continue.
 
-```mermaid
-flowchart LR
-    A[AI agent] --> S[CONTINUUM SDK]
-    S --> SE[State Engine<br/>projection of events]
-    S --> AL[Action Ledger<br/>idempotent side effects]
-    S --> CM[Checkpoint Manager<br/>6 policies: Manual to Hybrid]
-    SE --> EL[("Event Log<br/>append-only, hash-chained<br/>29 event types")]
-    AL --> EL
-    CM --> EL
-    EL --> DB[("Durable Storage<br/>SQLite, WAL")]
-    DB --> ENV[Environment + Validator<br/>staleness propagates<br/>dependency to evidence<br/>to finding to decision]
-    DB --> REC[Recovery Engine<br/>sealed contract names<br/>one next action]
-    ENV --> REC
-    REC --> RES[Resume<br/>bounded recovery context]
-```
+![CONTINUUM architecture](docs/assets/architecture.svg)
 
 The detailed explanation, the projection model, and the recovery context are in [references/architecture.md](references/architecture.md).
 
