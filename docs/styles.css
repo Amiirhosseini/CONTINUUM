@@ -364,12 +364,6 @@ body { background: var(--bg); color: var(--text); font-family: 'Inter', system-u
 .top-bar-right { display: flex; align-items: center; gap: 8px; }
 .top-github { font-size: 11px; font-weight: 700; color: #1a3a52; text-decoration: none; padding: 4px 10px; border-radius: 4px; background: rgba(255,255,255,0.5); transition: background 0.2s; }
 .top-github:hover { background: rgba(255,255,255,0.8); }
-.theme-toggle { width: 28px; height: 28px; border: 1px solid rgba(7, 19, 30, 0.15); background: transparent; color: #1a3a52; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
-.theme-toggle:hover { background: rgba(255,255,255,0.5); }
-.theme-toggle .icon-sun { display: none; }
-.theme-toggle .icon-moon { display: block; }
-[data-theme="light"] .theme-toggle .icon-sun { display: block; }
-[data-theme="light"] .theme-toggle .icon-moon { display: none; }
 .live-dot { width: 6px; height: 6px; border-radius: 50%; background: #22C55E; animation: pulse 2s infinite; }
 .live-text { font-family: var(--mono); font-size: 10px; font-weight: 600; color: #1a3a52; letter-spacing: 0.5px; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
