@@ -408,12 +408,33 @@ def test_a_corrupted_record_is_reported_as_corruption(db: str) -> None:
     assert "integrity error:" in err
 
 
-def test_repair_suppresses_the_hint_but_not_the_verdict(db: str) -> None:
-    """--repair acknowledges the plan; it must not fake a safe exit."""
+def test_repair_records_the_plan_and_does_not_fake_a_safe_exit(db: str) -> None:
+    """--repair must persist the repair plan, not merely suppress the hint."""
+    before = SQLiteStorage(db).last_sequence("run_1")
+
     code, out, err = run("--db", db, "resume", "run_1", "--env", "dataset=v4", "--repair")
     assert code == ExitCode.REQUIRES_REPAIR
     assert "Repairs required" in out
     assert "--repair" not in err
+    assert "Repair plan recorded" in err
+
+    with SQLiteStorage(db) as store:
+        after = store.last_sequence("run_1")
+        events = store.read_events("run_1", after_sequence=before)
+    assert after > before
+    recorded = [e for e in events if e.type == EventType.RECOVERY_STARTED]
+    assert recorded, "no RECOVERY_STARTED event was written"
+    assert recorded[0].payload["mode"] == "repair_and_resume"
+    assert recorded[0].payload["plan"]
+
+
+def test_resume_without_repair_is_still_read_only(db: str) -> None:
+    """Omitting --repair must not write anything, even when repairs are due."""
+    before = SQLiteStorage(db).last_sequence("run_1")
+    code, _, _ = run("--db", db, "resume", "run_1", "--env", "dataset=v4")
+    assert code == ExitCode.REQUIRES_REPAIR
+    assert SQLiteStorage(db).last_sequence("run_1") == before
+
 
 
 def test_tolerating_unknown_is_opt_in(db: str) -> None:

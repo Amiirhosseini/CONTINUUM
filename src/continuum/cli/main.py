@@ -32,6 +32,7 @@ from continuum.checkpoint import CheckpointError, CheckpointManager
 from continuum.cli.colour import Palette
 from continuum.cli.exitcodes import ExitCode, exit_code_for
 from continuum.environment import StaticProvider, capture
+from continuum.events import EventType
 from continuum.models import ActionStatus, EnvironmentSnapshot, EnvResource, RecoveryMode
 from continuum.recovery import RecoveryEngine, render_contract
 from continuum.state.diff import diff_states, render_diff
@@ -387,6 +388,22 @@ def cmd_resume(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
             "\nRun with --repair to record the repair plan, or resolve the items above first.",
             file=err,
         )
+
+    if args.repair and decision.plan:
+        storage.append_event(
+            args.run_id,
+            EventType.RECOVERY_STARTED,
+            {
+                "mode": decision.mode.value,
+                "plan": [step.model_dump() for step in decision.plan.steps],
+            },
+        )
+        print(
+            f"\nRepair plan recorded ({len(decision.plan.steps)} step(s)). "
+            f"Rerun resume to confirm progress.",
+            file=err,
+        )
+
     return exit_code_for(decision.mode)
 
 
