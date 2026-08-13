@@ -10,8 +10,9 @@ recovery and the re-raise. Recorded in CHANGELOG.md under Fixed.
 
 **The server is verified usable through Claude Code.** Registered as an MCP
 server, it reports `✔ Connected`, exposes all nine tools with the correct
-read-only/mutating split, and the full `record_progress` to `checkpoint` to
-`intercept_action` to `complete_action` to `resume` cycle returns correct,
+read-only/mutating split, and the full `continuum_record_progress` to
+`continuum_checkpoint` to `continuum_intercept_action` to
+`continuum_complete_action` to `continuum_resume` cycle returns correct,
 durable JSON. Authorization denies by default. That claim is proven end to end
 over the real stdio protocol, and the unit suite (675 passed, 4 skipped) covers
 every tool.

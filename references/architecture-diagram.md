@@ -13,7 +13,7 @@ state data model, durable storage, and the external systems a run acts on.
 
 | Item | Values |
 |:--|:--|
-| **MCP tools (9)** | Read-only (3): `validate`, `resume`, `list_actions`. Mutating (6): `record_progress`, `checkpoint`, `intercept_action`, `complete_action`, `fail_action`, `reconcile_action`. |
+| **MCP tools (9)** | Read-only (3): `continuum_validate`, `continuum_resume`, `continuum_list_actions`. Mutating (6): `continuum_record_progress`, `continuum_checkpoint`, `continuum_intercept_action`, `continuum_complete_action`, `continuum_fail_action`, `continuum_reconcile_action`. (All names are prefixed with `continuum_`.) |
 | **Recovery modes (7)** | `RESUME`, `REPAIR_AND_RESUME`, `REPLAN`, `WAIT`, `REQUEST_HUMAN`, `ROLLBACK`, `ABORT`. Precedence (most cautious wins): `RESUME -> REPAIR_AND_RESUME -> REPLAN -> WAIT -> REQUEST_HUMAN -> ROLLBACK -> ABORT`. |
 | **Checkpoint policies (6)** | `ManualPolicy`, `IntervalPolicy`, `EventPolicy`, `SemanticPolicy`, `ContextPressurePolicy`, `HybridPolicy` (default). |
 | **Action ledger reconcilers (3)** | `ProbeReconciler` (asks external system, produces evidence), `ManualReconciler` (escalates), `AssumeNotOccurredReconciler` (requires explicit `idempotent=True`). Deliberately no `AssumeOccurred`. |
@@ -21,7 +21,7 @@ state data model, durable storage, and the external systems a run acts on.
 | **Event types (29)** | Including `RUN_STARTED`, `TOOL_CALLED`, `DECISION_CREATED`, `STATE_CHECKPOINTED`, `ENVIRONMENT_CHANGED`, `RECOVERY_STARTED`, `ACTION_RECONCILED`, `WORK_COMPLETED`, `RUN_COMPLETED`, and 20 more across the full lifecycle. |
 | **Action states** | `PLANNED`, `STARTED`, `COMPLETED`, `FAILED`, `UNKNOWN`, `COMPENSATED`, `REQUIRES_REVIEW`. |
 | **Storage guarantees** | Append-only events, atomic sequence allocation, durability on `append_event` return, WAL journaling, `synchronous=FULL`, corruption refused on read (`CorruptedRecord`), loud write races (`ConcurrentWriteError`). No exactly-once (the ledger reconciles the gap). |
-| **Framework adapters (3)** | `GenericAgentAdapter` (in-process, trusted `Origin.DETERMINISTIC`), `OpenAIAgentAdapter` (OpenAI Agents SDK), `LangGraphAdapter` (wraps a `StateGraph`). |
+| **Framework adapters (3)** | `GenericAgentAdapter` (in-process, trusted `Origin.DETERMINISTIC`), `OpenAIAgentAdapter` (OpenAI Agents SDK), `LangGraphAgentAdapter` (subclasses `GenericAgentAdapter`; wraps a `StateGraph`). |
 | **Provenance / origin** | Every state component traces to its origin event: `Origin.DETERMINISTIC`, `Origin.EXTERNAL_AGENT` (marked `REQUIRES_REVIEW`), `Origin.LLM`. |
 
 ## Recovery data flow

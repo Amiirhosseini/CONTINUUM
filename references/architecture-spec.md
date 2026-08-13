@@ -35,7 +35,7 @@ Layer 1 - Agents and clients
   - Generic Python agent (in-process facade)
 
 Layer 2 - Framework adapters (optional installs)
-  - LangGraphAdapter
+  - LangGraphAgentAdapter
   - OpenAIAgentAdapter
   - GenericAgentAdapter
 
@@ -73,17 +73,23 @@ server.
 Thin wrappers that translate a framework's native loop into CONTINUUM calls.
 - GenericAgentAdapter: in-process Python facade, trusted as Origin.DETERMINISTIC.
 - OpenAIAgentAdapter: wraps the OpenAI Agents SDK.
-- LangGraphAdapter: wraps a LangGraph StateGraph.
+- LangGraphAgentAdapter: subclasses GenericAgentAdapter; wraps a LangGraph StateGraph.
 These are optional. An agent can also call the SDK or MCP server directly.
 
 ### 3.3 MCP server (stdio, deny by default)
 A Model Context Protocol server exposing 9 tools. It is read-only by default.
-- Read-only tools (3): validate, resume, list_actions.
-- Mutating tools (6): record_progress, checkpoint, intercept_action,
-  complete_action, fail_action, reconcile_action.
-An auth gate restricts mutating tools to an allowlist
-(CONTINUUM_MCP_MUTATING_CLIENTS or .continuum/mcp-policy.json). Without
-explicit permission, no state-changing call succeeds. This is the
+- Read-only tools (3): continuum_validate, continuum_resume,
+  continuum_list_actions.
+- Mutating tools (6): continuum_record_progress, continuum_checkpoint,
+  continuum_intercept_action, continuum_complete_action,
+  continuum_fail_action, continuum_reconcile_action.
+(Every MCP tool name is prefixed with "continuum_" so it never collides
+with a host tool's own tool names.)
+An auth gate restricts mutating tools to an allowlist. The primary
+environment variable is CONTINUUM_MCP_ALLOW; CONTINUUM_MCP_MUTATING_CLIENTS
+is kept only as a backward-compatible alias. A per-project file
+.continuum/mcp-policy.json is also honored. Without explicit permission,
+no state-changing call succeeds. This is the
 "DENY BY DEFAULT. WORKS WITH CLAUDE CODE." boundary.
 
 ### 3.4 Extractors
@@ -96,9 +102,15 @@ Turn agent output into structured state deltas.
 - Append-only, hash-chained: each event stores the digest of the prior event,
   so tampering is detectable.
 - verify() re-walks the chain and localizes the first corrupted event.
-- 29 event types span the full lifecycle, including RUN_STARTED, TOOL_CALLED,
-  DECISION_CREATED, STATE_CHECKPOINTED, ENVIRONMENT_CHANGED, RECOVERY_STARTED,
-  ACTION_RECONCILED, WORK_COMPLETED, RUN_COMPLETED, and 20 more.
+- 29 event types span the full lifecycle. The complete set:
+  RUN_STARTED, RUN_COMPLETED, RUN_ABORTED, TASK_UPDATED, TOOL_CALLED,
+  TOOL_COMPLETED, TOOL_FAILED, DECISION_CREATED, DECISION_INVALIDATED,
+  EVIDENCE_ADDED, FINDING_ADDED, FINDING_INVALIDATED, WORK_ADDED,
+  WORK_COMPLETED, DEPENDENCY_DECLARED, APPROVAL_REQUESTED, APPROVAL_GRANTED,
+  APPROVAL_REVOKED, MODEL_CHANGED, MODEL_ASSUMPTION_RECORDED,
+  STATE_CHECKPOINTED, STATE_VALIDATED, ENVIRONMENT_CHANGED, RECOVERY_STARTED,
+  RECOVERY_COMPLETED, RECOVERY_BLOCKED, ACTION_RECORDED, ACTION_RECONCILED,
+  ACTION_COMPENSATED.
 - Every state component traces to its origin event (provenance).
 
 ### 3.6 State Engine (semantic projection)
@@ -187,18 +199,25 @@ gap.
 
 ---
 
-## 4. SemanticState data model (10 fields)
+## 4. SemanticState data model (10 semantic fields)
 
-- Goal: what the run is trying to achieve.
-- Progress: verified completion counts.
-- PlanStep[]: the planned steps.
-- Decision[]: conclusions the agent may safely act on.
-- Finding[]: derived observations.
-- Evidence[]: the sources those findings rest on.
-- PendingWork[]: work not yet done.
-- Approval[]: human approvals required or granted.
-- ExternalDependency[]: outside resources the run depends on.
-- ModelState: model identity and model-specific assumptions.
+The actual attribute names on the SemanticState model:
+
+- goal: the run's objective (type Goal).
+- progress: verified completion counts (type Progress).
+- plan: the planned steps (type list[PlanStep]).
+- decisions: conclusions the agent may safely act on (type list[Decision]).
+- findings: derived observations (type list[Finding]).
+- evidence: the sources those findings rest on (type list[Evidence]).
+- pending_work: work not yet done (type list[PendingWork]).
+- approvals: human approvals required or granted (type list[Approval]).
+- external_dependencies: outside resources the run depends on
+  (type list[ExternalDependency]).
+- model: model identity and model-specific assumptions
+  (type ModelState | None).
+
+(Plus metadata fields: run_id, version, source_sequence, created_at,
+updated_at.)
 
 ---
 

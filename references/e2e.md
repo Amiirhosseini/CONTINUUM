@@ -42,7 +42,7 @@ server and toolkit, not yet an autonomous agent. See its README.
 The kit has now run against a real Claude Code session. Run 1 scored 7/7
 mechanics (exactly-once side effects, ledger, projected progress, event
 chain, recovery gate). The autonomy half is demonstrated too: an agent used
-`record_progress`, `intercept_action`, `complete_action`, and `resume`
+`continuum_record_progress`, `continuum_intercept_action`, `continuum_complete_action`, and `continuum_resume`
 unprompted, refused to re-send invoices it verified as already sent, and
 surfaced the `request_human` verdict instead of overriding it.
 
