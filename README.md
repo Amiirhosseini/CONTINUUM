@@ -161,8 +161,8 @@ session, then scores the outbox, ledger, and event chain out of band. It still
 requires a human to drive the two Claude Code sessions, so it verifies the
 server and toolkit, not yet an autonomous agent. See its README.
 
-The kit has now run against real Claude Code sessions. Mechanics score 7/7
-across runs (exactly-once side effects, ledger, projected progress, event
+The kit has now run against a real Claude Code session. Run 1 scored 7/7
+mechanics (exactly-once side effects, ledger, projected progress, event
 chain, recovery gate). The autonomy half is demonstrated too: an agent used
 `record_progress`, `intercept_action`, `complete_action`, and `resume`
 unprompted, refused to re-send invoices it verified as already sent, and
@@ -298,16 +298,21 @@ server, it reports `✔ Connected`, exposes all nine tools with the correct
 read-only/mutating split, and the full `record_progress` to `checkpoint` to
 `intercept_action` to `complete_action` to `resume` cycle returns correct,
 durable JSON. Authorization denies by default. That claim is proven end to end
-over the real stdio protocol, and the unit suite (662 passed, 4 skipped) covers
+over the real stdio protocol, and the unit suite (675 passed, 4 skipped) covers
 every tool.
 
-**What is not yet demonstrated (open: issue #6).** The mechanics are proven, but
-the project's actual goal, an unscripted LLM agent that checkpoints on its own
-initiative, routes side effects through the ledger, and calls `resume` before
-acting after a crash, has not been observed. The `e2e-autonomy-test/` kit drives
-exactly this, but it requires a human to run it against a real agent session, and
-no such run has happened yet. A green mechanics result is not evidence of
-autonomous correct behaviour.
+**What is not yet fully demonstrated (open: issue #6).** Mechanics are now proven
+end to end: run 1 scored 7/7 (exactly-once side effects, ledger, projected
+progress, event chain, recovery gate) against a real Claude Code session, and the
+autonomy half was observed too, an agent used `record_progress`,
+`intercept_action`, `complete_action`, and `resume` unprompted, refused to
+re-send invoices it verified as already sent, and surfaced the `request_human`
+verdict instead of overriding it. What remains open is the *breadth* of that
+evidence: only run 1 of the planned repeats has been completed, and the
+defensive fallback bridges argument and field-name drift but not action-type
+drift (for example `send_invoice` versus `send-invoice-email`), which still
+requires the caller to reuse the same action type. A single green run is not yet
+proof of robust autonomous behaviour.
 
 ---
 
