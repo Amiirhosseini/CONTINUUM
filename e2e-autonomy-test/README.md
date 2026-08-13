@@ -107,6 +107,16 @@ argument formatting, and no spurious `started` slots are created to be failed
 out. The regression test `test_a_stable_key_deduplicates_across_argument_shape_changes`
 mirrors this exact failure.
 
+Re-reading the transcripts also showed the drift was worse than relative vs
+absolute paths: the path argument was renamed (`target` / `outbox_file` /
+`outfile` / `file`), the action type itself differed in one run (`send_invoice`
+vs `send-invoice-email`), and `external_id` was recorded both absolute and
+bare. A defensive layer now covers the cases where the caller supplies no key:
+`arguments_hash`/`idempotency_key` canonically normalize path-like arguments,
+and `ActionLedger.claim()` falls back to token-based identity matching (shared
+scalar values, path basenames/stems, external ids) for a unique same-type
+match. Regression tests mirror each observed drift shape.
+
 One secondary observation, not yet a fix: session 1 reports taking a
 checkpoint (`checkpoint_a03ba166...`), but `continuum_resume` consistently
 reports `checkpoint_version: 0` on resume. Worth investigating whether the

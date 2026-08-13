@@ -24,6 +24,24 @@ All notable changes to this project are documented here. The format follows
   `key="invoice:INV-001"` and relative-path arguments, then intercept again with
   the same key and absolute-path arguments, and assert `proceed: false`.
 
+- **Dedup still failed when the caller supplied no stable key (transcript
+  analysis).** Re-reading the three e2e transcripts showed the real drift was
+  argument *field names* (`target` vs `outbox_file` vs `outfile` vs `file`) and,
+  in one run, the action type itself (`send_invoice` vs `send-invoice-email`),
+  with `external_id` shape drift (absolute path vs bare basename). Path
+  canonicalization alone cannot bridge field renames, and no stable key helps
+  when the agent forgets to pass one. Two defensive layers now cover this:
+  `arguments_hash`/`idempotency_key` canonically normalize path-like arguments
+  (lexical `normpath` plus `~` expansion, URLs untouched) so equivalent path
+  spellings hash identically; and `ActionLedger.claim()` gains a token-based
+  identity fallback for the no-explicit-key case, recognizing an already
+  recorded action of the same type by shared identity tokens (scalar values,
+  path basenames and stems, external ids; weak tokens such as counts and status
+  words are dropped). A unique completed match returns `fresh=False` with the
+  stored result; a unique interrupted match surfaces as uncertain rather than
+  opening a fresh slot; ambiguity and the run id plumbing token never match.
+  Regression tests mirror each observed drift shape.
+
 - **MCP server fails to connect after a hard-kill (orphaned WAL sidecars).** A
   server process killed with `SIGKILL` cannot run SQLite's WAL cleanup, so it
   leaves `<db>-wal` and `<db>-shm` sidecars behind. On the next launch, opening

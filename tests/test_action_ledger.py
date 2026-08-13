@@ -367,3 +367,132 @@ def test_an_explicit_key_ignores_argument_drift(ledger: ActionLedger) -> None:
 def test_an_empty_explicit_key_is_refused(ledger: ActionLedger) -> None:
     with pytest.raises(ValueError, match="non-empty"):
         ledger.claim("send_reminder", {"to": "x"}, key="")
+
+
+# --- defensive identity fallback (issue #6) -------------------------------- #
+#
+# These mirror the real drift observed across three Claude Code e2e runs: the
+# idempotency key hashes arguments verbatim, so an agent that renames an
+# argument field (`target` vs `outbox_file` vs `outfile`) or reformats a path
+# between sessions computes a different key. The only stable identity across
+# every shape was the invoice id token (e.g. `INV-001`), which survives as a
+# scalar value, a path basename, and an external_id stem.
+
+
+def test_path_canonicalization_unifies_equivalent_spellings() -> None:
+    """A path normalized lexically must hash the same as its canonical form."""
+    assert arguments_hash({"outbox": "/tmp/e2e-outbox/./INV-001.sent"}) == arguments_hash(
+        {"outbox": "/tmp/e2e-outbox/INV-001.sent"}
+    )
+    assert arguments_hash({"outbox": "/tmp//e2e-outbox/INV-001.sent"}) == arguments_hash(
+        {"outbox": "/tmp/e2e-outbox/INV-001.sent"}
+    )
+
+
+def test_path_canonicalization_does_not_collapse_distinct_paths() -> None:
+    a = arguments_hash({"target": "/tmp/e2e-outbox/INV-001.sent"})
+    b = arguments_hash({"target": "/tmp/e2e-outbox/INV-002.sent"})
+    assert a != b
+
+
+def test_identity_match_recognises_a_completed_action_across_field_renames(
+    ledger: ActionLedger,
+) -> None:
+    """Session 1 uses invoice_id+target; session 2 uses invoice only."""
+    first = ledger.claim(
+        "send_invoice",
+        {"invoice_id": "INV-001", "target": "/tmp/e2e-outbox/INV-001.sent"},
+    )
+    ledger.complete(first.key, external_id="INV-001.sent")
+
+    second = ledger.claim("send_invoice", {"invoice": "INV-001"})
+    assert not second.fresh
+    assert second.already_completed
+    assert second.external_id == "INV-001.sent"
+
+
+def test_identity_match_survives_external_id_shape_drift(ledger: ActionLedger) -> None:
+    """Session 1 completes with an absolute path; session 2 re-claims by id."""
+    first = ledger.claim(
+        "send_invoice",
+        {"invoice_id": "INV-002", "outbox_file": "/tmp/e2e-outbox/INV-002.sent"},
+    )
+    ledger.complete(first.key, external_id="/tmp/e2e-outbox/INV-002.sent")
+
+    again = ledger.claim("send_invoice", {"invoice_id": "INV-002"})
+    assert not again.fresh
+    assert again.external_id == "/tmp/e2e-outbox/INV-002.sent"
+
+
+def test_identity_match_does_not_collapse_distinct_invoices(ledger: ActionLedger) -> None:
+    """A different invoice id is different work, not a drift of the same work."""
+    first = ledger.claim(
+        "send_invoice",
+        {"invoice_id": "INV-003", "target": "/tmp/e2e-outbox/INV-003.sent"},
+    )
+    ledger.complete(first.key, external_id="INV-003.sent")
+
+    other = ledger.claim("send_invoice", {"invoice": "INV-004"})
+    assert other.fresh
+    assert other.action.arguments["invoice"] == "INV-004"
+
+
+def test_identity_match_does_not_cross_action_types(ledger: ActionLedger) -> None:
+    """send_invoice and send-invoice-email are different operations."""
+    first = ledger.claim(
+        "send_invoice",
+        {"invoice_id": "INV-005", "target": "/tmp/e2e-outbox/INV-005.sent"},
+    )
+    ledger.complete(first.key, external_id="INV-005.sent")
+
+    other = ledger.claim("send-invoice-email", {"invoice": "INV-005"})
+    assert other.fresh
+
+
+def test_identity_match_surfaces_an_interrupted_action(ledger: ActionLedger) -> None:
+    """A drifted re-claim of an interrupted action must not open a fresh slot."""
+    ledger.claim(
+        "send_invoice",
+        {"invoice_id": "INV-006", "target": "/tmp/e2e-outbox/INV-006.sent"},
+    )
+
+    with pytest.raises(UnknownSideEffect, match="may or may not have occurred"):
+        ledger.claim("send_invoice", {"invoice": "INV-006"})
+
+    uncertain = ledger.pending()
+    assert len(uncertain) == 1
+    assert uncertain[0].side_effect_uncertain
+
+
+def test_identity_match_requires_a_distinctive_token(ledger: ActionLedger) -> None:
+    """Generic values (counts, status words) must never trigger a match."""
+    first = ledger.claim("api.call", {"invoice_id": "INV-007", "status": "sent"})
+    ledger.complete(first.key, external_id="INV-007.sent")
+
+    # "1" and "sent" are weak tokens; only INV-008 is new work.
+    other = ledger.claim("api.call", {"id": 1, "status": "sent"})
+    assert other.fresh
+
+
+def test_identity_match_does_not_fire_for_an_explicit_key(ledger: ActionLedger) -> None:
+    """An explicit key asserts identity; the token fallback must not overrule it."""
+    first = ledger.claim("send_reminder", {"to": "x@y.z"}, key="reminder-monday")
+    ledger.complete(first.key, external_id="msg_1")
+
+    second = ledger.claim("send_reminder", {"to": "x@y.z"}, key="reminder-tuesday")
+    assert second.fresh, "a distinct explicit key must still be a second action"
+
+
+def test_identity_match_ignores_the_run_id_plumbing_token(ledger: ActionLedger) -> None:
+    """continuum_run_id rides inside arguments and is common to every claim."""
+    first = ledger.claim(
+        "external.api_call",
+        {"endpoint": "/a", "continuum_run_id": ledger.run_id},
+    )
+    ledger.complete(first.key, external_id="ok")
+
+    other = ledger.claim(
+        "external.api_call",
+        {"endpoint": "/b", "continuum_run_id": ledger.run_id},
+    )
+    assert other.fresh, "a different endpoint is different work"

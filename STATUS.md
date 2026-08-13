@@ -238,7 +238,7 @@ A module-by-module audit filed seven issues, each reproduced against clean
 | [#19](https://github.com/Cyrax321/CONTINUUM/issues/19) | **`resume --repair` is a no-op.** Help and docstrings claim `--repair` records the repair plan (and is one of only three mutating commands); in practice it only suppresses a stderr hint, writing nothing. | Medium | Open |
 | [#18](https://github.com/Cyrax321/CONTINUUM/issues/18) | **`events` breaks the exit-code contract.** `continuum events $MISSING` exits 0 with "No events.", while every other run-scoped command exits 2; `events` is absent from the enforcing parametrised test. Tagged `good first issue`. | Medium | Resolved: `1bcc933` gates `cmd_events` on `get_run` (which raises `RunNotFound`, mapped to `NOT_FOUND` by the dispatcher) and adds `events` to the missing-run parametrised test. |
 | Orphaned-WAL startup crash | **MCP server fails to connect after a hard-kill.** A killed server leaves `<db>-wal`/`<db>-shm` sidecars that make `PRAGMA journal_mode=WAL` throw `disk I/O error` on the next launch. | Medium | Resolved: `_open_server_storage` in `src/continuum/mcp/server.py` clears orphaned sidecars and retries the open once on `OperationalError` (re-raising when there was nothing to clear), with two regression tests in `tests/test_mcp_server.py`. See the MCP server section. |
-| Issue #6 e2e dedup defect | **`continuum_intercept_action` deduplicated on raw argument formatting, not resource identity.** Three real Claude Code e2e runs showed session 2 getting `proceed: true` for invoices session 1 already sent, because relative-path vs absolute-path arguments hashed to different idempotency keys. Correctness survived only because the agents cross-checked the outbox and refused the flag. | High | Resolved: the tool now accepts a stable `key` (e.g. `invoice:INV-001`) that is what makes two attempts the same action, immune to argument drift. Regression test `test_a_stable_key_deduplicates_across_argument_shape_changes`. |
+| Issue #6 e2e dedup defect | **`continuum_intercept_action` deduplicated on raw argument formatting, not resource identity.** Three real Claude Code e2e runs showed session 2 getting `proceed: true` for invoices session 1 already sent, because relative-path vs absolute-path arguments hashed to different idempotency keys. Correctness survived only because the agents cross-checked the outbox and refused the flag. | High | Resolved twice over: the tool accepts a stable `key` (e.g. `invoice:INV-001`) that is what makes two attempts the same action, and a defensive layer now covers the no-key and argument-drift cases (path canonicalization plus a token-based identity fallback in `ActionLedger.claim`). Regression tests: `test_a_stable_key_deduplicates_across_argument_shape_changes` plus the identity-match and canonicalization tests in `tests/test_action_ledger.py`. |
 | Stale editable metadata | `pip show continuum-agent` reports its editable location as `Desktop/untitled folder 2` (the pre-move path); imports still resolve correctly, so it is cosmetic. A clean `pip install -e ".[mcp]"` from the current project root fixes it. | Low | Open |
 
 ## The CI Node 24 migration (2026-08-12)
@@ -646,6 +646,42 @@ test `test_a_stable_key_deduplicates_across_argument_shape_changes` mirrors the
 e2e failure exactly: intercept and complete with `key="invoice:INV-001"` and
 relative arguments, then intercept again with the same key and absolute
 arguments, and assert `proceed: false`.
+
+### Defensive hardening from the transcript analysis
+
+Re-reading the three transcripts showed the stable-key fix was necessary but
+not sufficient on its own. The actual drift was richer than relative-vs-absolute
+paths:
+
+- **Argument field renames.** The send tool was called with `target`,
+  `outbox_file`, `outfile`, and `file` as the path argument name across the
+  runs, so even identical paths hashed differently.
+- **Action type drift.** One run recorded `send_invoice` in one session and
+  `send-invoice-email` in another.
+- **External id shape drift.** Completion reported `/tmp/e2e-outbox/INV-004.sent`
+  in one run and bare `INV-004.sent` in another.
+- **The only stable identity** across every shape was the resource token itself
+  (`INV-001`), surviving as a scalar value, a path basename, and an external id
+  stem.
+
+Two layers now harden dedup so correctness does not depend on the caller
+supplying a key or naming arguments consistently:
+
+1. **Path canonicalization.** `arguments_hash` and `idempotency_key` now
+   normalize path-like arguments (lexical `normpath` plus `~` expansion; URLs
+   untouched) before hashing, so equivalent spellings of the same path collapse.
+2. **Token-based identity fallback.** When `claim()` is called with no explicit
+   key and the exact hash lookup misses, it recognizes an already recorded
+   action of the same type by shared identity tokens (scalar values, path
+   basenames/stems, external ids). Weak tokens (counts, status words) and the
+   `continuum_run_id` plumbing token never match. A unique completed match
+   returns `fresh=False` with the stored result and its real recorded key; a
+   unique interrupted match is surfaced as uncertain (never a fresh slot);
+   multiple candidates fall through rather than guess. Action type drift is not
+   bridged by design: different types are genuinely different operations.
+
+Regression tests mirror each observed drift shape, and the full suite (700
+tests) stays green.
 
 ### Secondary observations
 

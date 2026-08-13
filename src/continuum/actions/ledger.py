@@ -45,7 +45,12 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from continuum.actions.idempotency import IdempotencyKey, arguments_hash, idempotency_key
+from continuum.actions.idempotency import (
+    IdempotencyKey,
+    arguments_hash,
+    idempotency_key,
+    identity_tokens,
+)
 from continuum.events import EventType
 from continuum.models import Action, ActionStatus, UnknownSideEffect, utcnow
 from continuum.security.hashing import stable_hash
@@ -125,6 +130,58 @@ class ActionLedger:
     def get(self, key: str) -> Action | None:
         return self._replay().get(key)
 
+    def _identity_match(
+        self,
+        action_type: str,
+        arguments: Mapping[str, Any] | None,
+        volatile: Sequence[str],
+    ) -> tuple[IdempotencyKey, Action] | None:
+        """Defensive recognition of an already-recorded action despite argument drift.
+
+        The idempotency key hashes arguments verbatim, so an agent that renames
+        an argument field (``target`` vs ``outbox_file``) or reformats a path
+        between sessions computes a different key and the exact lookup misses.
+        As a fallback, when the caller supplied no explicit key, a completed or
+        interrupted action of the same type is recognised by shared identity
+        tokens (scalar values plus path basenames and external ids) rather than
+        by the full argument shape.
+
+        Returns ``(key, action)`` for the unique same-type match, or ``None``
+        when nothing is distinctive enough to be confident. ``None`` is also
+        returned when several actions share a token, because guessing which one
+        the caller means is exactly the quiet failure mode this exists to avoid.
+        """
+        incoming = identity_tokens(arguments, volatile=volatile)
+        if not incoming:
+            return None
+        # The run id rides along inside arguments as ``continuum_run_id`` and is
+        # common to every claim in the run, so it must never count as a
+        # resource token when deciding whether two claims are the same work.
+        plumbing = identity_tokens(external_id=self.run_id)
+        incoming = incoming - plumbing
+
+        completed: list[tuple[IdempotencyKey, Action]] = []
+        uncertain: list[tuple[IdempotencyKey, Action]] = []
+        for stored_key, action in self._replay().items():
+            if action.action_type != action_type:
+                continue
+            known = identity_tokens(action.arguments, external_id=action.external_id)
+            known = known - plumbing
+            if not (incoming & known):
+                continue
+            if action.status in (ActionStatus.STARTED, ActionStatus.UNKNOWN):
+                uncertain.append((IdempotencyKey(stored_key), action))
+            elif action.status is ActionStatus.COMPLETED:
+                completed.append((IdempotencyKey(stored_key), action))
+
+        if len(completed) == 1:
+            return completed[0]
+        if len(completed) > 1:
+            return None
+        if len(uncertain) == 1:
+            return uncertain[0]
+        return None
+
     def all(self) -> Sequence[Action]:
         return list(self._replay().values())
 
@@ -179,6 +236,7 @@ class ActionLedger:
         its real-world outcome cannot be determined, unless ``on_unknown``
         resolves it.
         """
+        explicit_key = key is not None
         idem = idempotency_key(
             action_type,
             arguments,
@@ -188,6 +246,20 @@ class ActionLedger:
         )
         key = idem
         existing = self.get(key)
+
+        if existing is None and not explicit_key:
+            # No explicit key was supplied (the caller did not assert an
+            # identity), and the exact argument-hash lookup missed. Recognise
+            # an already-recorded attempt by shared identity tokens before
+            # opening a brand-new slot, so argument drift between sessions does
+            # not turn a completed action into a fresh proceed=true.
+            matched = self._identity_match(action_type, arguments, volatile)
+            if matched is not None:
+                existing = matched[1]
+                # The caller will report completion or failure against the key
+                # returned in the outcome, so it must be the stored key of the
+                # record we are deferring to, not the freshly-derived one.
+                key = matched[0]
 
         if existing is None:
             action = Action(

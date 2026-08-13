@@ -132,6 +132,33 @@ Measured the suspect lag seen when resuming after 4-5 actions. Findings:
   replay is real but negligible below hundreds of actions; a replay cache is
   deferred until a run grows that large.
 
+## Session 10: defensive dedup hardening (2026-08-13)
+
+Re-read the three e2e transcripts and found the real drift was argument field
+renames (`target` / `outbox_file` / `outfile` / `file`), action type drift in
+one run (`send_invoice` vs `send-invoice-email`), and `external_id` shape
+drift. The only stable identity was the resource token (`INV-001`), surviving
+as scalar value, path basename, and external id stem. The stable-key fix could
+not help when the caller supplied no key or renamed fields.
+
+Added two defensive layers:
+
+1. `arguments_hash` / `idempotency_key` now canonically normalize path-like
+   arguments (lexical `normpath` plus `~` expansion; URLs untouched) before
+   hashing.
+2. `ActionLedger.claim()` gains a token-based identity fallback for the
+   no-explicit-key case: shared identity tokens (scalar values, path
+   basenames/stems, external ids; weak tokens and the `continuum_run_id`
+   plumbing token excluded) recognize a unique same-type match. Completed match
+   returns `fresh=False` with the stored result and real recorded key;
+   interrupted match surfaces as uncertain; ambiguity falls through.
+
+Caught during testing: the fallback initially deduplicated distinct tool calls
+because `continuum_run_id` (a strong token) was present in every claim's
+arguments; the plumbing exclusion fixed it and a regression test pins it.
+
+Verification: 700 tests pass, ruff clean, mypy clean on changed files.
+
 ## Open items carried forward
 
 - Issue #1: MCP authentication (authorization exists; `clientInfo` remains
