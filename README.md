@@ -3,7 +3,11 @@
 </p>
 
 <p align="center">
-  <strong>A lightweight, framework-agnostic semantic recovery layer for long-running AI agents.</strong>
+  <strong>CONTINUUM: Verifiable semantic recovery for long-running AI agents.</strong>
+  Semantic checkpoints (not conversation dumps), an idempotent action ledger
+  that refuses duplicate side effects, and a hash-chained tamper-evident event
+  log, all exposed as a deny-by-default MCP server. Framework-agnostic,
+  Python 3.11+.
 </p>
 
 <p align="center">
