@@ -96,31 +96,40 @@ The `e2e-autonomy-test/` kit scripts a real invoice-batch task, a hard-kill mid-
 CONTINUUM separates **LLM context** (temporary) from **durable task state** (permanent). Instead of saving conversation history, it constructs a semantic checkpoint, the minimum verified information required to continue.
 
 ```
-                   AI AGENT
-                      |
-                      v
-              +-----------------+
-              |  CONTINUUM SDK  |
-              +--------+--------+
-                       |
-           +-----------+-----------+
-           v           v           v
-        State        Action      Evidence
-        Engine       Ledger      Registry
-           |           |           |
-           +-----------+-----------+
-                       v
-              Semantic Checkpoint
-                       |
-                       v
-               Durable Storage
-                       |
-             +---------+---------+
-             v                   v
-        Environment          Recovery
-        Validation              |
-             |                  v
-             +--------------> Resume
+                       AI AGENT
+                          |
+                          v
+                  +-----------------+
+                  |  CONTINUUM SDK  |
+                  +--------+--------+
+                           |
+       +-------------------+-------------------+
+       v                   v                   v
+  State Engine        Action Ledger      Checkpoint Manager
+  (projection         (idempotent        (6 policies:
+   of events)          side effects)      Manual..Hybrid)
+       |                   |                   |
+       +-------------------+-------------------+
+                           v
+                      Event Log
+              append-only, hash-chained (29 types)
+                           |
+                           v
+                  Durable Storage (SQLite, WAL)
+                           |
+       +-------------------+-------------------+
+       v                                       v
+  Environment (snapshot + diff)          Recovery Engine
+       |                                       |
+       v                                       v
+  Validator (staleness                      Sealed contract,
+  dependency to evidence to                 names one next
+  finding to decision)                      action
+       |                                       |
+       +-------------------+-------------------+
+                           v
+                       Resume (bounded
+                       recovery context)
 ```
 
 The detailed explanation, the projection model, and the recovery context are in [references/architecture.md](references/architecture.md).
