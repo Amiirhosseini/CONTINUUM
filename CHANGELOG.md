@@ -102,6 +102,33 @@ All notable changes to this project are documented here. The format follows
   v3 and `pypa/gh-action-pypi-publish@release/v1` left unchanged: both run as
   composite actions, not on Node, so they are not affected.
 
+- **Older-schema databases opened silently, then failed with a raw sqlite
+  error (issue #17).** A pre-v2 file opened without `SchemaVersionError`
+  (only *newer* versions were rejected), `read_events` returned `[]` for a
+  populated run, and the first write failed with
+  `OperationalError: table events has no column named event_id`, which did
+  not name the real cause. `_migrate` in `src/continuum/storage/sqlite.py`
+  now raises `SchemaVersionError` when the stored schema version is below
+  `SCHEMA_VERSION`, mirroring the existing newer-version guard. There is no
+  automatic migration path, so the error tells the operator to reset the
+  database or open it with a compatible build. Reproduced from the report's
+  v1 fixture; the fix is covered by
+  `tests/test_storage.py::test_an_older_schema_is_refused`, which writes a
+  v1 `continuum_meta` row and asserts the open is refused with "older
+  CONTINUUM". Closed by commit `82b9f1c`.
+
+- **`continuum resume --repair` recorded nothing; the flag was a no-op (issue
+  #19).** The help text and `cmd_resume` docstring said `--repair` records the
+  repair plan, but it only suppressed the stderr hint and left the database
+  unchanged. `cmd_resume` in `src/continuum/cli/main.py` now appends a
+  `RECOVERY_STARTED` event carrying the assessment's plan steps (kind, target,
+  reason, requires_human) whenever `--repair` is given and a plan exists, and
+  confirms the write on stderr. Omitting `--repair` remains strictly read-only.
+  Covered by `tests/test_cli.py::test_repair_records_the_plan_and_does_not_fake_a_safe_exit`
+  (asserts the `RECOVERY_STARTED` event is written with its mode and plan) and
+  `tests/test_cli.py::test_resume_without_repair_is_still_read_only`. Closed by
+  commit `f145818`.
+
 ### Added
 
 - **Regression test for the checkpoint environment round-trip.** `tests/test_storage.py`
