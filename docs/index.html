@@ -435,12 +435,108 @@
     </div>
   </section>
 
+  <!-- SIMULATOR -->
+  <section class="simulator-section" id="simulator">
+    <div class="section-header">
+      <h2 class="section-title">Interactive Fault Recovery Simulator</h2>
+      <p class="section-subtitle">Simulate real-world agent failures and inspect how CONTINUUM handles recovery contracts.</p>
+    </div>
+
+    <div class="sim-container">
+      <div class="sim-sidebar">
+        <div class="sim-sidebar-title">Select Failure Scenario</div>
+        <button class="sim-nav-btn active" data-scenario="crash">
+          <span>Process Crash / Restart</span>
+          <span class="sim-badge ok">RESUME</span>
+        </button>
+        <button class="sim-nav-btn" data-scenario="dataset">
+          <span>Environment Shift (v3 &rarr; v4)</span>
+          <span class="sim-badge warn">REPAIR</span>
+        </button>
+        <button class="sim-nav-btn" data-scenario="model">
+          <span>Model Switch (GPT-4 &rarr; Claude)</span>
+          <span class="sim-badge warn">MODEL</span>
+        </button>
+        <button class="sim-nav-btn" data-scenario="sideeffect">
+          <span>Uncertain Side Effect</span>
+          <span class="sim-badge err">HUMAN</span>
+        </button>
+      </div>
+
+      <div class="sim-main">
+        <div class="sim-topbar">
+          <div class="sim-tabs">
+            <button class="sim-tab-btn active" data-tab="terminal">Terminal Output</button>
+            <button class="sim-tab-btn" data-tab="state">Semantic State JSON</button>
+            <button class="sim-tab-btn" data-tab="contract">Recovery Contract JSON</button>
+          </div>
+          <span class="sim-version">continuum-cli v0.1.0</span>
+        </div>
+        <div class="sim-output-area" id="simOutputArea">
+          <!-- Dynamically populated by app.js -->
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- WHAT WE MAKE -->
   <section class="what-we-make-section" id="what-we-make">
     <div class="what-we-make-container">
       <p class="what-we-make-eyebra">the good stuff</p>
       <h2 class="what-we-make-title">WHAT WE MAKE</h2>
       <div class="what-we-make-note">One library. Three surfaces: Python SDK, MCP server, CLI.</div>
+    </div>
+  </section>
+
+  <!-- QUICKSTART -->
+  <section class="quickstart-section" id="quickstart">
+    <div class="quickstart-card">
+      <div class="quickstart-header">
+        <p class="quickstart-eyebra">start building</p>
+        <h2 class="quickstart-title">Up and running in minutes</h2>
+        <p class="quickstart-note">Not on PyPI yet, install from a clone. The core library and CLI use only the standard library, the <code>mcp</code> extra adds the server.</p>
+      </div>
+
+      <div class="quickstart-grid">
+        <div class="qs-block">
+          <div class="qs-block-head">
+            <span class="qs-num">01</span>
+            <h3 class="qs-heading">Install</h3>
+          </div>
+          <pre class="qs-code"><code>git clone https://github.com/Cyrax321/CONTINUUM
+cd CONTINUUM
+uv venv
+uv pip install -e ".[dev]"</code></pre>
+          <p class="qs-text">Two entrypoints land on your PATH: <code>continuum</code> (the CLI) and <code>continuum-mcp</code> (the MCP server).</p>
+        </div>
+
+        <div class="qs-block">
+          <div class="qs-block-head">
+            <span class="qs-num">02</span>
+            <h3 class="qs-heading">Record a run</h3>
+          </div>
+          <pre class="qs-code"><code>from continuum import EventType, Run, SQLiteStorage
+
+store = SQLiteStorage("agent.db")
+store.create_run(Run(run_id="run_4821", goal="Analyze docs"))
+store.append_event("run_4821", EventType.RUN_STARTED, {"total": 10_000})</code></pre>
+          <p class="qs-text">Append events as the agent works. The chain is hash linked and verifiable after a crash.</p>
+        </div>
+
+        <div class="qs-block">
+          <div class="qs-block-head">
+            <span class="qs-num">03</span>
+            <h3 class="qs-heading">Resume</h3>
+          </div>
+          <pre class="qs-code"><code>continuum resume run_4821
+continuum validate run_4821</code></pre>
+          <p class="qs-text">Decide how a run may safely resume, or validate state against the live environment. See <code>python examples/crash_recovery_agent.py</code>.</p>
+        </div>
+      </div>
+
+      <div class="quickstart-cta">
+        <a href="https://github.com/Cyrax321/CONTINUUM/blob/main/README.md" target="_blank" rel="noopener" class="qs-btn">Read the full README &#8594;</a>
+      </div>
     </div>
   </section>
 
@@ -574,7 +670,8 @@
       <div class="footer-inner">
         <div class="footer-header">
           <div class="footer-brand">
-            <img src="assets/logo.png" alt="CONTINUUM Logo" class="footer-logo">
+            <div class="footer-logo-dot"></div>
+            <span class="footer-label">CONTINUUM</span>
           </div>
           <button class="scroll-top-btn" id="scrollTopBtn" aria-label="Scroll to top">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 15l-6-6-6 6"/></svg>
