@@ -436,7 +436,6 @@ def test_resume_without_repair_is_still_read_only(db: str) -> None:
     assert SQLiteStorage(db).last_sequence("run_1") == before
 
 
-
 def test_tolerating_unknown_is_opt_in(db: str) -> None:
     interrupt_a_side_effect(db)
     strict, _, _ = run("--db", db, "resume", "run_1", "--env", "dataset=v3")
