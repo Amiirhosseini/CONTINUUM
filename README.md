@@ -1158,6 +1158,29 @@ semantic state  +  environment validation  +  action reconciliation  =  safe rec
 
 ---
 
+## Related work
+
+CONTINUUM sits at the overlap of durable execution, idempotent side-effect tracking, and crash recovery for LLM agents. The surrounding literature is mostly engineering writing, with a few recent preprints that examine the same failure modes directly.
+
+### Foundations
+
+- **Idempotency keys.** The standard "do not do it twice" mechanism for external systems. See Stripe's [idempotent requests](https://docs.stripe.com/api/idempotent_requests) and the [AWS Lambda Powertools idempotency utility](https://docs.aws.amazon.com/lambda/latest/dg/powertools-idempotency.html).
+- **Transaction outbox pattern.** Write intent and effect record in one durable step, then dispatch, so a crash cannot lose an in-flight side effect ([Chris Richardson's write-up](https://microservices.io/patterns/data/transactional-outbox.html)).
+- **Saga pattern and compensating actions.** A sequence of local steps where each has a semantic undo, so a failure can be repaired without an ACID rollback. Relevant to CONTINUUM's `COMPENSATED` action state and dependency-safe repair ([saga pattern](https://microservices.io/patterns/data/saga.html)).
+- **Durable execution engines.** [Temporal](https://docs.temporal.io/), Restate, and DBOS persist a journal of completed steps and replay it for exactly-once semantics across crashes and redeploys.
+- **Anthropic, Building Effective Agents (2024).** Workflow and orchestration patterns that frame agents as stateful processes worth making durable ([research post](https://www.anthropic.com/research/building-effective-agents)).
+
+### Academic context
+
+Recent preprints that measure or model the same reliability gaps CONTINUUM targets (all arXiv links verified live):
+
+- Khan, *Resume Means Resume: A Machine-Checked Conformance Contract for Checkpoint, Interrupt, and Resume Semantics in Workflow Persistence Layers*, [arXiv:2608.03836](https://arxiv.org/abs/2608.03836) (2026). Proves a reference resume contract in TLA+ and measures that widely deployed frameworks re-execute durably recorded work after a real SIGKILL and cannot resume after a mid-node crash, the exact defects CONTINUUM's ledger and recovery gate exist to prevent.
+- Chang, Geng, and Chang, *Mnemosyne: Agentic Transaction Processing for Validating and Repairing AI-generated Workflows*, [arXiv:2607.00269](https://arxiv.org/abs/2607.00269) (2026). Treats generated actions as untrusted proposals admitted only against a declared constraint set, with an append-only transition log and dependency-safe compensation. Close to CONTINUUM's deny-by-default admission and provenance model.
+- Liu, Zhao, Shang, and Shen, *Dive into Claude Code: The Design Space of Today's and Future AI Agent Systems*, [arXiv:2604.14228](https://arxiv.org/abs/2604.14228) (2026). Finds that most agent code is operational infrastructure (context management, permission systems, append-oriented session storage) rather than model logic, the layer CONTINUUM lives in.
+- Tavori, Bremler-Barr, Levy, and Lavi, *RetryGuard: Preventing Self-Inflicted Retry Storms in Cloud Microservices Applications*, [arXiv:2511.23278](https://arxiv.org/abs/2511.23278) (2025). Shows default retry patterns amplify cost and load under failure, motivating global retry budgets rather than per-call loops.
+
+---
+
 ## Development
 
 **Prerequisites**: Python 3.11+
