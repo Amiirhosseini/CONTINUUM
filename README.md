@@ -1189,9 +1189,18 @@ For a full account of what is verified, what is believed, and what is neither, s
 
 ## Contributing
 
+Contributions are welcome. This project is open source under Apache 2.0 and
+deliberately built to be extended: by researchers validating the recovery
+semantics, by engineers porting the ledger or MCP server to other frameworks or
+languages, and by anyone turning the planned roadmap (benchmarks, cloud API,
+dashboard) into reality. A good place to start is the `good first issue` label
+on the [issue tracker](https://github.com/Cyrax321/CONTINUUM/issues), or the
+open correctness bugs listed in STATUS.md.
+
 Phases 1–11 are complete: data models, semantic state, persistence, checkpointing, validation, the action ledger, the recovery engine, the CLI, crash-recovery examples, environment snapshots and diffs, and framework adapters. Remaining planned work is the benchmark suite (Phase 12), cloud API (Phase 13), and dashboard (Phase 14), alongside the open correctness bugs tracked in STATUS.md and on the issue tracker.
 
-Open an issue before submitting large PRs.
+Open an issue before submitting large PRs. See [CONTRIBUTING.md](CONTRIBUTING.md)
+for the full contribution guide, including the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ---
 
