@@ -484,6 +484,25 @@ def test_a_newer_schema_is_refused(tmp_path: Path) -> None:
         SQLiteStorage(db)
 
 
+def test_an_older_schema_is_refused(tmp_path: Path) -> None:
+    from continuum.storage import SchemaVersionError
+    from continuum.storage.sqlite import SCHEMA_VERSION
+
+    db = tmp_path / "agent.db"
+    SQLiteStorage(db).close()
+
+    raw = sqlite3.connect(db)
+    raw.execute(
+        "UPDATE continuum_meta SET value = ? WHERE key = 'schema_version'",
+        (str(SCHEMA_VERSION - 1),),
+    )
+    raw.commit()
+    raw.close()
+
+    with pytest.raises(SchemaVersionError, match="older CONTINUUM"):
+        SQLiteStorage(db)
+
+
 def test_reopening_an_existing_database_is_not_a_migration(tmp_path: Path) -> None:
     db = tmp_path / "agent.db"
     with SQLiteStorage(db) as store:

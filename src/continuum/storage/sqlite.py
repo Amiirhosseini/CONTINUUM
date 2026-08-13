@@ -168,6 +168,12 @@ class SQLiteStorage(Storage):
                     f"database schema v{found} was written by a newer CONTINUUM; "
                     f"this build understands v{SCHEMA_VERSION}"
                 )
+            if found < SCHEMA_VERSION:
+                raise SchemaVersionError(
+                    f"database schema v{found} was written by an older CONTINUUM; "
+                    f"this build requires v{SCHEMA_VERSION}. No automatic migration "
+                    f"is available: reset the database or open it with a compatible build."
+                )
 
     # -- transactions ----------------------------------------------------- #
 
