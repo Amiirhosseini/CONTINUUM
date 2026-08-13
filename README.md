@@ -173,7 +173,7 @@ The deep reference for each concept lives in [references/concepts.md](references
 
 ## Architecture
 
-The system is built on immutable Pydantic v2 models with a cryptographic hash chain. State is projected from an append-only event log by a pure fold, not stored and mutated. The full reference, including the data model, event log, projection, extraction, versioning, durable storage, checkpointing, recovery context, state validation, action ledger, recovery engine, and security model, is in [references/architecture.md](references/architecture.md). The project structure and module map are there too.
+The system is built on immutable Pydantic v2 models with a cryptographic hash chain. State is projected from an append-only event log by a pure fold, not stored and mutated. The full reference, including the data model, event log, projection, extraction, versioning, durable storage, checkpointing, recovery context, state validation, action ledger, recovery engine, and security model, is in [references/architecture.md](references/architecture.md). A complete system diagram and enumerated reference (tools, recovery modes, policies, reconcilers) is in [references/architecture-diagram.md](references/architecture-diagram.md). The project structure and module map are in [references/architecture.md](references/architecture.md).
 
 Key guarantees: append-only events, atomic sequence allocation, durability on `append_event` return, write races fail loudly, and corruption is refused rather than returned.
 

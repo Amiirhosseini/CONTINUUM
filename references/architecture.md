@@ -1,5 +1,10 @@
 ## Architecture
 
+A complete system diagram, a sequence diagram of the recovery data flow, and an
+enumerated reference (tools, recovery modes, checkpoint policies, reconcilers,
+state fields, event types) are in
+[architecture-diagram.md](architecture-diagram.md).
+
 ### Data Model (Phase 1 - Complete)
 
 
