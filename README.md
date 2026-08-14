@@ -111,7 +111,30 @@ The detailed explanation, the projection model, and the recovery context are in 
 | Recovery engine | Seven recovery modes with a deterministic, sealed next-action contract |
 | Deny-by-default MCP server | Nine tools, read-only/mutating split, caller allowlist |
 | Framework adapters | Generic Python, OpenAI Agents SDK, and LangGraph integrations |
-| Tamper-evident log | Hash-chained event log (29 event types) with integrity verification |
+| Secure planning loop | Two-signal observation verification escalates high-risk branches to REQUIRES_REVIEW |
+| Periodic revalidation | Environment re-checked on a schedule, catching mid-run drift within one cycle |
+| Tamper-evident log | Hash-chained event log (32 event types) with integrity verification |
+
+## Security Extension
+
+CONTINUUM adds two additive security extensions on top of the existing recovery
+and checkpoint substrate. They do not change resume, replay, or the existing
+crash-time revalidation path.
+
+- **Secure Planning Loop**: observations (for example a perception of a UI
+  element) carry provenance and are verified by two independent signals
+  (`verified` / `unverified` / `contested`). A plan branch gated on an
+  observation is escalated to `REQUIRES_REVIEW` when it is high risk and the
+  observation is not fully verified, or when an environment observation is
+  contested. Verification decisions and branch resolutions are appended to the
+  ledger as `PERCEPTION_OBSERVED` and `BRANCH_RESOLVED` events.
+- **Periodic Revalidation**: reuses the recovery engine on a step interval
+  (default 25) and on app switch, so mid-run environment drift is caught within
+  one cycle instead of only at the next crash.
+
+See [docs/PROBLEM.md](docs/PROBLEM.md) for the problem statement and honest
+scope, [docs/RESULTS.md](docs/RESULTS.md) for results, and
+[STATUS.md](STATUS.md) for the implementation status.
 
 ## Empirical Verification
 
@@ -135,7 +158,7 @@ CONTINUUM is verified not just with mock unit tests, but against real LLM agents
 
 ### Automated Test Suite and Benchmarks
 
-- **672 tests passing** on Python 3.11, 3.12, and 3.13 (including unit, `hypothesis` property-based, and concurrency tests).
+- **700 tests passing** on Python 3.11, 3.12, and 3.13 (including unit, `hypothesis` property-based, and concurrency tests).
 - **CONTINUUM-Bench**: `continuum benchmark` executes in-process recovery benchmarks across three scenarios (`process_crash`, `dataset_change`, `unknown_side_effect`), proving 0 duplicate work, 0 duplicate side effects, and automatic detection of stale environment dependencies.
 
 ## MCP Integration
@@ -252,7 +275,7 @@ Recent preprints that measure or model the same reliability gaps CONTINUUM targe
 
 ## Status and limitations
 
-- **Tested**: 672 tests passing, 7 skipped (see [STATUS.md](STATUS.md)).
+- **Tested**: 700 tests passing, 4 skipped (see [STATUS.md](STATUS.md)).
 - **Not on PyPI.** Install from a clone (see Quick Start).
 - **MCP caller authentication is not implemented.** `clientInfo` is asserted by the client and never verified, so authorization is by declared identity, not authentication. Tracked as [#1](https://github.com/Cyrax321/CONTINUUM/issues/1).
 - **Unbuilt components**: Cloud API (Phase 13) and Dashboard (Phase 14).
