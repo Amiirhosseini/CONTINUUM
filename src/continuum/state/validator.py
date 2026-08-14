@@ -380,33 +380,57 @@ class StateValidator:
         recorded = state.model.model if state.model else None
         assumptions = list(state.model.model_specific_state) if state.model else []
 
-        if expected_model is None or recorded is None or expected_model == recorded:
-            if assumptions:
-                entries.append(
-                    ComponentValidationEntry(
-                        component=Component.MODEL,
-                        component_id=recorded,
-                        status=StateStatus.VALID,
-                        detail=f"{len(assumptions)} model-specific assumption(s) recorded",
-                    )
+        if expected_model is not None and recorded is not None and expected_model != recorded:
+            # The model changed. Anything model-specific must be revalidated,
+            # and switching models is never assumed safe.
+            entries.append(
+                ComponentValidationEntry(
+                    component=Component.MODEL,
+                    component_id=recorded,
+                    status=StateStatus.REQUIRES_REVIEW if not assumptions else StateStatus.STALE,
+                    detail=(
+                        f"state was produced by {recorded!r} but {expected_model!r} is now active"
+                        + (
+                            f"; {len(assumptions)} model-specific assumption(s) need revalidation"
+                            if assumptions
+                            else ""
+                        )
+                    ),
                 )
+            )
             return
 
-        # The model changed. Anything model-specific must be revalidated, and
-        # switching models is never assumed safe.
+        if not assumptions:
+            return
+
+        if expected_model is None or recorded is None:
+            # Assumptions were recorded but either the resume model or the
+            # recording model is unknown, so they cannot be verified. Say so
+            # rather than guessing "valid" in the state's favour.
+            unknown_side = (
+                "resume model is unknown" if expected_model is None else "recorded model is unknown"
+            )
+            entries.append(
+                ComponentValidationEntry(
+                    component=Component.MODEL,
+                    component_id=recorded,
+                    status=StateStatus.UNKNOWN,
+                    detail=(
+                        f"{len(assumptions)} model-specific assumption(s) recorded but the "
+                        f"{unknown_side}; cannot verify"
+                    ),
+                )
+            )
+            return
+
+        # expected_model == recorded: assumptions were verified against the
+        # model that will actually resume the run.
         entries.append(
             ComponentValidationEntry(
                 component=Component.MODEL,
                 component_id=recorded,
-                status=StateStatus.REQUIRES_REVIEW if not assumptions else StateStatus.STALE,
-                detail=(
-                    f"state was produced by {recorded!r} but {expected_model!r} is now active"
-                    + (
-                        f"; {len(assumptions)} model-specific assumption(s) need revalidation"
-                        if assumptions
-                        else ""
-                    )
-                ),
+                status=StateStatus.VALID,
+                detail=f"{len(assumptions)} model-specific assumption(s) recorded",
             )
         )
 

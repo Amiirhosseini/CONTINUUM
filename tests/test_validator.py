@@ -324,6 +324,39 @@ def test_no_expected_model_means_no_model_check() -> None:
     assert not any(e.component is Component.MODEL for e in outcome.report.statuses)
 
 
+def test_no_expected_model_with_assumptions_is_unknown_not_valid() -> None:
+    # A validate/resume run without --model has no idea which model will
+    # actually resume, so it cannot verify recorded model-specific
+    # assumptions. It must not report them VALID (issue #49).
+    outcome = validate_state(
+        state(
+            model=ModelState(
+                model="model-a",
+                model_specific_state=[ModelSpecificState(description="assumes JSON tools")],
+            )
+        ),
+        expected_model=None,
+    )
+    assert status_for(outcome, Component.MODEL) is StateStatus.UNKNOWN
+    assert not outcome.safe
+
+
+def test_unrecorded_model_with_assumptions_is_unknown_not_valid() -> None:
+    # If the state itself doesn't record which model produced it, assumptions
+    # can't be verified either, even when expected_model is known.
+    outcome = validate_state(
+        state(
+            model=ModelState(
+                model=None,
+                model_specific_state=[ModelSpecificState(description="assumes JSON tools")],
+            )
+        ),
+        expected_model="model-b",
+    )
+    assert status_for(outcome, Component.MODEL) is StateStatus.UNKNOWN
+    assert not outcome.safe
+
+
 # --- internal coherence ---------------------------------------------------- #
 
 
