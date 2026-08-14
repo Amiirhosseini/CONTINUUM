@@ -738,3 +738,37 @@ The commit history on `main` is dominated by website and logo iteration: roughly
   paths.
 - `demo_report.md` — artifact from third-party client testing.
 - `kilo.jsonc` — Kilo's own MCP config, written by Kilo.
+
+---
+
+## Security Extension (in progress, not part of v0.1.0 launch)
+
+Two additive extensions are being prototyped on top of the existing
+recovery/checkpoint substrate. Both are additive: they do not change resume,
+replay, or the existing crash-time revalidation path. Deliberately scoped to
+avoid scope creep (no adversarial training, no new policy language).
+
+- `docs/PROBLEM.md` — the problem statement each extension addresses, with the
+  paper, the date, the unmet claim, and our honest "does not solve" framing.
+- `src/continuum/security/provenance.py` — `ObservationProvenance` and
+  `PlanBranch` (frozen pydantic v2, matching `models.py` conventions).
+- `src/continuum/security/trust_gate.py` — `verify_observation` (two-signal
+  trust: `verified` / `unverified` / `contested`), `record_observation`,
+  `resolve_branch` (risk-tiered escalation to `REQUIRES_REVIEW` for high-risk
+  unverified/contested, and contested environment observations), `ReviewGate`.
+- `src/continuum/security/revalidation.py` — `RevalidationTrigger`,
+  `RevalidationPolicy`, `RevalidationResult`, `maybe_revalidate` (fires on a
+  step interval and on app switch, reusing `RecoveryEngine.assess`).
+- `src/continuum/security/prompts/secure_planning.md` — the planner prompt
+  contract for Extension 1.
+- `docs/RESULTS.md` — numbers; the mini-benchmark is still PENDING (runs after
+  the core mechanism is proven).
+
+Tests: `tests/test_trust_gate.py`, `tests/test_revalidation_schedule.py`,
+`tests/test_toy_task_banner_attack.py` (a cookie-consent banner before/after
+pair). All 700 tests pass; `ruff` and `mypy --strict` are clean.
+
+What this does NOT claim: Extension 1 does not defeat an optimized pixel-patch
+attack (still open per CaMeLs), it adds an audit trail and escalation.
+Extension 2 does not improve long-horizon reasoning, it re-checks ground truth
+on a schedule. Neither claims to have "solved" its source paper.
