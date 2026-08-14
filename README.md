@@ -170,13 +170,15 @@ CONTINUUM plugs into agent frameworks without becoming one. Three adapters ship 
 | Generic Python agent | `GenericAgentAdapter` | In-process facade; writes trusted (`Origin.DETERMINISTIC`) state. |
 | OpenAI Agents SDK | `OpenAIAgentAdapter` | Experimental. Hooks `ToolContext` / `RunHooks`; optional `openai-agents`. |
 | LangGraph | `LangGraphAgentAdapter` | Experimental. Wraps a `StateGraph`; optional `langgraph`. |
-| LangChain | `LangChainAgentAdapter` | Experimental. Drops `checkpoint_node` into an LCEL `Runnable` pipeline; optional `langchain-core`. |
+| LangChain | `LangChainAgentAdapter` | Experimental. Drops `checkpoint_node` into an LCEL `Runnable` pipeline and the `create_agent` tool-calling loop; optional `langchain`. |
 
-Each adapter records progress and side effects through the ledger and routes external effects through the two-phase intercept/complete protocol. The framework adapters are newer than the generic facade, but each now has end-to-end integration tests (`tests/test_integration_langgraph.py`, `tests/test_integration_langchain.py`, and `tests/test_integration_langchain_agent.py` for a real `create_agent` tool-calling loop) covering checkpoint durability, exactly-once side effects, and crash-after-checkpoint resume. Treat them as experimental until their adapter-specific tests cover the full crash and resume matrix.
+Each adapter records progress and side effects through the ledger and routes external effects through the two-phase intercept/complete protocol. The framework adapters are newer than the generic facade, but each now has end-to-end integration tests (`tests/test_integration_langgraph.py`, `tests/test_integration_langchain.py`, and `tests/test_integration_langchain_agent.py` for a real `create_agent` tool-calling loop) covering checkpoint durability, exactly-once side effects, and crash-after-checkpoint resume. Treat them as experimental until their adapter-specific tests cover the full crash and resume matrix. Full usage, with runnable examples for every adapter, is in [references/adapters.md](references/adapters.md).
 
 ### Resuming agent- or MCP-reported runs
 
-State reported by an external agent over MCP (or by the OpenAI/LangGraph adapters) is recorded with `Origin.EXTERNAL_AGENT` provenance, which the validator marks `REQUIRES_REVIEW`. That is intentional: an agent must not validate its own unverified work. The consequence is that such runs resolve to `request_human` on `continuum resume` until a human has eyeballed them.
+State reported over MCP, or through the OpenAI adapter, is recorded with `Origin.EXTERNAL_AGENT` provenance, which the validator marks `REQUIRES_REVIEW`. That is intentional: an agent must not validate its own unverified work. The consequence is that such runs resolve to `request_human` on `continuum resume` until a human has eyeballed them.
+
+Runs started through the LangGraph or LangChain adapter use `Origin.DETERMINISTIC` provenance (the adapter is the orchestrator starting the run on CONTINUUM's behalf), so a consistent run resumes (`RESUME`) without a human in the loop.
 
 To clear that review and resume, confirm the run as the operator:
 
@@ -292,6 +294,7 @@ Deep reference material:
 - [references/concepts.md](references/concepts.md) - semantic checkpoints, validation, ledger, recovery modes, contract
 - [references/architecture.md](references/architecture.md) - data model, event log, projection, storage, checkpointing, recovery engine, security, project structure
 - [references/api.md](references/api.md) - Python and adapter API
+- [references/adapters.md](references/adapters.md) - framework adapter usage (Generic, OpenAI, LangGraph, LangChain) with runnable examples
 - [references/cli.md](references/cli.md) - full CLI command list, exit codes, state diff
 - [references/quickstart.md](references/quickstart.md) - install, examples, the proof scripts
 - [references/e2e.md](references/e2e.md) - end to end autonomy test walkthrough
