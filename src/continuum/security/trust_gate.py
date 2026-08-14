@@ -151,9 +151,8 @@ def resolve_branch(
     ``request_human`` recovery path), exactly as the spec's
     ``route_to_request_human`` does.
     """
-    requires_review = (
-        (branch.risk_tier == "high" and obs.trust_level != "verified")
-        or (obs.source == "environment_observed" and obs.trust_level == "contested")
+    requires_review = (branch.risk_tier == "high" and obs.trust_level != "verified") or (
+        obs.source == "environment_observed" and obs.trust_level == "contested"
     )
 
     event: Event | None = None

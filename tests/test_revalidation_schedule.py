@@ -34,7 +34,9 @@ def seed(s: SQLiteStorage, dataset: str = "v3") -> None:
         "run_1", EventType.DEPENDENCY_DECLARED, {"resource": "dataset", "version": dataset}
     )
     s.append_event(
-        "run_1", EventType.EVIDENCE_ADDED, {"evidence_id": "e1", "summary": "s", "source": "dataset"}
+        "run_1",
+        EventType.EVIDENCE_ADDED,
+        {"evidence_id": "e1", "summary": "s", "source": "dataset"},
     )
     s.append_event(
         "run_1", EventType.FINDING_ADDED, {"finding_id": "f1", "evidence": ["e1"], "claim": "c"}

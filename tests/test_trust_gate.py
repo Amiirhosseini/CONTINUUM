@@ -107,9 +107,7 @@ def test_events_are_appended_to_ledger() -> None:
     store = SQLiteStorage(":memory:")
     store.create_run(Run(run_id="r1", goal="g"))
 
-    obs = verify_observation(
-        "Accept", "hash", dom_snapshot="x", storage=store, run_id="r1"
-    )
+    obs = verify_observation("Accept", "hash", dom_snapshot="x", storage=store, run_id="r1")
     gate = resolve_branch(_branch("high"), obs, storage=store, run_id="r1")
 
     types = {e.type for e in store.read_events("r1")}

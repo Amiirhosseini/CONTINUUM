@@ -318,7 +318,9 @@ class StateValidator:
             )
         )
 
-    def _check_progress(self, state: SemanticState, entries: list[ComponentValidationEntry]) -> None:
+    def _check_progress(
+        self, state: SemanticState, entries: list[ComponentValidationEntry]
+    ) -> None:
         # Counter arithmetic (completed + pending + failed <= total) is enforced
         # by the Progress model on construction *and* on deserialization, so a
         # state that reaches here cannot violate it. Re-checking would be dead
