@@ -1,8 +1,10 @@
 # Project status
 
-**As of 2026-08-12** (commit `d32f7a2` was the last tagged state; subsequent
-entries added the framework adapters, Inspector CLI verification, and CI
-Node 24 migration).
+**As of 2026-08-14** (commit `a539948`). On 2026-08-14 a repository-wide bug
+audit ran: every behavioural module was read and exercised, surfacing 20
+evidence-backed issues (#29-"#49, excluding the externally-filed #39). They are
+labelled `good first issue` or `help wanted` (plus `adapter`/`detector` where
+relevant) and form the contributor backlog; none are fixed in this tree yet.
 
 A factual snapshot for whoever picks this up next, human or otherwise, with no
 memory of how any of it was found. It records what is verified, what is
@@ -12,7 +14,7 @@ believed, and what is neither.
 
 ## Verified
 
-662 tests pass, 4 skipped, on Python 3.13 with `mcp 2.0.0` installed. The MCP
+677 tests pass, 4 skipped, on Python 3.13 with `mcp 2.0.0` installed. The MCP
 server tests are no longer excluded: they load and pass against `mcp>=2.0` (the
 version pinned in `pyproject.toml`). An earlier note recorded them as failing to
 load; that incompatibility is gone with the newer SDK. CI was green on Python
@@ -171,7 +173,7 @@ MCP server at all.
 Also out of scope: rate limiting, audit of failed attempts beyond the error
 response, and scoping callers to particular runs.
 
-### Naming (`d32f7a2`)
+### Naming (`a539948`)
 
 `CONTINUUM_MCP_MUTATING_CLIENTS` is accepted as an alias for
 `CONTINUUM_MCP_ALLOW`, occupying the same precedence position rather than adding
