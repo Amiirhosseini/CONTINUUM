@@ -85,7 +85,7 @@ The `e2e-autonomy-test/` kit scripts a real invoice-batch task, a hard-kill mid-
 
 CONTINUUM separates **LLM context** (temporary) from **durable task state** (permanent). Instead of saving conversation history, it constructs a semantic checkpoint, the minimum verified information required to continue.
 
-![CONTINUUM architecture](docs/assets/architecture.svg)
+![CONTINUUM how it works](docs/assets/architecture.svg)
 
 The detailed explanation, the projection model, and the recovery context are in [references/architecture.md](references/architecture.md).
 
