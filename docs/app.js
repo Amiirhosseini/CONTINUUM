@@ -5,6 +5,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initDiffViewer();
   initCalculator();
   initCodeTabs();
+  initQuickstartCopy();
   initArchTooltips();
   initCustomCursor();
   initFaqAccordion();
@@ -318,7 +319,7 @@ Recovery Safety: <span class="hl-red">REQUIRES_HUMAN</span>
 Mode: REQUEST_HUMAN
 Action: Execution halted to prevent duplicate issue creation.
 
-<span class="hl-red">❌ Automatic retry blocked to protect external system idempotency.</span>`,
+<span class="hl-red">× Automatic retry blocked to protect external system idempotency.</span>`,
 
     stateJson: `{
   "action_id": "action_812",
@@ -704,10 +705,68 @@ function initCodeTabs() {
       navigator.clipboard.writeText(codeBody.textContent).then(() => {
         const originalText = copyBtn.textContent;
         copyBtn.textContent = 'Copied!';
+        showCopiedToast('Copied to clipboard');
         setTimeout(() => copyBtn.textContent = originalText, 2000);
       });
     });
   }
+}
+
+// ---------------------------------------------------------------------------
+// 4b. Quickstart Static Code Blocks Copy
+// ---------------------------------------------------------------------------
+function showCopiedToast(message) {
+  let toast = document.getElementById('copyToast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'copyToast';
+    toast.className = 'copy-toast';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = message || 'Copied to clipboard';
+  toast.classList.add('show');
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(() => toast.classList.remove('show'), 1600);
+}
+
+function initQuickstartCopy() {
+  const buttons = document.querySelectorAll('.qs-copy');
+
+  buttons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const pre = btn.parentElement.querySelector('pre.qs-code');
+      if (!pre) return;
+      const text = pre.textContent;
+
+      const done = () => {
+        const original = btn.textContent;
+        btn.textContent = 'Copied';
+        btn.classList.add('copied');
+        showCopiedToast('Copied to clipboard');
+        setTimeout(() => {
+          btn.textContent = original;
+          btn.classList.remove('copied');
+        }, 1500);
+      };
+
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done).catch(fallback);
+      } else {
+        fallback();
+      }
+
+      function fallback() {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); done(); } catch (e) { /* no-op */ }
+        document.body.removeChild(ta);
+      }
+    });
+  });
 }
 
 // ---------------------------------------------------------------------------
