@@ -156,10 +156,23 @@ CONTINUUM plugs into agent frameworks without becoming one. Three adapters ship 
 | Adapter | Class | Notes |
 |:--|:--|:--|
 | Generic Python agent | `GenericAgentAdapter` | In-process facade; writes trusted (`Origin.DETERMINISTIC`) state. |
-| OpenAI Agents SDK | `OpenAIAgentAdapter` | Hooks `ToolContext` / `RunHooks`; optional `openai-agents`. |
-| LangGraph | `LangGraphAgentAdapter` | Wraps a `StateGraph`; optional `langgraph`. |
+| OpenAI Agents SDK | `OpenAIAgentAdapter` | Experimental. Hooks `ToolContext` / `RunHooks`; optional `openai-agents`. |
+| LangGraph | `LangGraphAgentAdapter` | Experimental. Wraps a `StateGraph`; optional `langgraph`. |
 
-Each adapter records progress and side effects through the ledger and routes external effects through the two-phase intercept/complete protocol.
+Each adapter records progress and side effects through the ledger and routes external effects through the two-phase intercept/complete protocol. The OpenAI and LangGraph adapters are newer than the generic facade and are still being hardened against the e2e recovery scenarios the core library is verified against; treat them as experimental until their adapter-specific tests cover the full crash and resume matrix.
+
+### Resuming agent- or MCP-reported runs
+
+State reported by an external agent over MCP (or by the OpenAI/LangGraph adapters) is recorded with `Origin.EXTERNAL_AGENT` provenance, which the validator marks `REQUIRES_REVIEW`. That is intentional: an agent must not validate its own unverified work. The consequence is that such runs resolve to `request_human` on `continuum resume` until a human has eyeballed them.
+
+To clear that review and resume, confirm the run as the operator:
+
+```bash
+continuum confirm <run_id>   # records REVIEW_CONFIRMED, then re-assesses
+continuum resume <run_id>    # now reports RESUME
+```
+
+Over MCP the equivalent is the `continuum_confirm` tool followed by `continuum_resume`. Confirmation is a one-time, human-attested event; it is the escape hatch for the self-certification safety so an externally-driven run is never permanently stuck.
 
 ## Core Concepts
 
@@ -243,6 +256,8 @@ Recent preprints that measure or model the same reliability gaps CONTINUUM targe
 - **Not on PyPI.** Install from a clone (see Quick Start).
 - **MCP caller authentication is not implemented.** `clientInfo` is asserted by the client and never verified, so authorization is by declared identity, not authentication. Tracked as [#1](https://github.com/Cyrax321/CONTINUUM/issues/1).
 - **Unbuilt components**: Cloud API (Phase 13) and Dashboard (Phase 14).
+- **Framework adapters are experimental.** The OpenAI Agents SDK and LangGraph adapters are newer than the generic facade and do not yet carry the same crash-and-resume verification coverage. Prefer `GenericAgentAdapter` for production recovery until their adapter-specific tests cover the full recovery matrix.
+- **Agent/MCP runs need an explicit confirm before auto-resume.** Because externally-reported state is `REQUIRES_REVIEW`, `continuum resume` returns `request_human` until a human runs `continuum confirm <run_id>` (or the MCP `continuum_confirm` tool). This is by design, not a bug; see [Framework Integration](#framework-integration).
 - **e2e autonomy test series** (issue [#6](https://github.com/Cyrax321/CONTINUUM/issues/6)): Three full Claude Code runs scored 7/7 mechanics with unprompted recovery behavior observed. Defensive token-based fallback and path normalization bridge argument drift. Further test iterations across diverse prompt styles remain open.
 
 For a full account of what is verified, believed, and neither, see [STATUS.md](STATUS.md). The current set of open correctness bugs (a 2026-08-12 code audit) is tracked there.

@@ -52,7 +52,7 @@ from continuum.models import (
     SemanticState,
 )
 from continuum.recovery.engine import RecoveryDecision
-from continuum.storage.base import Storage
+from continuum.storage.base import RunNotFound, Storage
 
 __all__ = [
     "LangGraphAgentAdapter",
@@ -231,7 +231,22 @@ class LangGraphAgentAdapter(GenericAgentAdapter):
         if not run_id:
             return {}
 
-        semantic_state = self._extract_semantic_state(state)
+        # Capture the run's authoritative projected state when its event log
+        # already carries work. Building the state from the dict fields instead
+        # (the old behaviour) left source_sequence=0, so restore(replay=False)
+        # returned a synthetic state that contradicted the log, and
+        # restore(replay=True) discarded the checkpoint entirely (it replayed
+        # the whole log). A fresh run has no events yet, so the dict is the only
+        # truth available and we fall back to extracting from it. See issue #46.
+        try:
+            has_events = bool(self.storage.read_events(run_id))
+        except RunNotFound:
+            has_events = False
+
+        if has_events:
+            semantic_state = self.manager.project_current(run_id)
+        else:
+            semantic_state = self._extract_semantic_state(state)
         self.capture_state(run_id, semantic_state, reason="langgraph checkpoint node")
         return {}
 
