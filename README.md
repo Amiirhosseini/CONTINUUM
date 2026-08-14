@@ -21,22 +21,14 @@
 
 ## Contents
 
-- [Why](#why)
-- [Quick Start](#quick-start)
-- [How it works](#how-it-works)
-- [Features](#features)
-- [Empirical Verification](#empirical-verification)
-- [MCP Integration](#mcp-integration)
-- [Framework Integration](#framework-integration)
-- [Core Concepts](#core-concepts)
-- [Architecture](#architecture)
-- [API and CLI](#api-and-cli)
-- [Roadmap](#roadmap)
-- [What CONTINUUM Is Not](#what-continuum-is-not)
-- [Related work](#related-work)
-- [Status and limitations](#status-and-limitations)
-- [Contributing](#contributing)
-- [License](#license)
+| | | |
+|:--|:--|:--|
+| [Why](#why) | [Quick Start](#quick-start) | [How it works](#how-it-works) |
+| [Features](#features) | [Security Extension](#security-extension) | [Empirical Verification](#empirical-verification) |
+| [MCP Integration](#mcp-integration) | [Framework Integration](#framework-integration) | [Core Concepts](#core-concepts) |
+| [Architecture](#architecture) | [API and CLI](#api-and-cli) | [Roadmap](#roadmap) |
+| [What CONTINUUM Is Not](#what-continuum-is-not) | [Related work](#related-work) | [Status and limitations](#status-and-limitations) |
+| [Contributing](#contributing) | [License](#license) | |
 
 ---
 
