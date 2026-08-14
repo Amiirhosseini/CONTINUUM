@@ -47,8 +47,11 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Protocol, cast, runtime_checkable
 
 from continuum.adapters.generic import GenericAgentAdapter
+from continuum.events import EventType
 from continuum.models import (
     EnvironmentSnapshot,
+    Origin,
+    Run,
     SemanticState,
 )
 from continuum.recovery.engine import RecoveryDecision
@@ -130,6 +133,50 @@ class LangGraphAgentAdapter(GenericAgentAdapter):
         super().__init__(storage)
         self.graph = graph
         self._state_to_semantic = state_to_semantic
+
+    def start_run(
+        self,
+        goal: str,
+        *,
+        run_id: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> Run:
+        """Start a run and record its ``RUN_STARTED`` event.
+
+        ``GenericAgentAdapter.start_run`` only creates the run row, but
+        projection, replay, and restore require the ``RUN_STARTED`` event to
+        exist as the log's first entry. Without it, ``checkpoint_node`` fails
+        with "the log never recorded RUN_STARTED". The event is backfilled only
+        when the log is empty; a non-empty log whose first event is not
+        ``RUN_STARTED`` is refused to avoid misordering the run's history.
+        """
+        run = (
+            Run(goal=goal, metadata=dict(metadata or {}))
+            if run_id is None
+            else Run(run_id=run_id, goal=goal, metadata=dict(metadata or {}))
+        )
+        try:
+            existing = self.storage.get_run(run.run_id)
+            run = existing
+        except RunNotFound:
+            run = self.storage.create_run(run)
+
+        first = self.storage.read_events(run.run_id, upto=1)
+        if not first:
+            self.storage.append_event(
+                run.run_id,
+                EventType.RUN_STARTED,
+                {"goal": run.goal},
+                source=Origin.DETERMINISTIC,
+            )
+        elif first[0].type is not EventType.RUN_STARTED:
+            raise ValueError(
+                f"run {run.run_id!r} does not begin with RUN_STARTED "
+                f"(first event is {first[0].type.value}). CONTINUUM cannot backfill "
+                f"it after the fact without misordering the run's history; recreate "
+                f"the run, or record RUN_STARTED before any other event."
+            )
+        return run
 
     def wrap_tool(
         self,
