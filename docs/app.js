@@ -603,68 +603,74 @@ function initCustomModelSelector(onModelChange) {
 // 4. Quickstart Code Tabs & Copy
 // ---------------------------------------------------------------------------
 const codeSnippets = {
-  sdk: `# Python SDK Quickstart
-from continuum import Continuum
+  sdk: `# CONTINUUM Python SDK
+from continuum.storage.sqlite import SQLiteStorage
+from continuum.checkpoint import CheckpointManager
+from continuum.recovery import RecoveryEngine
+from continuum.actions import ActionLedger
+from continuum.models import Goal, Progress, SemanticState
 
-# Initialize local SQLite storage
-runtime = Continuum(storage="sqlite:///agent.db")
+store = SQLiteStorage("sqlite:///agent.db")
+manager = CheckpointManager(store)
 
-# Start a run
-run = runtime.start(goal="Analyze 10,000 research documents")
+# Record a checkpoint of semantic state
+state = SemanticState(
+    run_id="run_4821",
+    goal=Goal("Analyze 10,000 research documents"),
+    progress=Progress(completed=3421, pending=6579),
+)
+manager.checkpoint("run_4821", state=state, reason="milestone")
 
-# Record progress and findings
-run.record_finding(claim="Strong correlation observed", confidence=0.94)
-run.update_progress(completed=3421, pending=6579)
+# Record external side effects idempotently
+ledger = ActionLedger(store, "run_4821")
+ledger.claim("github.create_issue", arguments={"title": "Bug found"})
 
-# Checkpoint semantic state
-run.checkpoint()
+# Decide how to resume after a crash
+decision = RecoveryEngine(store).assess("run_4821")
+if decision.safe:
+    print("safe to resume:", decision.next_allowed_action)`,
 
-# Record external side effects safely
-run.record_action(type="github.create_issue", arguments={"title": "Bug found"})
+  cli: `# CONTINUUM CLI
 
-# Resume after crash
-recovered_run = runtime.resume("run_4821")
-status = recovered_run.validate()
-
-if status.safe:
-    recovered_run.continue_execution()`,
-
-  cli: `# CONTINUUM CLI Commands
-
-# Initialize database
+# Initialize storage
 continuum init
 
-# Start a new run
-continuum run --goal "Analyze 10,000 documents"
+# Force a checkpoint for a run
+continuum checkpoint run_4821
 
-# Create a checkpoint
-continuum checkpoint
-
-# Validate state against live environment
+# Validate state against the live environment
 continuum validate run_4821
 
-# Inspect state at specific version
+# Inspect state at a specific version
 continuum inspect run_4821 --version 17
 
-# Diff two checkpoints
-continuum diff checkpoint_v16 checkpoint_v17
+# Diff two state versions
+continuum diff 16 17
 
-# Resume safely from crash
-continuum resume run_4821`,
+# Decide how to resume safely after a crash
+continuum resume run_4821
 
-  extractor: `# Custom Deterministic State Extractor
-from continuum.state import StateExtractor
+# Confirm self-reported progress so the run may resume
+continuum confirm run_4821`,
 
-class CustomExtractor(StateExtractor):
-    def extract(self, event_log, environment):
-        # Deterministically extract semantic state from event prefix
+  extractor: `# Custom deterministic state extractor
+from continuum.state import StateExtractor, ExtractionContext
+from continuum.models import Goal, SemanticState
+
+class CustomExtractor:
+    name = "custom"
+
+    def extract(self, context: ExtractionContext) -> SemanticState:
+        # context.trajectory holds the run's recorded events.
         decisions = [
-            e.payload for e in event_log.by_type("DECISION_CREATED")
+            e.payload for e in context.trajectory
+            if e.type.value == "DECISION_CREATED"
         ]
-        return {
-            "decisions": decisions,
-            "validated_at": environment.captured_at
-        }`,
+        return SemanticState(
+            run_id=context.run_id,
+            goal=Goal("recovered goal"),
+            decisions=[...],  # build Decision objects from the decisions list
+        )`,
 
   events: `# Hash-Chained Event Log Audit
 from continuum.events import EventLog
@@ -673,7 +679,7 @@ log = EventLog()
 
 # Append sealed (SHA-256 chained) events
 event1 = log.append(run_id="run_4821", type="RUN_STARTED")
-event2 = log.append(run_id="run_4821", type="DECISION_CREATED", payload={...})
+event2 = log.append(run_id="run_4821", type="DECISION_CREATED", payload={"claim": "x"})
 
 # Verify chain integrity (tamper detection)
 report = log.verify(run_id="run_4821")
