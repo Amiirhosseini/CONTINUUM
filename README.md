@@ -99,7 +99,7 @@ The detailed explanation, the projection model, and the recovery context are in 
 | Provenance-aware state | Agent-reported progress is marked `REQUIRES_REVIEW`, never self-certifying |
 | Recovery engine | Seven recovery modes with a deterministic, sealed next-action contract |
 | Deny-by-default MCP server | Nine tools, read-only/mutating split, caller allowlist |
-| Framework adapters | Generic Python, OpenAI Agents SDK, and LangGraph integrations |
+| Framework adapters | Generic Python, OpenAI Agents SDK, LangGraph, and LangChain integrations |
 | Secure planning loop | Two-signal observation verification escalates high-risk branches to REQUIRES_REVIEW |
 | Periodic revalidation | Environment re-checked on a schedule, catching mid-run drift within one cycle |
 | Tamper-evident log | Hash-chained event log (32 event types) with integrity verification |
@@ -170,8 +170,9 @@ CONTINUUM plugs into agent frameworks without becoming one. Three adapters ship 
 | Generic Python agent | `GenericAgentAdapter` | In-process facade; writes trusted (`Origin.DETERMINISTIC`) state. |
 | OpenAI Agents SDK | `OpenAIAgentAdapter` | Experimental. Hooks `ToolContext` / `RunHooks`; optional `openai-agents`. |
 | LangGraph | `LangGraphAgentAdapter` | Experimental. Wraps a `StateGraph`; optional `langgraph`. |
+| LangChain | `LangChainAgentAdapter` | Experimental. Drops `checkpoint_node` into an LCEL `Runnable` pipeline; optional `langchain-core`. |
 
-Each adapter records progress and side effects through the ledger and routes external effects through the two-phase intercept/complete protocol. The OpenAI and LangGraph adapters are newer than the generic facade and are still being hardened against the e2e recovery scenarios the core library is verified against; treat them as experimental until their adapter-specific tests cover the full crash and resume matrix.
+Each adapter records progress and side effects through the ledger and routes external effects through the two-phase intercept/complete protocol. The framework adapters are newer than the generic facade, but each now has end-to-end integration tests (`tests/test_integration_langgraph.py`, `tests/test_integration_langchain.py`, and `tests/test_integration_langchain_agent.py` for a real `create_agent` tool-calling loop) covering checkpoint durability, exactly-once side effects, and crash-after-checkpoint resume. Treat them as experimental until their adapter-specific tests cover the full crash and resume matrix.
 
 ### Resuming agent- or MCP-reported runs
 
