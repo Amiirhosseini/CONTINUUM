@@ -159,6 +159,45 @@ arguments; the plumbing exclusion fixed it and a regression test pins it.
 
 Verification: 700 tests pass, ruff clean, mypy clean on changed files.
 
+## Session 11: repository-wide bug audit (2026-08-14)
+
+Read every behavioural module and exercised it, surfacing 20 evidence-backed
+issues (#29 to #49, excluding the externally filed #39). Labelled `good first
+issue` or `help wanted` and left as the contributor backlog.
+
+Eight were fixed and merged to `main`, each with regression tests:
+
+- Replay now verifies the stored version instead of only re-deriving it (issue
+  #31, PR #50).
+- `continuum replay --upto N` rejects prefixes that exclude `RUN_STARTED` with a
+  clear message (issue #32, PR #55).
+- Progress writer rejects negative `completed` / `failed` even when `total` is
+  omitted (issue #38, PR #51).
+- `LLMExtractor.extract()` falls back to the deterministic state on a malformed
+  proposal instead of raising (issue #40, PR #56).
+- `LLMExtractor._merge` collapses ids repeated within a single proposal (issue
+  #41, PR #52).
+- Cache hit keeps a result dict holding the `__return_value__` envelope key
+  intact (issue #44, PR #53).
+- Self-certified progress is no longer relabelled `UNKNOWN` by `--tolerate-unknown`
+  (issue #48, PR #55).
+- Issue #37 closed by the same batch of fixes.
+
+Detail and the still-open nine live in `STATUS.md`; user-facing notes are in
+`CHANGELOG.md`.
+
+## Session 12: README contributors and deleted-account fix (2026-08-17)
+
+Added a Contributors section with circular profile avatars for the four active
+contributors. While doing so, found that `sharyaropensource` (Sharyar Naseem)
+had a deleted GitHub account: profile and avatar both return 404, so GitHub no
+longer attributes his commits and his PRs are disassociated. The commits
+themselves remain on `main`, so the work is preserved in history.
+
+Kept his attribution as plain text and removed the dead profile and avatar links
+so the README ships no broken reference. The other three contributors
+(`Cyrax321`, `dchaudhari7177`, `lesbass`) resolve normally.
+
 ## Open items carried forward
 
 - Issue #1: MCP authentication (authorization exists; `clientInfo` remains
