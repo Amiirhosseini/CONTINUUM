@@ -24,7 +24,7 @@ All notable changes to this project are documented here. The format follows
    - Docs: `docs/PROBLEM.md` (problem statement, honest scope) and
     `docs/RESULTS.md` (results; mini-benchmark pending). Tests:
     `tests/test_trust_gate.py`, `tests/test_revalidation_schedule.py`,
-    `tests/test_toy_task_banner_attack.py`. All 700 tests pass; `ruff` and
+    `tests/test_toy_task_banner_attack.py`. All 740 tests pass; `ruff` and
     `mypy --strict` are clean.
 
 - **Real-LLM crash-and-resume harness.** `examples/langchain_real_llm_crash.py`
@@ -230,8 +230,45 @@ All notable changes to this project are documented here. The format follows
   confirms the write on stderr. Omitting `--repair` remains strictly read-only.
   Covered by `tests/test_cli.py::test_repair_records_the_plan_and_does_not_fake_a_safe_exit`
   (asserts the `RECOVERY_STARTED` event is written with its mode and plan) and
-  `tests/test_cli.py::test_resume_without_repair_is_still_read_only`. Closed by
-  commit `f145818`.
+   `tests/test_cli.py::test_resume_without_repair_is_still_read_only`. Closed by
+   commit `f145818`.
+
+ - **`continuum replay` claimed to verify the stored version but never compared
+   it (issue #31).** `cmd_replay` re-derived state from events and reported
+   success without checking the recomputed version against what is persisted, so
+   a corrupted or drifted store passed silently. It now actually verifies the
+   stored version and fails when they diverge. Closed by `a5c3307` (PR #50).
+
+ - **`continuum replay --upto N` crashed with `ProjectionError` when the prefix
+   excluded `RUN_STARTED` (issue #32).** The projector needs the run's start
+   event to seed state, so a prefix that drops it raised instead of reporting a
+   clear error. `cmd_replay` now rejects `--upto` values that exclude
+   `RUN_STARTED` with a message explaining the constraint. Closed by `fd1bf90`.
+
+ - **`continuum_record_progress` accepted negative `completed`/`failed` when
+   `total` was omitted (issue #38).** A missing total let callers poison the log
+   with negative counters that no downstream check caught. The progress writer
+   now rejects negative `completed`/`failed` even when `total` is absent. Closed
+   by `fca1b6e` (PR #51).
+
+ - **`LLMExtractor.extract()` crashed on a malformed LLM proposal (issue #40).**
+   A proposal that failed to parse raised out of `extract()` instead of degrading
+   to the deterministic state. It now falls back to the deterministic state on a
+   malformed proposal rather than propagating the exception. Closed by `8c7cfec`
+   (PR #56).
+
+ - **`LLMExtractor._merge` double-added ids repeated within a single proposal
+   (issue #41).** Ids that appeared more than once in one LLM proposal were
+   merged additively, inflating the projected state. `_merge` now collapses ids
+   repeated within a single proposal. Closed by `a1bdef4` (PR #52).
+
+ - **`intercept_action` returned a divergent value on a cache hit when the result
+   dict held the reserved key `__return_value__` (issue #44).** A cached result
+   whose payload used the envelope key was reshaped differently from a fresh one,
+   so callers could see two shapes for the same action. The adapter now keeps a
+   result dict holding the envelope key intact on cache hit. Closed by `15e0d67`
+   (PR #53).
+
 
 ### Added
 

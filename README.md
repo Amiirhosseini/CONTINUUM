@@ -147,8 +147,8 @@ CONTINUUM is verified not just with mock unit tests, but against real LLM agents
 
 ### Automated Test Suite and Benchmarks
 
-- **700 tests passing** on Python 3.11, 3.12, and 3.13 (including unit, `hypothesis` property-based, and concurrency tests).
-- **CONTINUUM-Bench**: `continuum benchmark` executes in-process recovery benchmarks across three scenarios (`process_crash`, `dataset_change`, `unknown_side_effect`), proving 0 duplicate work, 0 duplicate side effects, and automatic detection of stale environment dependencies.
+- **740 tests passing** on Python 3.11, 3.12, and 3.13 (including unit, `hypothesis` property-based, and concurrency tests).
+- **CONTINUUM-Bench**: `continuum benchmark` executes in-process recovery benchmarks across five scenarios (`process_crash`, `dataset_change`, `unknown_side_effect`, `partial_completion`, `early_crash`), proving 0 duplicate work, 0 duplicate side effects, and automatic detection of stale environment dependencies.
 
 ## MCP Integration
 
@@ -159,11 +159,11 @@ uv pip install -e ".[mcp]"
 CONTINUUM_MCP_MUTATING_CLIENTS=your-client-name continuum-mcp
 ```
 
-Nine tools over stdio. Three are read-only (`continuum_validate`, `continuum_resume`, `continuum_list_actions`); six mutate. Side effects are two-phase (claim, perform, complete), and mutating tools deny by default behind an allowlist. Agent-reported state is recorded with `Origin.EXTERNAL_AGENT` provenance and marked `REQUIRES_REVIEW`. Verification details, including crash recovery at startup and the end to end Claude Code test, are in [references/mcp.md](references/mcp.md). The authentication limitation is covered in [references/architecture.md](references/architecture.md) (MCP server and Security sections), and the MCP narrative is in [references/quickstart.md](references/quickstart.md).
+Ten tools over stdio. Three are read-only (`continuum_validate`, `continuum_resume`, `continuum_list_actions`); seven mutate. Side effects are two-phase (claim, perform, complete), and mutating tools deny by default behind an allowlist. Agent-reported state is recorded with `Origin.EXTERNAL_AGENT` provenance and marked `REQUIRES_REVIEW`. Verification details, including crash recovery at startup and the end to end Claude Code test, are in [references/mcp.md](references/mcp.md). The authentication limitation is covered in [references/architecture.md](references/architecture.md) (MCP server and Security sections), and the MCP narrative is in [references/quickstart.md](references/quickstart.md).
 
 ## Framework Integration
 
-CONTINUUM plugs into agent frameworks without becoming one. Three adapters ship in `src/continuum/adapters/`, all optional installs so the core stays standard-library-only:
+CONTINUUM plugs into agent frameworks without becoming one. Four adapters ship in `src/continuum/adapters/` (one in-process facade plus three framework integrations), all optional installs so the core stays standard-library-only:
 
 | Adapter | Class | Notes |
 |:--|:--|:--|
@@ -308,7 +308,7 @@ Recent preprints that measure or model the same reliability gaps CONTINUUM targe
 
 ## Status and limitations
 
-- **Tested**: 700 tests passing, 4 skipped (see [STATUS.md](STATUS.md)).
+- **Tested**: 740 tests passing, 4 skipped (see [STATUS.md](STATUS.md)).
 - **Not on PyPI.** Install from a clone (see Quick Start).
 - **MCP caller authentication is not implemented.** `clientInfo` is asserted by the client and never verified, so authorization is by declared identity, not authentication. Tracked as [#1](https://github.com/Cyrax321/CONTINUUM/issues/1).
 - **Unbuilt components**: Cloud API (Phase 13) and Dashboard (Phase 14).
@@ -328,7 +328,7 @@ Open an issue before submitting large PRs. See [CONTRIBUTING.md](CONTRIBUTING.md
 
 <a href="https://github.com/Cyrax321"><img src="https://github.com/Cyrax321.png" width="60" style="border-radius: 50%;" alt="Cyrax321" /></a>
 <a href="https://github.com/dchaudhari7177"><img src="https://github.com/dchaudhari7177.png" width="60" style="border-radius: 50%;" alt="Dipak Chaudhari" /></a>
-<a href="https://github.com/sharyaropensource"><img src="https://github.com/sharyaropensource.png" width="60" style="border-radius: 50%;" alt="Sharyar Naseem" /></a>
+Sharyar Naseem
 <a href="https://github.com/lesbass"><img src="https://github.com/lesbass.png" width="60" style="border-radius: 50%;" alt="Stefano Maffeis" /></a>
 
 ## License
