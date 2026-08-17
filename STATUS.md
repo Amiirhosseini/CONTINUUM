@@ -1,10 +1,13 @@
 # Project status
 
-**As of 2026-08-14** (commit `a539948`). On 2026-08-14 a repository-wide bug
+**As of 2026-08-17** (commit `ca5f723`). On 2026-08-14 a repository-wide bug
 audit ran: every behavioural module was read and exercised, surfacing 20
 evidence-backed issues (#29-"#49, excluding the externally-filed #39). They are
 labelled `good first issue` or `help wanted` (plus `adapter`/`detector` where
-relevant) and form the contributor backlog; none are fixed in this tree yet.
+relevant) and formed the contributor backlog. Eight of them have since been fixed
+and merged to `main` (#31, #32, #37, #38, #40, #41, #44, #48); the remaining nine
+are tracked as still-open contributor work in the Known issues at launch table
+below.
 
 A factual snapshot for whoever picks this up next, human or otherwise, with no
 memory of how any of it was found. It records what is verified, what is
@@ -14,7 +17,7 @@ believed, and what is neither.
 
 ## Verified
 
-677 tests pass, 4 skipped, on Python 3.13 with `mcp 2.0.0` installed. The MCP
+740 tests pass, 4 skipped, on Python 3.13 with `mcp 2.0.0` installed. The MCP
 server tests are no longer excluded: they load and pass against `mcp>=2.0` (the
 version pinned in `pyproject.toml`). An earlier note recorded them as failing to
 load; that incompatibility is gone with the newer SDK. CI was green on Python
@@ -49,7 +52,8 @@ notices.
   integration, optional `langgraph` dependency.
 - **`OpenAIAgentAdapter`** (`adapters/openai.py`) — OpenAI Agents SDK
   integration, optional `openai-agents` dependency.
-- **MCP server** (`mcp/server.py`) — 9 tools over stdio.
+- **MCP server** (`mcp/server.py`) — 10 tools over stdio (`continuum_confirm`
+  was added alongside the `REVIEW_CONFIRMED` event in the launch fixes).
 
 ### MCP two-phase action interception
 
@@ -257,10 +261,10 @@ The three launch-critical defects were fixed and closed in `e8271bd`:
 - **#47** — OpenAI adapter `RUN_STARTED` backfill: `_ensure_run_exists` now
   backfills `RUN_STARTED` like `ContinuumMCP.ensure_run`.
 
-The remaining **17 are real but non-launch-critical and are left open as
+The remaining **9 are real but non-launch-critical and are left open as
 contributor work** (labeled `good first issue` / `help wanted`):
 
-#29, #30, #31, #32, #33, #34, #36, #37, #38, #40, #41, #42, #43, #44, #45, #48, #49.
+#29, #30, #33, #34, #36, #42, #43, #45, #49.
 
 #### Known issues at launch
 
@@ -268,20 +272,20 @@ contributor work** (labeled `good first issue` / `help wanted`):
 |:--|:--|:--|
 | [#29](https://github.com/Cyrax321/CONTINUUM/issues/29) | `ActionLedger.reconcile(occurred=False)` leaves stale `external_id`/`result` on the action | Open (contributor work) |
 | [#30](https://github.com/Cyrax321/CONTINUUM/issues/30) | `FileProvider` reports a missing file as `version=None`, so diff marks it `changed` not `removed` | Open (contributor work) |
-| [#31](https://github.com/Cyrax321/CONTINUUM/issues/31) | `continuum replay` claims to confirm state matches the stored version but never compares | Open (contributor work) |
-| [#32](https://github.com/Cyrax321/CONTINUUM/issues/32) | `continuum replay --upto N` crashes with `ProjectionError` when the prefix excludes `RUN_STARTED` | Open (contributor work) |
+| [#31](https://github.com/Cyrax321/CONTINUUM/issues/31) | `continuum replay` claims to confirm state matches the stored version but never compares | Resolved: `a5c3307` (PR #50: replay now actually verifies the stored version) |
+| [#32](https://github.com/Cyrax321/CONTINUUM/issues/32) | `continuum replay --upto N` crashes with `ProjectionError` when the prefix excludes `RUN_STARTED` | Resolved: `fd1bf90` (reject `--upto` values that exclude `RUN_STARTED`) |
 | [#33](https://github.com/Cyrax321/CONTINUUM/issues/33) | `identity_tokens` drops plain-word resource ids (`invoice`) because `_is_strong_token` requires a digit/`@`/`.` | Open (contributor work) |
 | [#34](https://github.com/Cyrax321/CONTINUUM/issues/34) | `ActionLedger scoped_to_run=False` does not enforce global uniqueness across runs as documented | Open (contributor work) |
 | [#36](https://github.com/Cyrax321/CONTINUUM/issues/36) | `identity_tokens` drops purely-numeric resource ids, so cross-session fallback fails on numeric ids | Open (contributor work) |
-| [#37](https://github.com/Cyrax321/CONTINUUM/issues/37) | OpenAI adapter: tool arguments misbound and idempotency bypassed because `__signature__` drops `ctx` | Open (contributor work) |
-| [#38](https://github.com/Cyrax321/CONTINUUM/issues/38) | `continuum_record_progress` accepts negative `completed`/`failed` when `total` is omitted, poisoning the event log | Open (contributor work) |
-| [#40](https://github.com/Cyrax321/CONTINUUM/issues/40) | `LLMExtractor`: malformed LLM proposal crashes `extract()` instead of falling back | Open (contributor work) |
-| [#41](https://github.com/Cyrax321/CONTINUUM/issues/41) | `LLMExtractor._merge` double-adds duplicate ids within a single proposal | Open (contributor work) |
+| [#37](https://github.com/Cyrax321/CONTINUUM/issues/37) | OpenAI adapter: tool arguments misbound and idempotency bypassed because `__signature__` drops `ctx` | Resolved: `5acd0be` (forward idempotency key and fix OpenAI tool wrapping; also `8be8b7f` for the model-validator leg) |
+| [#38](https://github.com/Cyrax321/CONTINUUM/issues/38) | `continuum_record_progress` accepts negative `completed`/`failed` when `total` is omitted, poisoning the event log | Resolved: `fca1b6e` (PR #51: reject negative progress counters even when total is omitted) |
+| [#40](https://github.com/Cyrax321/CONTINUUM/issues/40) | `LLMExtractor`: malformed LLM proposal crashes `extract()` instead of falling back | Resolved: `8c7cfec` (PR #56: fall back to deterministic state on malformed LLM proposal) |
+| [#41](https://github.com/Cyrax321/CONTINUUM/issues/41) | `LLMExtractor._merge` double-adds duplicate ids within a single proposal | Resolved: `a1bdef4` (PR #52: collapse ids repeated within a single LLM proposal) |
 | [#42](https://github.com/Cyrax321/CONTINUUM/issues/42) | Strict mode: uncertain side effect yields `REQUEST_HUMAN` but an auto-reconcile step silently ignores `strict_unknown` | Open (contributor work) |
 | [#43](https://github.com/Cyrax321/CONTINUUM/issues/43) | Two checkpoints at the same state version collapse to one in `continuum history` | Open (contributor work) |
-| [#44](https://github.com/Cyrax321/CONTINUUM/issues/44) | `intercept_action` returns a divergent value on cache hit when the result dict holds reserved key `__return_value__` | Open (contributor work) |
+| [#44](https://github.com/Cyrax321/CONTINUUM/issues/44) | `intercept_action` returns a divergent value on cache hit when the result dict holds reserved key `__return_value__` | Resolved: `15e0d67` (PR #53: keep a result dict holding the envelope key intact on cache hit) |
 | [#45](https://github.com/Cyrax321/CONTINUUM/issues/45) | `claim(on_unknown=)` resolution is not persisted, so the ledger stays uncertain after call-time resolution | Open (contributor work) |
-| [#48](https://github.com/Cyrax321/CONTINUUM/issues/48) | `StateValidator._check_progress` relabels self-certified progress as `UNKNOWN`, so `--tolerate-unknown` silently unblocks it | Open (contributor work) |
+| [#48](https://github.com/Cyrax321/CONTINUUM/issues/48) | `StateValidator._check_progress` relabels self-certified progress as `UNKNOWN`, so `--tolerate-unknown` silently unblocks it | Resolved: `1327be3` (PR #55: self-certified progress no longer relabelled `UNKNOWN`) |
 | [#49](https://github.com/Cyrax321/CONTINUUM/issues/49) | `StateValidator._check_model` reports model-specific assumptions `VALID` when `expected_model` is `None` (fail-open) | Open (contributor work) |
 
 None of these block the v0.1.0 launch; they are tracked for post-launch
@@ -350,15 +354,17 @@ selected versions are the highest stable semver release for each action as of
 
 Phases 13–14 of the original plan: cloud API, dashboard. The minimal
 CONTINUUM-Bench harness (Phase 12) now ships: `continuum benchmark` runs and
-prints measured numbers across three scenarios and three strategies. The fuller
+prints measured numbers across five scenarios (`process_crash`, `dataset_change`,
+`unknown_side_effect`, `partial_completion`, `early_crash`) and three strategies. The fuller
 suite, published baselines, and a dashboard view remain a Phase 12 goal.
 
 ### Framework adapters (Phase 11)
 
-`adapters/` now contains `base.py`, `generic.py`, `langgraph.py`, and
-`openai.py`. Both are optional dependencies — `langgraph` and `openai-agents`
-are not pulled in by `pip install continuum-agent`; install via
-`pip install continuum-agent[langgraph]` or `[openai]`. Each was written after
+`adapters/` now contains `base.py`, `generic.py`, `langchain.py`, `langgraph.py`,
+and `openai.py`. The three framework adapters are optional dependencies —
+`langchain`, `langgraph` and `openai-agents` are not pulled in by
+`pip install continuum-agent`; install via `pip install continuum-agent[langchain]`,
+`[langgraph]` or `[openai]`. Each was written after
 checking the target framework's actual API surface (ToolContext/RunHooks for
 OpenAI Agents SDK; StateGraph/TypedDict for LangGraph), not an assumed shape.
 Tests cover behavior without the SDK installed (mocked), with it installed
@@ -726,7 +732,7 @@ supplying a key or naming arguments consistently:
    multiple candidates fall through rather than guess. Action type drift is not
    bridged by design: different types are genuinely different operations.
 
-Regression tests mirror each observed drift shape, and the full suite (700
+Regression tests mirror each observed drift shape, and the full suite (740
 tests) stays green.
 
 ### Secondary observations
@@ -1207,7 +1213,7 @@ avoid scope creep (no adversarial training, no new policy language).
 
 Tests: `tests/test_trust_gate.py`, `tests/test_revalidation_schedule.py`,
 `tests/test_toy_task_banner_attack.py` (a cookie-consent banner before/after
-pair). All 700 tests pass; `ruff` and `mypy --strict` are clean.
+pair). All 740 tests pass; `ruff` and `mypy --strict` are clean.
 
 What this does NOT claim: Extension 1 does not defeat an optimized pixel-patch
 attack (still open per CaMeLs), it adds an audit trail and escalation.
