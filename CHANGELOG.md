@@ -78,6 +78,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`StateValidator._check_progress` no longer downgrades self-certified
+  progress to `UNKNOWN`.** The "no source events" check (`source_sequence == 0
+  and completed > 0`) ran as a second `if` after the self-certified branch, so a
+  self-reported progress (the shape the OpenAI and LangGraph adapters emit) was
+  relabelled `UNKNOWN` and then silently unblocked by `--tolerate-unknown`
+  (`strict_unknown=False`). `UNKNOWN` is excepted under `strict_unknown=False`,
+  but `REQUIRES_REVIEW` is not, so a self-report must always block a resume. The
+  second check is now an `elif`, so it cannot overwrite a `REQUIRES_REVIEW`.
+  Fixed in issue #48.
 - **OpenAI Agents SDK adapter could not run a real tool call.** Two bugs in
   `OpenAIAgentAdapter.wrap_function_tool` surfaced only when an actual model drove
   the agent (verified against a live OpenRouter model; see STATUS.md). First, the
