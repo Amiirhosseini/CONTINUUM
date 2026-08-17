@@ -77,7 +77,7 @@ Thin wrappers that translate a framework's native loop into CONTINUUM calls.
 These are optional. An agent can also call the SDK or MCP server directly.
 
 ### 3.3 MCP server (stdio, deny by default)
-A Model Context Protocol server exposing 9 tools. It is read-only by default.
+A Model Context Protocol server exposing 10 tools. It is read-only by default.
 - Read-only tools (3): continuum_validate, continuum_resume,
   continuum_list_actions.
 - Mutating tools (6): continuum_record_progress, continuum_checkpoint,
@@ -264,7 +264,7 @@ Third tier: one large container labeled "CONTINUUM SDK". Inside it, a 3x3 grid:
   Row 2: State Engine, Checkpoint Manager, Environment
   Row 3: Validator, Recovery Engine, Security
   Place a pill at the top-right of the SDK container: "MCP server: deny by
-  default, 9 tools (3 read-only, 6 mutating)".
+  default, 10 tools (3 read-only, 7 mutating)".
 Fourth tier: two boxes side by side: "Durable Storage (SQLite, WAL)" and
   "External Systems (GitHub, email, APIs)".
 Bottom tier: one centered box "Resume (bounded recovery context)".
