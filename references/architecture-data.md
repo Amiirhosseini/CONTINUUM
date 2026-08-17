@@ -321,7 +321,7 @@ Vertical, tiered. Group boxes by the tiers in section 1.
   - Row 2: State Engine, Checkpoint Manager, Environment
   - Row 3: Validator, Recovery Engine, Security
   - Pill at top-right of the SDK container:
-    "MCP server: deny by default, 10 tools (3 read-only, 7 mutating)".
+    "MCP server: deny by default, 9 tools (3 read-only, 6 mutating)".
 - Fourth tier: two boxes side by side: "Durable Storage (SQLite, WAL)" and
   "External Systems (GitHub, email, APIs)".
 - Bottom tier: one centered box "Resume (bounded recovery context)".
