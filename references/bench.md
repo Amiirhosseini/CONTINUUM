@@ -1,13 +1,53 @@
-## CONTINUUM-Bench (design, not implemented)
+## CONTINUUM-Bench
 
-**No benchmark harness exists.** Nothing in this section has been built or
-measured, and `continuum benchmark` exits `4` saying so. The scenarios and
-metrics below are a specification for future work, recorded so the intended
-measurements are stated before any results are produced.
+A recovery benchmark for long-running agents under controlled failures. The
+minimal harness now ships: `continuum benchmark` runs real scenarios against the
+actual library (storage, checkpointing, validation, action ledger, recovery)
+with an in-process simulated agent. Nothing is mocked and no result is invented.
 
-Design for evaluating long-running agent recovery under controlled failures.
+### Status
 
-### Scenarios
+Implemented (minimal harness):
+
+- Module: `src/continuum/benchmark/__init__.py`
+- Command: `continuum benchmark [--total N] [--json]` (default total 200)
+- Tests: `tests/test_benchmark.py` asserts that continuum resumes with 0
+  duplicate work, detects the dataset change, and that full replay wastes work
+
+Remaining Phase 12 goals (see STATUS.md):
+
+- Expand from the 3 shipped scenarios to the full scenario suite below.
+- Publish baselines from real agent runs, not just the simulated harness.
+- Add a dashboard view of results.
+
+### Implemented scenarios
+
+| Scenario             | What breaks                                       |
+|:---------------------|:--------------------------------------------------|
+| process_crash        | The agent dies mid-run; measures duplicate work   |
+| dataset_change       | The environment version changes while the agent is down |
+| unknown_side_effect  | An external side effect is interrupted mid-flight |
+
+### Implemented methods (baselines)
+
+- `continuum`        - semantic checkpoint + environment revalidation + ledger
+- `replay`           - full transcript replay from scratch (the waste case)
+- `naive_checkpoint` - resume from the saved progress count, no validation
+
+### Metrics
+
+| Metric                       | Definition                                     |
+|:-----------------------------|:-----------------------------------------------|
+| duplicate_work_ratio         | Previously completed work repeated after recovery |
+| duplicate_side_effects       | External actions accidentally repeated          |
+| detected_stale               | Whether the method noticed the environment changed |
+| context_tokens               | Size of the briefing the agent needs to resume |
+| compression_ratio            | full log tokens / resume briefing tokens       |
+| elapsed_seconds              | Time to run the (scenario, method) measurement |
+
+### Target scenario suite (not yet implemented)
+
+The full spec calls for ten controlled-failure scenarios:
 
 | Scenario             | Description                           |
 |:---------------------|:--------------------------------------|
@@ -22,16 +62,21 @@ Design for evaluating long-running agent recovery under controlled failures.
 | Stale decision       | Previously valid decision invalidated |
 | Partial completion   | Task partially finished before crash  |
 
-### Metrics
+### Sample results
 
-| Metric                       | Definition                                                     |
-|:-----------------------------|:---------------------------------------------------------------|
-| Recovery Fidelity            | `correct_recovered_decisions / required_recovered_decisions`    |
-| Recovery Compression         | `full_context_tokens / semantic_recovery_tokens`               |
-| Duplicate Work Ratio         | Previously completed work repeated after recovery              |
-| Duplicate Side Effects       | External actions accidentally repeated                         |
-| Recovery Latency             | Time from crash to safe continuation                           |
-| State Validation Accuracy    | Proportion of stale states correctly detected                  |
+From `continuum benchmark --total 30` (illustrative, not the published baseline):
 
----
+    scenario           method              dup_work  dup_side  stale  ctx_tok  compress
+    process_crash      continuum              0.000         0  False       57     14.16
+    process_crash      replay                 0.500         1  False      778       1.0
+    process_crash      naive_checkpoint       0.000         0  False        4      None
+    dataset_change     continuum              0.000         0   True       57     14.16
+    dataset_change     replay                 0.500         1  False      778       1.0
+    dataset_change     naive_checkpoint       0.000         0  False        4      None
+    unknown_side_effect continuum              0.000         0  False       57     13.86
+    unknown_side_effect replay                 0.233         1  False      516       1.0
+    unknown_side_effect naive_checkpoint       0.000         0  False        3      None
 
+Reading: continuum resumes with no duplicate work and exactly one side effect,
+and is the only method that detects the dataset change. Full replay reprocesses
+everything (wasteful but ends correct). Naive checkpoint is efficient but blind.
