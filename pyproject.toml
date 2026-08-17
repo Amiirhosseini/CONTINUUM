@@ -58,6 +58,9 @@ openai = ["openai-agents>=0.2"]
 langchain = ["langchain>=0.3"]
 # The CLI uses only the standard library: a recovery tool must not fail to
 # import when you most need it. No extra is required.
+# Optional Ed25519 attestation of the event chain (continuum attest), kept out
+# of the core so the recovery path needs no crypto dependency.
+attest = ["cryptography>=45.0"]
 
 [project.scripts]
 continuum = "continuum.cli.main:main"
