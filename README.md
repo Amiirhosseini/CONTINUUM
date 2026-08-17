@@ -324,25 +324,6 @@ Contributions are welcome. This project is open source under Apache 2.0 and deli
 
 Open an issue before submitting large PRs. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contribution guide, including the [Code of Conduct](CODE_OF_CONDUCT.md).
 
-### Contributors
-
-<a href="https://github.com/Cyrax321">
-  <img src="https://github.com/Cyrax321.png" alt="Cyrax321" width="60" style="border-radius: 50%;" />
-</a>
-<a href="https://github.com/dchaudhari7177">
-  <img src="https://github.com/dchaudhari7177.png" alt="Dipak Chaudhari" width="60" style="border-radius: 50%;" />
-</a>
-<a href="https://github.com/sharyaropensource">
-  <img src="https://github.com/sharyaropensource.png" alt="Sharyar Naseem" width="60" style="border-radius: 50%;" />
-</a>
-<a href="https://github.com/lesbass">
-  <img src="https://github.com/lesbass.png" alt="Stefano Maffeis" width="60" style="border-radius: 50%;" />
-</a>
-
-| <img src="https://github.com/Cyrax321.png" width="50" style="border-radius: 50%;" alt="Cyrax321" /> | <img src="https://github.com/dchaudhari7177.png" width="50" style="border-radius: 50%;" alt="Dipak Chaudhari" /> | <img src="https://github.com/sharyaropensource.png" width="50" style="border-radius: 50%;" alt="Sharyar Naseem" /> | <img src="https://github.com/lesbass.png" width="50" style="border-radius: 50%;" alt="Stefano Maffeis" /> |
-|:---:|:---:|:---:|:---:|
-| [**Cyrax321**](https://github.com/Cyrax321) | [**Dipak Chaudhari**](https://github.com/dchaudhari7177) | [**Sharyar Naseem**](https://github.com/sharyaropensource) | [**Stefano Maffeis**](https://github.com/lesbass) |
-
 ## License
 
 Apache 2.0 - see [LICENSE](LICENSE).
