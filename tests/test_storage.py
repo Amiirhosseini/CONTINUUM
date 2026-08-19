@@ -503,22 +503,68 @@ def test_a_newer_schema_is_refused(tmp_path: Path) -> None:
         SQLiteStorage(db)
 
 
-def test_an_older_schema_is_refused(tmp_path: Path) -> None:
-    from continuum.storage import SchemaVersionError
+def test_a_one_version_older_schema_is_migrated_forward(tmp_path: Path) -> None:
     from continuum.storage.sqlite import SCHEMA_VERSION
 
+    # A database left at v1 (one step behind) by an older build: it lacks the
+    # v2 ``versions`` table and the event provenance columns. The forward
+    # migration must bring it up to the current schema and open normally.
+    legacy = """
+        CREATE TABLE continuum_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE runs (
+            run_id TEXT PRIMARY KEY, goal TEXT NOT NULL, status TEXT NOT NULL,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            metadata TEXT NOT NULL DEFAULT '{}'
+        );
+        CREATE TABLE events (
+            run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+            sequence INTEGER NOT NULL, event_id TEXT NOT NULL UNIQUE,
+            type TEXT NOT NULL, timestamp TEXT NOT NULL, payload TEXT NOT NULL,
+            causer_event_id TEXT, hash TEXT NOT NULL,
+            PRIMARY KEY (run_id, sequence)
+        );
+        CREATE TABLE checkpoints (
+            checkpoint_id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+            version INTEGER NOT NULL, trigger TEXT NOT NULL,
+            created_at TEXT NOT NULL, integrity_hash TEXT NOT NULL, body TEXT NOT NULL
+        );
+        INSERT INTO continuum_meta(key, value) VALUES ('schema_version', '1');
+    """
     db = tmp_path / "agent.db"
-    SQLiteStorage(db).close()
-
     raw = sqlite3.connect(db)
-    raw.execute(
-        "UPDATE continuum_meta SET value = ? WHERE key = 'schema_version'",
-        (str(SCHEMA_VERSION - 1),),
-    )
+    raw.executescript(legacy)
     raw.commit()
     raw.close()
 
-    with pytest.raises(SchemaVersionError, match="older CONTINUUM"):
+    assert SCHEMA_VERSION == 2
+    # No longer refused: the one-step migration path exists.
+    with SQLiteStorage(db) as store:
+        store.create_run(Run(run_id="run_1", goal="g"))
+        assert store.get_run("run_1").goal == "g"
+
+
+def test_an_unsupported_older_schema_is_refused(tmp_path: Path) -> None:
+    from continuum.storage import SchemaVersionError
+
+    # A database stamped older than any registered migration has no path
+    # forward and must still be refused rather than guessed at.
+    legacy = """
+        CREATE TABLE continuum_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE runs (
+            run_id TEXT PRIMARY KEY, goal TEXT NOT NULL, status TEXT NOT NULL,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            metadata TEXT NOT NULL DEFAULT '{}'
+        );
+        INSERT INTO continuum_meta(key, value) VALUES ('schema_version', '0');
+    """
+    db = tmp_path / "agent.db"
+    raw = sqlite3.connect(db)
+    raw.executescript(legacy)
+    raw.commit()
+    raw.close()
+
+    with pytest.raises(SchemaVersionError, match="older than supported"):
         SQLiteStorage(db)
 
 
@@ -540,8 +586,12 @@ def test_storage_urls_are_accepted_in_several_forms(tmp_path: Path) -> None:
         assert memory.list_runs() == []
 
 
-def test_postgres_fails_clearly_rather_than_silently_using_sqlite() -> None:
-    with pytest.raises(NotImplementedError, match="not implemented yet"):
+def test_postgres_url_is_routed_to_postgres_backend() -> None:
+    # A postgres URL is no longer refused with NotImplementedError; it is routed
+    # to PostgresStorage. Without the driver installed that fails clearly
+    # (RuntimeError mentioning psycopg) rather than silently falling back to
+    # SQLite, which would mask a misconfiguration.
+    with pytest.raises(RuntimeError, match="psycopg"):
         open_storage("postgresql://localhost/continuum")
 
 

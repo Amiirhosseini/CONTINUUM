@@ -40,68 +40,11 @@ from continuum.storage.base import (
     ConcurrentWriteError,
     CorruptedRecord,
     RunNotFound,
-    SchemaVersionError,
     Storage,
 )
+from continuum.storage.migrations import SCHEMA_VERSION, migrate_schema
 
 __all__ = ["SQLiteStorage", "SCHEMA_VERSION"]
-
-SCHEMA_VERSION = 2
-
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS continuum_meta (
-    key   TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS runs (
-    run_id     TEXT PRIMARY KEY,
-    goal       TEXT NOT NULL,
-    status     TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    metadata   TEXT NOT NULL DEFAULT '{}'
-);
-
-CREATE TABLE IF NOT EXISTS events (
-    run_id          TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-    sequence        INTEGER NOT NULL,
-    event_id        TEXT NOT NULL UNIQUE,
-    type            TEXT NOT NULL,
-    timestamp       TEXT NOT NULL,
-    payload         TEXT NOT NULL,
-    causer_event_id TEXT,
-    source          TEXT NOT NULL DEFAULT 'deterministic',
-    prev_hash       TEXT,
-    hash            TEXT NOT NULL,
-    PRIMARY KEY (run_id, sequence)
-);
-
-CREATE INDEX IF NOT EXISTS events_by_type ON events(run_id, type);
-
-CREATE TABLE IF NOT EXISTS versions (
-    run_id           TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-    version          INTEGER NOT NULL,
-    fingerprint      TEXT NOT NULL,
-    prev_fingerprint TEXT,
-    reason           TEXT NOT NULL DEFAULT '',
-    created_at       TEXT NOT NULL,
-    state            TEXT NOT NULL,
-    PRIMARY KEY (run_id, version)
-);
-
-CREATE TABLE IF NOT EXISTS checkpoints (
-    checkpoint_id  TEXT PRIMARY KEY,
-    run_id         TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-    version        INTEGER NOT NULL,
-    trigger        TEXT NOT NULL,
-    created_at     TEXT NOT NULL,
-    integrity_hash TEXT NOT NULL,
-    body           TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS checkpoints_by_run ON checkpoints(run_id, version);
-"""
 
 
 def _resolve_path(url_or_path: str | Path) -> str:
@@ -147,33 +90,11 @@ class SQLiteStorage(Storage):
         cursor.execute("PRAGMA busy_timeout=30000")
 
     def _migrate(self) -> None:
-        # executescript() commits any open transaction, so schema creation runs
-        # on its own rather than inside _write().
+        # Forward-migrate (or seed) the schema under the write lock. The runner
+        # assumes autocommit, which _configure selects, and commits any open
+        # transaction itself via executescript.
         with self._lock:
-            self._connection.executescript(_SCHEMA)
-
-        with self._write() as conn:
-            row = conn.execute(
-                "SELECT value FROM continuum_meta WHERE key = 'schema_version'"
-            ).fetchone()
-            if row is None:
-                conn.execute(
-                    "INSERT INTO continuum_meta(key, value) VALUES ('schema_version', ?)",
-                    (str(SCHEMA_VERSION),),
-                )
-                return
-            found = int(row["value"])
-            if found > SCHEMA_VERSION:
-                raise SchemaVersionError(
-                    f"database schema v{found} was written by a newer CONTINUUM; "
-                    f"this build understands v{SCHEMA_VERSION}"
-                )
-            if found < SCHEMA_VERSION:
-                raise SchemaVersionError(
-                    f"database schema v{found} was written by an older CONTINUUM; "
-                    f"this build requires v{SCHEMA_VERSION}. No automatic migration "
-                    f"is available: reset the database or open it with a compatible build."
-                )
+            migrate_schema(self._connection)
 
     # -- transactions ----------------------------------------------------- #
 
