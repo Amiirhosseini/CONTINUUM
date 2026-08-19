@@ -7,14 +7,24 @@ now any of them could overwrite another's progress, checkpoint over its state,
 or claim its actions. This layer keeps honestly-named agents out of each other's
 runs.
 
-It is *not* a security boundary. ``clientInfo`` is asserted by the client during
-the initialize handshake and never verified, so a caller that wants to be called
-``claude-code`` simply says so. What the transport does guarantee is that the
-name is fixed at connection time and injected server-side: a caller cannot
-elevate itself mid-session by passing a forged ``clientInfo`` in tool arguments.
-That is enough to separate cooperating agents, and not enough to stop a hostile
-one — which in any case has direct filesystem access to the database and does
-not need the MCP server at all.
+It is a security boundary only when authentication is turned on. By default
+``clientInfo`` is asserted by the client during the initialize handshake and
+never verified, so a caller that wants to be called ``claude-code`` simply says
+so. What the transport does guarantee is that the name is fixed at connection
+time and injected server-side: a caller cannot elevate itself mid-session by
+passing a forged ``clientInfo`` in tool arguments. That is enough to separate
+cooperating agents, and not enough to stop a hostile one on its own.
+
+When ``CONTINUUM_MCP_TOKEN`` is set (or an ``AuthPolicy`` is supplied), the
+server additionally verifies a shared secret the client presents in the
+handshake's ``_meta.authToken``. A caller that cannot prove possession of the
+secret is refused every mutating tool regardless of the name it claims, which
+is what turns "cooperating agents kept apart" into "hostile caller stopped".
+The check is fail-closed: a missing or mismatched secret always refuses, and an
+unset secret leaves authentication disabled so the default local, single-user,
+no-account behavior is unchanged. A hostile process with direct filesystem
+access to the database can still edit it without the server, which is outside
+this layer's scope.
 
 Read-only tools stay open
 -------------------------
@@ -41,10 +51,16 @@ __all__ = [
     "AuthorizationPolicy",
     "NotAuthorized",
     "UnknownCaller",
+    "AuthPolicy",
+    "NotAuthenticated",
     "POLICY_ENV_VAR",
     "POLICY_ENV_VAR_ALIAS",
     "POLICY_FILENAME",
+    "AUTH_ENV_VAR",
     "load_policy",
+    "load_auth",
+    "caller_name",
+    "token_from",
 ]
 
 POLICY_ENV_VAR = "CONTINUUM_MCP_ALLOW"
@@ -68,6 +84,117 @@ class NotAuthorized(PermissionError):
 
 class UnknownCaller(NotAuthorized):
     """The connection never identified itself, so nothing can be authorized."""
+
+
+class NotAuthenticated(PermissionError):
+    """The caller did not prove possession of the expected shared secret."""
+
+
+class AuthPolicy:
+    """Verifies that a caller possesses the expected shared secret.
+
+    Disabled by default: with no expected secret configured, ``verify`` is a
+    no-op and the server behaves as before (authorization by declared name
+    only). When a secret is configured, every mutating call must present it
+    through the handshake's ``_meta.authToken``, or it is refused.
+
+    The check is fail-closed on purpose. The closed PR #3 is the cautionary
+    tale: its guard authorized the caller after catching a ``ValueError``, so
+    a malformed request fell through to "allowed". Here a missing, empty, or
+    mismatched secret always refuses, and a misconfigured empty secret refuses
+    rather than opening the door. No exception path resolves in the caller's
+    favour.
+    """
+
+    __slots__ = ("expected", "tokens", "source")
+
+    def __init__(
+        self,
+        expected: str | None = None,
+        *,
+        tokens: Mapping[str, str] | None = None,
+        source: str = "default",
+    ) -> None:
+        self.expected = expected
+        self.tokens = dict(tokens) if tokens else None
+        self.source = source
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        mode = "disabled" if self.disabled else ("per-client" if self.tokens else "shared-secret")
+        return f"AuthPolicy(mode={mode}, source={self.source!r})"
+
+    @property
+    def disabled(self) -> bool:
+        # Only an absent secret disables authentication. An explicit empty
+        # secret is a misconfiguration and must refuse, not open the door.
+        return self.expected is None and not self.tokens
+
+    def verify(self, caller: str | None, token: str | None) -> None:
+        """Raise ``NotAuthenticated`` unless ``token`` proves the secret.
+
+        ``caller`` is the declared name (used for per-client secrets); it is
+        never trusted on its own. Any failure refuses the call.
+        """
+        if self.disabled:
+            return
+        expected: str | None
+        if self.tokens is not None:
+            if caller not in self.tokens:
+                raise NotAuthenticated(
+                    f"caller {caller!r} is not registered for authentication"
+                )
+            expected = self.tokens[caller]
+        else:
+            expected = self.expected
+        # An empty expected secret cannot be presented, so it must refuse.
+        if not expected or not token or token != expected:
+            raise NotAuthenticated(
+                "the caller did not present the expected shared secret"
+            )
+
+
+AUTH_ENV_VAR = "CONTINUUM_MCP_TOKEN"
+
+
+def load_auth(
+    expected: str | None = None,
+    *,
+    env: Mapping[str, str] | None = None,
+) -> AuthPolicy:
+    """Resolve the authentication policy.
+
+    Explicit argument wins, then the ``CONTINUUM_MCP_TOKEN`` environment
+    variable, then disabled. An empty variable is treated as unset, so a blank
+    configuration is the same as "no authentication".
+    """
+    if expected is not None:
+        return AuthPolicy(expected, source="argument")
+    environ = os.environ if env is None else env
+    value = environ.get(AUTH_ENV_VAR)
+    if value:
+        return AuthPolicy(value, source=AUTH_ENV_VAR)
+    return AuthPolicy(source="default (disabled)")
+
+
+def token_from(context: Any) -> str | None:
+    """Read the shared secret a client presented in the initialize handshake.
+
+    Carried in ``_meta.authToken`` of the ``initialize`` request params, which
+    the transport injects server-side and the caller cannot forge through tool
+    arguments. Returns ``None`` when no context or no token is present.
+    """
+    if context is None:
+        return None
+    try:
+        params = context.session.client_params
+    except AttributeError:
+        return None
+    meta = getattr(params, "meta", None)
+    if not isinstance(meta, dict):
+        return None
+    token = meta.get("authToken")
+    return str(token) if token else None
+
 
 
 class AuthorizationPolicy:

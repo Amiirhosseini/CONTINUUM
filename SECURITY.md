@@ -41,10 +41,12 @@ In scope:
 
 Out of scope:
 
-- impersonation via `clientInfo`. This is a documented limitation, not a bug:
-  the MCP handshake identity is client-asserted and never verified, so the
-  authorization layer distinguishes honestly-named callers and nothing more.
-  See the "What it does not do" sections in `STATUS.md`.
+- impersonation via a forged `clientInfo` name alone. The authorization layer
+  still distinguishes callers by their declared name. What changed: when
+  `CONTINUUM_MCP_TOKEN` is set, the server also verifies a shared secret the
+  caller presents in the handshake, so a hostile process cannot impersonate an
+  authorized caller without that secret. See `src/continuum/mcp/authz.py` and
+  `STATUS.md` issue #1.
 - anything requiring existing write access to the database file
 
 ## Why this policy exists

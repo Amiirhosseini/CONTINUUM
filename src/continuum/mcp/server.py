@@ -44,7 +44,14 @@ from continuum.actions.ledger import ActionLedger
 from continuum.adapters.generic import GenericAgentAdapter
 from continuum.environment import StaticProvider, capture
 from continuum.events import EventType
-from continuum.mcp.authz import AuthorizationPolicy, caller_name, load_policy
+from continuum.mcp.authz import (
+    AuthorizationPolicy,
+    AuthPolicy,
+    caller_name,
+    load_auth,
+    load_policy,
+    token_from,
+)
 from continuum.models import (
     ActionStatus,
     EnvironmentSnapshot,
@@ -197,6 +204,7 @@ def build_server(
     *,
     storage: Storage | None = None,
     policy: AuthorizationPolicy | None = None,
+    auth: AuthPolicy | None = None,
 ) -> tuple[MCPServer, ContinuumMCP]:
     """Construct the MCP server and its backing context.
 
@@ -205,9 +213,14 @@ def build_server(
     ``policy`` decides which callers may use mutating tools. Omitted, it is
     resolved from the environment and then the project policy file, falling
     back to denying every mutation — an unconfigured server is read-only.
+
+    ``auth`` verifies a shared secret before any mutating tool runs. Omitted,
+    it is resolved from ``CONTINUUM_MCP_TOKEN`` and is disabled when that is
+    unset, leaving the default local, no-account behavior unchanged.
     """
     ctx = ContinuumMCP(database, storage=storage)
     policy = load_policy() if policy is None else policy
+    auth = load_auth() if auth is None else auth
     server = MCPServer(
         name="continuum",
         title="CONTINUUM",
@@ -237,7 +250,12 @@ def build_server(
 
         @functools.wraps(fn)
         def wrapper(*args: Any, ctx: Context | None = None, **kwargs: Any) -> str:
-            policy.require(caller_name(ctx), fn.__name__)
+            caller = caller_name(ctx)
+            # Authenticate before authorize: a caller proves the shared secret
+            # first, then its declared name is checked against the allowlist.
+            # Both must pass; either failure refuses the call before any write.
+            auth.verify(caller, token_from(ctx))
+            policy.require(caller, fn.__name__)
             return fn(*args, **kwargs)
 
         # The SDK locates the context parameter via get_type_hints(), and

@@ -1934,18 +1934,17 @@ an item done only with evidence (a test or a direct repro).
 
 ### A. Close the credibility and trust gaps (these invalidate the core claim)
 
-- [ ] **A1. Fix the remaining trust bug `#1` (MCP caller authentication).**
+- [x] **A1. Fix the remaining trust bug `#1` (MCP caller authentication).**
   - `#17` (older-schema DB accepted silently) and `#19` (`resume --repair`
-    no-op) are **already resolved** (commits `82b9f1c`, `f145818`, with
-    regression tests in `tests/test_storage.py` and `tests/test_cli.py`). Mark
-    done, do not rework.
-  - `#1`: MCP `clientInfo` is client-asserted and never verified, so the
-    authorization layer distinguishes honestly-named callers only. Add caller
-    authentication: a shared secret or per-client token (or transport-level
-    identity) the server verifies before authorizing mutating tools. Keep it
-    optional so the default local, single-user, no-account behavior is
-    unchanged. (Note: PR #3 attempted this but failed open and was closed; do
-    not repeat the `ValueError -> allowed` mistake.)
+    no-op) were **already resolved** (commits `82b9f1c`, `f145818`, with
+    regression tests in `tests/test_storage.py` and `tests/test_cli.py`).
+  - `#1`: implemented. When `CONTINUUM_MCP_TOKEN` is set, the server refuses
+    every mutating tool unless the caller presents that shared secret in the
+    handshake's `_meta.authToken`. Fail-closed (the PR #3 failed-open mistake is
+    explicitly tested against). `AuthPolicy`/`load_auth` in
+    `src/continuum/mcp/authz.py`, wired into the tool `guard` in
+    `src/continuum/mcp/server.py`, tests in `tests/test_mcp_authz.py`. Default
+    local behavior unchanged when the variable is unset.
 - [ ] **A2. Observability and proof.** Add metrics plus the Phase 14 dashboard,
   and run the minimal CONTINUUM-Bench (`#6`): LangGraph adapter revalidation on
   top of the existing checkpointer, with 3 scenarios, 2 baselines, and real

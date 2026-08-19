@@ -227,7 +227,7 @@ observation that raising `ToolError` directly is a defensible alternative to the
 
 | Issue | Summary | Priority |
 |:--|:--|:--|
-| [#1](https://github.com/Cyrax321/CONTINUUM/issues/1) | **MCP caller authentication.** Narrowed by `d9365c8`: authorization for mutating tools now exists and denies by default. What remains is authentication — `clientInfo` is client-asserted and unverified, so a deliberately impersonating local process is unaffected. Would need a shared secret, per-client token, or transport-level identity. | Medium |
+| [#1](https://github.com/Cyrax321/CONTINUUM/issues/1) | **MCP caller authentication.** Authorization for mutating tools (added in `d9365c8`) denies by default; what was missing was authentication — `clientInfo` was client-asserted and unverified. Now resolved: when `CONTINUUM_MCP_TOKEN` is set, the server refuses every mutating tool unless the caller presents that shared secret in the handshake's `_meta.authToken`. Fail-closed (missing or mismatched secret always refuses; an empty configured secret refuses rather than opening the door, the PR #3 mistake). Default local behavior is unchanged when the variable is unset. | Medium | Resolved — `AuthPolicy`/`load_auth` in `src/continuum/mcp/authz.py`, wired into the tool `guard` in `src/continuum/mcp/server.py`; tests in `tests/test_mcp_authz.py` (including `test_auth_fails_closed_when_required_but_unset`). |
 
 ### Code audit findings (2026-08-12)
 

@@ -19,14 +19,19 @@ from typing import Any
 import pytest
 
 from continuum.mcp.authz import (
+    AUTH_ENV_VAR,
     POLICY_ENV_VAR,
     POLICY_ENV_VAR_ALIAS,
     POLICY_FILENAME,
     AuthorizationPolicy,
+    AuthPolicy,
+    NotAuthenticated,
     NotAuthorized,
     UnknownCaller,
     caller_name,
+    load_auth,
     load_policy,
+    token_from,
 )
 from continuum.mcp.server import build_server
 from continuum.storage import SQLiteStorage
@@ -330,6 +335,160 @@ async def test_identity_cannot_be_forged_through_tool_arguments(
             },
             context=fake_context(STRANGER),
         )
+
+
+# --- authentication (issue #1) ---------------------------------------------- #
+
+
+def test_a_disabled_auth_policy_is_a_no_op() -> None:
+    auth = AuthPolicy()
+    assert auth.disabled
+    # Must not raise, and must not require anything.
+    auth.verify(STRANGER, None)
+    auth.verify(None, "anything")
+
+
+def test_a_configured_secret_is_required() -> None:
+    auth = AuthPolicy("secret")
+    assert not auth.disabled
+    # Correct secret passes.
+    auth.verify(ALLOWED, "secret")
+    # Missing, empty, or wrong secret refuses.
+    with pytest.raises(NotAuthenticated, match="shared secret"):
+        auth.verify(ALLOWED, None)
+    with pytest.raises(NotAuthenticated, match="shared secret"):
+        auth.verify(ALLOWED, "")
+    with pytest.raises(NotAuthenticated, match="shared secret"):
+        auth.verify(ALLOWED, "wrong")
+
+
+def test_auth_fails_closed_when_required_but_unset() -> None:
+    """The past mistake (PR #3) was a guard that authorized on ValueError.
+
+    An empty expected secret must refuse, never open the door.
+    """
+    auth = AuthPolicy("")
+    # "" is not a usable secret, so verification refuses rather than passing.
+    with pytest.raises(NotAuthenticated):
+        auth.verify(ALLOWED, "")
+
+
+def test_per_client_tokens_map_a_secret_to_a_name() -> None:
+    auth = AuthPolicy(tokens={ALLOWED: "a-secret"})
+    assert not auth.disabled
+    auth.verify(ALLOWED, "a-secret")
+    # An unregistered caller is refused even with a plausible token.
+    with pytest.raises(NotAuthenticated, match="not registered"):
+        auth.verify(STRANGER, "a-secret")
+    # A registered caller with the wrong token is refused.
+    with pytest.raises(NotAuthenticated, match="shared secret"):
+        auth.verify(ALLOWED, "nope")
+
+
+def test_load_auth_reads_the_env_var() -> None:
+    auth = load_auth(env={AUTH_ENV_VAR: "s3cr3t"})
+    assert not auth.disabled
+    assert auth.source == AUTH_ENV_VAR
+    auth.verify(ALLOWED, "s3cr3t")
+    with pytest.raises(NotAuthenticated):
+        auth.verify(ALLOWED, "nope")
+
+
+def test_load_auth_is_disabled_without_a_secret() -> None:
+    auth = load_auth(env={})
+    assert auth.disabled
+    # Argument wins over env and over the disabled default.
+    assert not load_auth("x", env={}).disabled
+
+
+def test_token_from_reads_the_handshake_meta() -> None:
+    assert token_from(fake_context(ALLOWED, auth_token="tok")) == "tok"
+    assert token_from(fake_context(ALLOWED)) is None
+    assert token_from(None) is None
+
+
+# --- authentication through the server -------------------------------------- #
+
+
+@pytest.fixture
+def authed_server(store: SQLiteStorage) -> Any:
+    """A server that requires the shared secret and allows one caller."""
+    srv, _ = build_server(
+        storage=store,
+        policy=AuthorizationPolicy([ALLOWED]),
+        auth=AuthPolicy("secret"),
+    )
+    return srv
+
+
+@pytest.mark.asyncio
+async def test_a_mutating_call_needs_the_secret(authed_server: Any) -> None:
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    # No token at all: refused, and nothing is written.
+    with pytest.raises(ToolError, match="shared secret"):
+        await authed_server.call_tool(
+            "continuum_record_progress",
+            {"run_id": "run_1", "completed": 1, "goal": "g"},
+            context=fake_context(ALLOWED),
+        )
+
+
+@pytest.mark.asyncio
+async def test_the_wrong_secret_is_refused(authed_server: Any) -> None:
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    with pytest.raises(ToolError, match="shared secret"):
+        await authed_server.call_tool(
+            "continuum_record_progress",
+            {"run_id": "run_1", "completed": 1, "goal": "g"},
+            context=fake_context(ALLOWED, auth_token="wrong"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_the_right_secret_and_name_succeeds(
+    authed_server: Any, store: SQLiteStorage
+) -> None:
+    result = await authed_server.call_tool(
+        "continuum_record_progress",
+        {"run_id": "run_1", "completed": 3, "total": 10, "goal": "g"},
+        context=fake_context(ALLOWED, auth_token="secret"),
+    )
+    assert json.loads(result.content[0].text)["completed"] == 3
+    assert store.get_run("run_1").goal == "g"
+
+
+@pytest.mark.asyncio
+async def test_a_stranger_with_the_secret_is_still_unauthorized(
+    authed_server: Any,
+) -> None:
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    # Possessing the secret is necessary but not sufficient: the name must
+    # also be on the allowlist. Auth passes, authorization still fails.
+    with pytest.raises(ToolError, match="not permitted"):
+        await authed_server.call_tool(
+            "continuum_record_progress",
+            {"run_id": "run_1", "completed": 1, "goal": "g"},
+            context=fake_context(STRANGER, auth_token="secret"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_read_only_tools_do_not_require_the_secret(
+    authed_server: Any, store: SQLiteStorage
+) -> None:
+    """Authentication gates mutating tools only, matching authorization."""
+    await authed_server.call_tool(
+        "continuum_record_progress",
+        {"run_id": "run_1", "completed": 1, "total": 10, "goal": "g"},
+        context=fake_context(ALLOWED, auth_token="secret"),
+    )
+    result = await authed_server.call_tool(
+        "continuum_resume", {"run_id": "run_1"}, context=fake_context(STRANGER)
+    )
+    assert not result.is_error
 
 
 # --- every tool must be classified ------------------------------------------ #
