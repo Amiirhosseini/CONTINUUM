@@ -40,8 +40,7 @@ class StateExtractor(Protocol):
 
     def extract(
         self, trajectory: Any, environment: EnvironmentSnapshot | None = None
-    ) -> SemanticState:
-        ...
+    ) -> SemanticState: ...
 
 
 @runtime_checkable
@@ -50,8 +49,7 @@ class ActionReconciler(Protocol):
 
     name: str
 
-    def reconcile(self, action: Action) -> Reconciliation:
-        ...
+    def reconcile(self, action: Action) -> Reconciliation: ...
 
 
 @runtime_checkable
@@ -62,8 +60,7 @@ class ValidationRule(Protocol):
 
     def evaluate(
         self, state: SemanticState, environment: EnvironmentSnapshot | None = None
-    ) -> list[ComponentValidationEntry]:
-        ...
+    ) -> list[ComponentValidationEntry]: ...
 
 
 __all__ = [

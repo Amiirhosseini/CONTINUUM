@@ -276,7 +276,5 @@ class GitProvider(EnvironmentProvider):
             }
         commit = result.stdout.strip()
         return {
-            key: EnvResource(
-                name=key, kind="git", version=commit[:16], metadata={"commit": commit}
-            )
+            key: EnvResource(name=key, kind="git", version=commit[:16], metadata={"commit": commit})
         }
