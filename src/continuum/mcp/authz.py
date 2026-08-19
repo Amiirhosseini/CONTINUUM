@@ -140,17 +140,13 @@ class AuthPolicy:
         expected: str | None
         if self.tokens is not None:
             if caller not in self.tokens:
-                raise NotAuthenticated(
-                    f"caller {caller!r} is not registered for authentication"
-                )
+                raise NotAuthenticated(f"caller {caller!r} is not registered for authentication")
             expected = self.tokens[caller]
         else:
             expected = self.expected
         # An empty expected secret cannot be presented, so it must refuse.
         if not expected or not token or token != expected:
-            raise NotAuthenticated(
-                "the caller did not present the expected shared secret"
-            )
+            raise NotAuthenticated("the caller did not present the expected shared secret")
 
 
 AUTH_ENV_VAR = "CONTINUUM_MCP_TOKEN"
@@ -194,7 +190,6 @@ def token_from(context: Any) -> str | None:
         return None
     token = meta.get("authToken")
     return str(token) if token else None
-
 
 
 class AuthorizationPolicy:

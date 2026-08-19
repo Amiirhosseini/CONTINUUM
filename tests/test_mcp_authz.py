@@ -447,9 +447,7 @@ async def test_the_wrong_secret_is_refused(authed_server: Any) -> None:
 
 
 @pytest.mark.asyncio
-async def test_the_right_secret_and_name_succeeds(
-    authed_server: Any, store: SQLiteStorage
-) -> None:
+async def test_the_right_secret_and_name_succeeds(authed_server: Any, store: SQLiteStorage) -> None:
     result = await authed_server.call_tool(
         "continuum_record_progress",
         {"run_id": "run_1", "completed": 3, "total": 10, "goal": "g"},
