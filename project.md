@@ -1934,14 +1934,18 @@ an item done only with evidence (a test or a direct repro).
 
 ### A. Close the credibility and trust gaps (these invalidate the core claim)
 
-- [ ] **A1. Fix trust bugs `#1`, `#17`, `#19`.**
-  - `#1`: MCP auth is client-asserted, not verified. Make the server verify the
-    caller instead of trusting a self-reported identity.
-  - `#17`: old-schema databases are silently accepted or break. Add a migration
-    path for the event schema and for projector logic so recovered state does
-    not drift across version upgrades.
-  - `#19`: `resume --repair` is a documented no-op. Either implement the repair
-    or remove the flag and the misleading docs.
+- [ ] **A1. Fix the remaining trust bug `#1` (MCP caller authentication).**
+  - `#17` (older-schema DB accepted silently) and `#19` (`resume --repair`
+    no-op) are **already resolved** (commits `82b9f1c`, `f145818`, with
+    regression tests in `tests/test_storage.py` and `tests/test_cli.py`). Mark
+    done, do not rework.
+  - `#1`: MCP `clientInfo` is client-asserted and never verified, so the
+    authorization layer distinguishes honestly-named callers only. Add caller
+    authentication: a shared secret or per-client token (or transport-level
+    identity) the server verifies before authorizing mutating tools. Keep it
+    optional so the default local, single-user, no-account behavior is
+    unchanged. (Note: PR #3 attempted this but failed open and was closed; do
+    not repeat the `ValueError -> allowed` mistake.)
 - [ ] **A2. Observability and proof.** Add metrics plus the Phase 14 dashboard,
   and run the minimal CONTINUUM-Bench (`#6`): LangGraph adapter revalidation on
   top of the existing checkpointer, with 3 scenarios, 2 baselines, and real
@@ -1983,8 +1987,9 @@ an item done only with evidence (a test or a direct repro).
 
 ### Where to start
 
-Begin with **A1**, specifically `#17` and `#19` (the smallest, highest-leverage
-trust fixes), then immediately follow with **B1** (the `Registry` and the four
-seam protocols with conformance tests) since that is what makes the existing
-recovery teachable and attachable.
+Begin with **A1/`#1`** (MCP caller authentication), the only remaining trust
+gap, then immediately follow with **B1** (the `Registry` and the four seam
+protocols with conformance tests) since that is what makes the existing recovery
+teachable and attachable. `#17` and `#19` are already resolved; verify their
+regression tests pass and move on.
 
