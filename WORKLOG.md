@@ -231,11 +231,43 @@ now the only remaining trust bug and is closed by this session.
 Verification: `tests/test_mcp_authz.py` and `tests/test_mcp_server.py` pass;
 `ruff` and `mypy --strict` clean on the changed files.
 
+## Session 14: plugin Registry and capability seams (B1) (2026-08-19)
+
+Started the "attach to any system" work from `references/integration-architecture.md`
+section 3 (the Cordis-style plugin seam). Built the Tier 1 foundation:
+
+- `src/continuum/plugins/registry.py`: a dependency-injected `Registry` mapping
+  names to services, resolved by type, with reversible `Registration` handles
+  (unregister) so a plugin can tear down what it contributed. `all_of(type_)`
+  returns every registered service conforming to a seam.
+- `src/continuum/plugins/seams.py`: the four capability seams as
+  `runtime_checkable` `Protocol`s, `EnvironmentProvider` (re-exported from
+  `continuum.environment`), `StateExtractor`, `ActionReconciler`, `ValidationRule`,
+  plus a `Reconciliation` dataclass for reconciler output.
+- `src/continuum/plugins/__init__.py`: single import surface.
+- `GitProvider` in `src/continuum/environment/snapshot.py`: the first
+  *discoverable* environment provider. It reads `git rev-parse HEAD` for a path
+  instead of trusting a declared version, and never raises (reports
+  `UNKNOWN_VERSION` outside a repo or on failure). Exported from the environment
+  package.
+
+`EnvironmentProvider` already existed as an ABC (`StaticProvider`,
+`ValueProvider`, `FileProvider`, `CallableProvider`), so the seam was real before
+this; B1 adds the registry, the three other seams, and a discoverable provider.
+
+Tests: `tests/test_plugins.py` covers the registry (register/resolve/reverse/
+filter), seam conformance (dummy implementations satisfy `isinstance` and return
+correct types), built-in providers conforming, and `GitProvider` reading HEAD in
+a temp repo and reporting UNKNOWN outside one.
+
+Verification: `tests/test_plugins.py` (12) and `tests/test_environment.py` (25)
+pass; `ruff` and `mypy --strict` clean on the changed files.
+
 ## Open items carried forward
 
 - Issue #17: resolved (`82b9f1c`); older-schema databases now refused at open.
 - Issue #19: resolved (`f145818`); `resume --repair` now records the plan.
-- Issue #1: resolved (this session); optional shared-secret authentication.
+- Issue #1: resolved (Session 13); optional shared-secret authentication.
 - Orphaned `demo_report.md` size change and concurrent-agent edits (inferred,
   never confirmed).
 - `checkpoint_version: 0` on resume despite a session-1 checkpoint.

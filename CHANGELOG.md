@@ -37,6 +37,16 @@ All notable changes to this project are documented here. The format follows
   `src/continuum/mcp/authz.py`, wired into the tool `guard` in
   `src/continuum/mcp/server.py`; tests in `tests/test_mcp_authz.py`.
 
+- **Plugin registry and capability seams (Tier 1, issue-adjacent).** New
+  `continuum.plugins` package starts the "attach to any system" work from
+  `references/integration-architecture.md`: a dependency-injected `Registry`
+  (named services, reversible registration) and the four capability seams as
+  `Protocol` interfaces, `EnvironmentProvider`, `StateExtractor`,
+  `ActionReconciler`, `ValidationRule`. The first *discoverable*
+  `EnvironmentProvider`, `GitProvider`, reads the current commit from a git
+  repository instead of trusting a declared version, and never raises.
+  Conformance tests in `tests/test_plugins.py`.
+
 - **Real-LLM crash-and-resume harness.** `examples/langchain_real_llm_crash.py`
   drives the LangChain adapter against a live OpenRouter model through a hard crash:
   the `crash` subcommand lets the wrapped tool perform a real side effect and then

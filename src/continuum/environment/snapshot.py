@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import subprocess
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
@@ -33,6 +34,7 @@ __all__ = [
     "FileProvider",
     "ValueProvider",
     "CallableProvider",
+    "GitProvider",
     "capture",
     "UNKNOWN_VERSION",
 ]
@@ -233,3 +235,48 @@ def process_fingerprint() -> Mapping[str, EnvResource]:
         "platform": EnvResource(name="platform", kind="runtime", version=sys.platform),
         "cwd": EnvResource(name="cwd", kind="runtime", version=os.getcwd()),
     }
+
+
+class GitProvider(EnvironmentProvider):
+    """Discovers the current commit of a git repository (git HEAD).
+
+    A *discoverable* provider: rather than the agent asserting a version, this
+    reads what the repository actually contains. Capture never raises; a
+    directory that is not a git repository (or an unreachable one) reports
+    ``UNKNOWN_VERSION`` so recovery treats it as a finding, not as unchanged.
+    """
+
+    name = "git"
+
+    def __init__(self, path: str | Path = ".") -> None:
+        self.path = Path(path)
+
+    def capture(self) -> Mapping[str, EnvResource]:
+        key = f"git:{self.path}"
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(self.path), "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            return {
+                key: EnvResource(
+                    name=key, kind="git", version=UNKNOWN_VERSION, metadata={"error": str(exc)}
+                )
+            }
+        if result.returncode != 0:
+            reason = (result.stderr or "not a git repository").strip()
+            return {
+                key: EnvResource(
+                    name=key, kind="git", version=UNKNOWN_VERSION, metadata={"error": reason}
+                )
+            }
+        commit = result.stdout.strip()
+        return {
+            key: EnvResource(
+                name=key, kind="git", version=commit[:16], metadata={"commit": commit}
+            )
+        }

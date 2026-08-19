@@ -1956,12 +1956,16 @@ an item done only with evidence (a test or a direct repro).
   CLI surface over a stable wire protocol (reuse MCP or add HTTP/gRPC), plus
   thin multi-language SDKs and a generic auto-instrumentation shim (HTTP client
   / DB driver wrappers) so non-Python systems attach with minimal code.
-- [ ] **B1 (Tier 1, teachability).** Add a `Registry` (dependency-injected
+- [x] **B1 (Tier 1, teachability).** Add a `Registry` (dependency-injected
   context) and the four capability seams as `Protocol` interfaces with
   conformance tests: `EnvironmentProvider` (discover, not declare),
   `StateExtractor` (map arbitrary internal state), `ActionReconciler`
   (common idempotency / read-back), `ValidationRule` (domain staleness). Ship
   at least one real `EnvironmentProvider` (git HEAD or Postgres schema version).
+  - Implemented in `src/continuum/plugins/` (`Registry`, seams, `Reconciliation`)
+    and `GitProvider` in `src/continuum/environment/snapshot.py`; conformance
+    tests in `tests/test_plugins.py`. Note `EnvironmentProvider` already existed
+    as an ABC with `StaticProvider`/`ValueProvider`/`FileProvider`/`CallableProvider`.
 - [ ] **B2 (Tier 2, production durability).** PostgreSQL storage, a centralized
   server, distributed locking / lease coordination for runs, and the
   schema plus projector migration framework from A1/`#17`.
