@@ -47,8 +47,7 @@ def _require_crypto() -> tuple[Any, Any, Any]:
         )
     except ImportError as exc:  # pragma: no cover - depends on install
         raise RuntimeError(
-            "attestation requires the 'cryptography' package; "
-            "install continuum-agent[attest]"
+            "attestation requires the 'cryptography' package; install continuum-agent[attest]"
         ) from exc
     return Ed25519PrivateKey, Ed25519PublicKey, serialization
 

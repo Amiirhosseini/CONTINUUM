@@ -36,9 +36,7 @@ def test_verify_rejects_wrong_chain_hash() -> None:
 def test_verify_rejects_tampered_payload() -> None:
     priv_pem, _pub_pem = generate_keypair()
     attest = sign_chain(priv_pem, "run_abc", 42, "abc123")
-    tampered = Attestation(
-        **{**attest.to_dict(), "trusted_through_seq": 43}
-    )
+    tampered = Attestation(**{**attest.to_dict(), "trusted_through_seq": 43})
     assert verify_attestation(tampered) is False
 
 

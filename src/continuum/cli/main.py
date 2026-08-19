@@ -661,7 +661,9 @@ def cmd_attest(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
     be handed to any third party who then runs ``attest-verify`` against their
     own copy of the store.
     """
-    storage.get_run(args.run_id)  # Raising RunNotFound here is better than a silent empty attestation.
+    storage.get_run(
+        args.run_id
+    )  # Raising RunNotFound here is better than a silent empty attestation.
     events = storage.read_events(args.run_id)
     if not events:
         raise ValueError(f"run {args.run_id!r} has no events to attest")
@@ -687,10 +689,7 @@ def cmd_attest(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
     if args.out:
         Path(args.out).write_text(json.dumps(doc, indent=2, sort_keys=True), encoding="utf-8")
         payload = {"attestation_file": args.out, **doc}
-        text = (
-            f"Attestation written to {args.out} "
-            f"(seq {head.sequence}, hash {head.hash[:12]}...)"
-        )
+        text = f"Attestation written to {args.out} (seq {head.sequence}, hash {head.hash[:12]}...)"
     else:
         payload = doc
         text = json.dumps(doc, indent=2, sort_keys=True)
@@ -857,7 +856,11 @@ def build_parser() -> argparse.ArgumentParser:
     attest.add_argument("--out", help="write attestation JSON here (default: stdout)")
 
     attest_verify = with_run(
-        add("attest-verify", cmd_attest_verify, "Verify a signed attestation against the live chain.")
+        add(
+            "attest-verify",
+            cmd_attest_verify,
+            "Verify a signed attestation against the live chain.",
+        )
     )
     attest_verify.add_argument("--attest", required=True, help="path to attestation JSON")
     return parser

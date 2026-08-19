@@ -625,9 +625,16 @@ def test_attest_and_verify_round_trip(db: str, tmp_path: Path) -> None:
 
     attest_file = tmp_path / "run_1.attest.json"
     code, out, _ = run(
-        "--db", db, "attest", "run_1",
-        "--key", str(key_file), "--signer", "ci-bot",
-        "--out", str(attest_file),
+        "--db",
+        db,
+        "attest",
+        "run_1",
+        "--key",
+        str(key_file),
+        "--signer",
+        "ci-bot",
+        "--out",
+        str(attest_file),
     )
     assert code == ExitCode.OK
     assert attest_file.exists()
@@ -646,8 +653,16 @@ def test_attest_verify_reports_altered_after_new_event(db: str, tmp_path: Path) 
 
     attest_file = tmp_path / "run_1.attest.json"
     run(
-        "--db", db, "attest", "run_1",
-        "--key", str(key_file), "--signer", "ci-bot", "--out", str(attest_file),
+        "--db",
+        db,
+        "attest",
+        "run_1",
+        "--key",
+        str(key_file),
+        "--signer",
+        "ci-bot",
+        "--out",
+        str(attest_file),
     )
     # A new event after signing shifts the head the attestation did not cover.
     with SQLiteStorage(db) as store:
