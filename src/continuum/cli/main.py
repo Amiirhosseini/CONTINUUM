@@ -948,7 +948,7 @@ def main(
 
     try:
         storage = open_storage(args.db)
-    except (StorageError, ValueError, NotImplementedError) as exc:
+    except (StorageError, ValueError, NotImplementedError, RuntimeError) as exc:
         print(f"error: {exc}", file=err)
         return ExitCode.ERROR
     except sqlite3.Error as exc:
