@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "continuum": {
+    "continuum-mcp": {
       "command": "continuum-mcp",
       "args": ["--db", "continuum.db"],
       "env": {

@@ -327,7 +327,7 @@ def build_server(
     auth = load_auth() if auth is None else auth
     ctx = ContinuumMCP(database, storage=storage)
     server = MCPServer(
-        name="continuum",
+        name="continuum-mcp",
         title="CONTINUUM",
         instructions=(
             "Durable recovery for long-running work. Record progress as you go, "

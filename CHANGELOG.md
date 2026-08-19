@@ -138,6 +138,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **MCP server was not found at cold start because its name did not match the
+  configured name (issue #87).** `.mcp.json` registered the server under the key
+  `continuum`, and `build_server` advertised `MCPServer(name="continuum")`, while
+  the console script, the docs, and `CLAUDE.md` all refer to it as `continuum-mcp`.
+  A client that resolves the server by the `continuum-mcp` name (including the
+  agent's own instructions) reported `ready: false` with `no MCP server with this
+  name is configured: continuum-mcp`, so the first tool call failed until a manual
+  `/mcp` reconnect. Both the `.mcp.json` key and the advertised server name are now
+  `continuum-mcp`, so the server is discovered and connected on the first attempt
+  with no per-session reconnect. The separate leak and clean-diagnostic hardening
+  of the cold-start path is tracked under #87 as well.
+
 - **A failed MCP cold start leaked a database handle and reported itself as a
   traceback (issue #87).** `build_server` opened storage on its first line but
   resolved the authorization policy and auth token after it, and both loaders
