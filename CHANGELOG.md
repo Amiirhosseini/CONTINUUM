@@ -27,6 +27,16 @@ All notable changes to this project are documented here. The format follows
     `tests/test_toy_task_banner_attack.py`. All 740 tests pass; `ruff` and
     `mypy --strict` are clean.
 
+- **MCP caller authentication (issue #1).** When `CONTINUUM_MCP_TOKEN` is set,
+  the MCP server now refuses every mutating tool unless the caller presents that
+  shared secret in the `initialize` handshake's `_meta.authToken`. The check is
+  fail-closed: a missing, empty, or mismatched secret always refuses, and an
+  empty configured secret refuses rather than opening the door (the closed PR
+  #3 failed open on a `ValueError`). The default local, single-user, no-account
+  behavior is unchanged when the variable is unset. `AuthPolicy`/`load_auth` in
+  `src/continuum/mcp/authz.py`, wired into the tool `guard` in
+  `src/continuum/mcp/server.py`; tests in `tests/test_mcp_authz.py`.
+
 - **Real-LLM crash-and-resume harness.** `examples/langchain_real_llm_crash.py`
   drives the LangChain adapter against a live OpenRouter model through a hard crash:
   the `crash` subcommand lets the wrapped tool perform a real side effect and then

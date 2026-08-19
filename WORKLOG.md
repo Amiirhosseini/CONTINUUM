@@ -198,12 +198,44 @@ Kept his attribution as plain text and removed the dead profile and avatar links
 so the README ships no broken reference. The other three contributors
 (`Cyrax321`, `dchaudhari7177`, `lesbass`) resolve normally.
 
+## Session 13: MCP caller authentication (issue #1) (2026-08-19)
+
+Closed the last open trust bug. Authorization (added in `d9365c8`) denied
+mutating tools by default, but `clientInfo` was client-asserted and never
+verified, so a hostile local process could impersonate an authorized caller.
+
+Added an optional, fail-closed shared-secret authentication:
+
+- `AuthPolicy` and `load_auth` in `src/continuum/mcp/authz.py`. When
+  `CONTINUUM_MCP_TOKEN` is set, the server requires the caller to present that
+  secret in the `initialize` handshake's `_meta.authToken`. The check is
+  fail-closed: a missing, empty, or mismatched secret always refuses, and an
+  empty configured secret refuses rather than opening the door. The closed PR
+  #3 failed open on a `ValueError`; `test_auth_fails_closed_when_required_but_unset`
+  pins the opposite behavior. An unset token leaves authentication disabled, so
+  the default local, single-user, no-account behavior is unchanged.
+- Wired into the tool `guard` in `src/continuum/mcp/server.py`: authenticate
+  before authorize, both must pass, denial precedes any write.
+- `token_from` reads the secret from `context.session.client_params.meta`.
+- `tests/mcp_helpers.py` `fake_context` now carries an `auth_token` for the
+  handshake `_meta`.
+- Tests in `tests/test_mcp_authz.py`: policy unit tests, the fail-closed case,
+  per-client tokens, env resolution, and server-level enforcement (right
+  secret + name succeeds; wrong/missing secret refused; a stranger with the
+  secret is still unauthorized; read-only tools unaffected).
+
+Also corrected the priority plan in `project.md`: #17 and #19 were already
+resolved (commits `82b9f1c`, `f145818`) and were wrongly listed as open; #1 is
+now the only remaining trust bug and is closed by this session.
+
+Verification: `tests/test_mcp_authz.py` and `tests/test_mcp_server.py` pass;
+`ruff` and `mypy --strict` clean on the changed files.
+
 ## Open items carried forward
 
-- Issue #1: MCP authentication (authorization exists; `clientInfo` remains
-  client-asserted).
-- Issue #17: older-schema databases accepted silently; no migration path.
-- Issue #19: `resume --repair` is a no-op.
+- Issue #17: resolved (`82b9f1c`); older-schema databases now refused at open.
+- Issue #19: resolved (`f145818`); `resume --repair` now records the plan.
+- Issue #1: resolved (this session); optional shared-secret authentication.
 - Orphaned `demo_report.md` size change and concurrent-agent edits (inferred,
   never confirmed).
 - `checkpoint_version: 0` on resume despite a session-1 checkpoint.

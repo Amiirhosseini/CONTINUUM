@@ -310,7 +310,7 @@ Recent preprints that measure or model the same reliability gaps CONTINUUM targe
 
 - **Tested**: 740 tests passing, 4 skipped (see [STATUS.md](STATUS.md)).
 - **Not on PyPI.** Install from a clone (see Quick Start).
-- **MCP caller authentication is not implemented.** `clientInfo` is asserted by the client and never verified, so authorization is by declared identity, not authentication. Tracked as [#1](https://github.com/Cyrax321/CONTINUUM/issues/1).
+- **MCP caller authentication is optional.** When `CONTINUUM_MCP_TOKEN` is set, the server refuses every mutating tool unless the caller presents that shared secret in the `initialize` handshake's `_meta.authToken`. Without it, authorization is by declared identity only (the historical default, preserved for local single-user use). Tracked as [#1](https://github.com/Cyrax321/CONTINUUM/issues/1).
 - **Unbuilt components**: Cloud API (Phase 13) and Dashboard (Phase 14).
 - **Framework adapters are experimental.** The OpenAI Agents SDK and LangGraph adapters are newer than the generic facade and do not yet carry the same crash-and-resume verification coverage. Prefer `GenericAgentAdapter` for production recovery until their adapter-specific tests cover the full recovery matrix.
 - **Agent/MCP runs need an explicit confirm before auto-resume.** Because externally-reported state is `REQUIRES_REVIEW`, `continuum resume` returns `request_human` until a human runs `continuum confirm <run_id>` (or the MCP `continuum_confirm` tool). This is by design, not a bug; see [Framework Integration](#framework-integration).
