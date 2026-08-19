@@ -602,3 +602,57 @@ def test_replay_verification_is_independent_of_upto(db: str) -> None:
     code, out, _ = run("--db", db, "replay", "run_1", "--upto", "3")
     assert code == ExitCode.OK
     assert "matches stored version" in out
+
+
+# --- event-chain attestation ------------------------------------------------ #
+
+
+def test_attest_keygen_writes_pem_files(tmp_path: Path) -> None:
+    priv = tmp_path / "signer.pem"
+    code, out, _ = run("attest-keygen", "--out", str(priv))
+    assert code == ExitCode.OK
+    assert priv.exists()
+    assert (tmp_path / "signer.pem.pub").exists()
+    assert "PRIVATE KEY" in priv.read_text()
+
+
+def test_attest_and_verify_round_trip(db: str, tmp_path: Path) -> None:
+    from continuum.security.attestation import generate_keypair
+
+    priv_pem, _ = generate_keypair()
+    key_file = tmp_path / "signer.pem"
+    key_file.write_text(priv_pem)
+
+    attest_file = tmp_path / "run_1.attest.json"
+    code, out, _ = run(
+        "--db", db, "attest", "run_1",
+        "--key", str(key_file), "--signer", "ci-bot",
+        "--out", str(attest_file),
+    )
+    assert code == ExitCode.OK
+    assert attest_file.exists()
+
+    code, out, _ = run("--db", db, "attest-verify", "run_1", "--attest", str(attest_file))
+    assert code == ExitCode.OK
+    assert "SIGNED" in out
+
+
+def test_attest_verify_reports_altered_after_new_event(db: str, tmp_path: Path) -> None:
+    from continuum.security.attestation import generate_keypair
+
+    priv_pem, _ = generate_keypair()
+    key_file = tmp_path / "signer.pem"
+    key_file.write_text(priv_pem)
+
+    attest_file = tmp_path / "run_1.attest.json"
+    run(
+        "--db", db, "attest", "run_1",
+        "--key", str(key_file), "--signer", "ci-bot", "--out", str(attest_file),
+    )
+    # A new event after signing shifts the head the attestation did not cover.
+    with SQLiteStorage(db) as store:
+        store.append_event("run_1", EventType.WORK_COMPLETED, {"doc": 999})
+
+    code, out, _ = run("--db", db, "attest-verify", "run_1", "--attest", str(attest_file))
+    assert code == ExitCode.CORRUPTED
+    assert "ALTERED" in out

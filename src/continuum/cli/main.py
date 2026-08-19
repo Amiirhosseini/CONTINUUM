@@ -21,9 +21,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sqlite3
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 from continuum import __version__
@@ -35,6 +37,11 @@ from continuum.environment import StaticProvider, capture
 from continuum.events import EventType
 from continuum.models import ActionStatus, EnvironmentSnapshot, EnvResource, Origin, RecoveryMode
 from continuum.recovery import RecoveryEngine, render_contract
+from continuum.security.attestation import (
+    generate_keypair,
+    sign_chain,
+    verify_attestation,
+)
 from continuum.state.diff import diff_states, render_diff
 from continuum.state.semantic import ProjectionError, project
 from continuum.state.versioning import state_fingerprint
@@ -629,6 +636,119 @@ def cmd_benchmark(args: argparse.Namespace, storage: Storage, out: Any, err: Any
     return ExitCode.OK
 
 
+def cmd_attest_keygen(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Generate an Ed25519 signer key pair for event-chain attestation.
+
+    Does not touch storage: key custody is the operator's responsibility, so the
+    tool only writes the two PEM files and says where they went.
+    """
+    private_pem, public_pem = generate_keypair()
+    priv_path = Path(args.out) if args.out else Path("signer.pem")
+    pub_path = Path(args.pub) if args.pub else priv_path.with_suffix(priv_path.suffix + ".pub")
+    priv_path.write_text(private_pem, encoding="utf-8")
+    pub_path.write_text(public_pem, encoding="utf-8")
+    payload = {"private_key": str(priv_path), "public_key": str(pub_path)}
+    text = f"Wrote private key {priv_path} and public key {pub_path}. Keep the private key secret."
+    _emit(payload, text, as_json=args.json, stream=out, palette=getattr(args, "_palette", None))
+    return ExitCode.OK
+
+
+def cmd_attest(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Sign the current head of a run's event chain into an attestation document.
+
+    The signed point is the run's latest event: its sequence number and the
+    event-log root hash. The document is portable and self-contained, so it can
+    be handed to any third party who then runs ``attest-verify`` against their
+    own copy of the store.
+    """
+    storage.get_run(args.run_id)  # Raising RunNotFound here is better than a silent empty attestation.
+    events = storage.read_events(args.run_id)
+    if not events:
+        raise ValueError(f"run {args.run_id!r} has no events to attest")
+    head = events[-1]
+    if head.hash is None:
+        raise ValueError(f"run {args.run_id!r} head event has no hash; the chain is incomplete")
+
+    key_path = args.key or os.environ.get("CONTINUUM_SIGNER_KEY")
+    if not key_path:
+        raise ValueError("no signing key: pass --key PATH or set CONTINUUM_SIGNER_KEY")
+    private_pem = Path(key_path).read_text(encoding="utf-8")
+    signer = args.signer or os.environ.get("CONTINUUM_SIGNER")
+
+    attest = sign_chain(
+        private_pem,
+        args.run_id,
+        head.sequence,
+        head.hash,
+        signer=signer,
+    )
+    doc = attest.to_dict()
+
+    if args.out:
+        Path(args.out).write_text(json.dumps(doc, indent=2, sort_keys=True), encoding="utf-8")
+        payload = {"attestation_file": args.out, **doc}
+        text = (
+            f"Attestation written to {args.out} "
+            f"(seq {head.sequence}, hash {head.hash[:12]}...)"
+        )
+    else:
+        payload = doc
+        text = json.dumps(doc, indent=2, sort_keys=True)
+    _emit(payload, text, as_json=args.json, stream=out, palette=getattr(args, "_palette", None))
+    return ExitCode.OK
+
+
+def cmd_attest_verify(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Verify a signed attestation against the run's live event chain.
+
+    Three outcomes:
+      SIGNED    — signature valid and the live chain still matches the signed point.
+      ALTERED   — signature valid but the chain changed after signing.
+      UNTRUSTED — the signature does not verify against the embedded public key.
+    """
+    storage.get_run(args.run_id)
+    doc = json.loads(Path(args.attest).read_text(encoding="utf-8"))
+
+    events = storage.read_events(args.run_id)
+    live_hash = events[-1].hash if events else None
+    live_seq = events[-1].sequence if events else 0
+
+    signature_valid = verify_attestation(doc)
+    chain_match = doc.get("chain_hash") == live_hash
+    seq_match = doc.get("trusted_through_seq") == live_seq
+
+    if not signature_valid:
+        verdict = "UNTRUSTED"
+    elif not chain_match or not seq_match:
+        verdict = "ALTERED"
+    else:
+        verdict = "SIGNED"
+
+    payload = {
+        "run_id": args.run_id,
+        "verdict": verdict,
+        "signature_valid": signature_valid,
+        "chain_match": chain_match,
+        "signer": doc.get("signer"),
+        "signed_seq": doc.get("trusted_through_seq"),
+        "live_seq": live_seq,
+    }
+    if verdict == "SIGNED":
+        text = (
+            f"Attestation SIGNED by {doc.get('signer')} for seq {doc.get('trusted_through_seq')}; "
+            f"chain matches."
+        )
+    elif verdict == "ALTERED":
+        text = (
+            f"Attestation ALTERED: chain changed since signing "
+            f"(signed seq {doc.get('trusted_through_seq')} vs live {live_seq})."
+        )
+    else:
+        text = "Attestation UNTRUSTED: signature does not verify against the embedded key."
+    _emit(payload, text, as_json=args.json, stream=out, palette=getattr(args, "_palette", None))
+    return ExitCode.OK if verdict == "SIGNED" else ExitCode.CORRUPTED
+
+
 # --------------------------------------------------------------------------- #
 # parser
 # --------------------------------------------------------------------------- #
@@ -726,6 +846,20 @@ def build_parser() -> argparse.ArgumentParser:
     add("benchmark", cmd_benchmark, "Run CONTINUUM-Bench (minimal harness).").add_argument(
         "--total", type=int, default=200, help="documents processed per run (default: 200)"
     )
+
+    attest_keygen = add("attest-keygen", cmd_attest_keygen, "Generate an Ed25519 signer key pair.")
+    attest_keygen.add_argument("--out", help="private key PEM path (default: signer.pem)")
+    attest_keygen.add_argument("--pub", help="public key PEM path (default: signer.pem.pub)")
+
+    attest = with_run(add("attest", cmd_attest, "Sign an event-chain attestation."))
+    attest.add_argument("--key", help="private key PEM path (or CONTINUUM_SIGNER_KEY)")
+    attest.add_argument("--signer", help="signer name (or CONTINUUM_SIGNER env)")
+    attest.add_argument("--out", help="write attestation JSON here (default: stdout)")
+
+    attest_verify = with_run(
+        add("attest-verify", cmd_attest_verify, "Verify a signed attestation against the live chain.")
+    )
+    attest_verify.add_argument("--attest", required=True, help="path to attestation JSON")
     return parser
 
 
@@ -757,7 +891,7 @@ def main(
         parser.print_help(file=out)
         return ExitCode.OK
 
-    if args.command == "benchmark":
+    if args.command in ("benchmark", "attest-keygen"):
         return int(args.func(args, None, out, err))
 
     try:

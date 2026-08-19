@@ -20,9 +20,9 @@ yet so the design can be reviewed first.
 from __future__ import annotations
 
 import base64
-import json
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
 
 from continuum.security.hashing import to_json
 
@@ -37,7 +37,7 @@ __all__ = [
 ATTESTATION_ALGORITHM = "ed25519+sha256"
 
 
-def _require_crypto():
+def _require_crypto() -> tuple[Any, Any, Any]:
     """Import the crypto primitives lazily so the core never depends on them."""
     try:
         from cryptography.hazmat.primitives import serialization
@@ -123,7 +123,7 @@ def sign_chain(
     if not isinstance(priv, Ed25519PrivateKey):
         raise ValueError("attestation private key is not an Ed25519 key")
 
-    from datetime import datetime, UTC
+    from datetime import UTC, datetime
 
     ts = timestamp or datetime.now(UTC).isoformat()
     pub_pem = (
@@ -181,6 +181,4 @@ def verify_attestation(
         pub.verify(signature, _payload_bytes(data))
     except Exception:  # noqa: BLE001 - any failure means "not valid"
         return False
-    if expected_chain_hash is not None and data.get("chain_hash") != expected_chain_hash:
-        return False
-    return True
+    return expected_chain_hash is None or data.get("chain_hash") == expected_chain_hash
