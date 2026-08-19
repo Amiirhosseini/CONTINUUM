@@ -8,6 +8,50 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Portable interchange format (B4).** New `continuum.interchange` package turns
+  durable output into a versioned, self-validating JSON envelope so external
+  tools can read and verify CONTINUUM without embedding Python. `export_*` /
+  `import_*` cover `SemanticState`, `RecoveryContract`, and `RecoveryDecision`
+  (lossless round-trip, since every `RecoveryDecision` field is a pydantic
+  model), `published_schema` returns the JSON Schema an external verifier can
+  check, and `dump_payload` / `load_payload` handle files. Canonical example
+  artifacts live in `examples/interchange/`. Stdlib-only beyond the existing
+  pydantic dependency; tests in `tests/test_interchange.py`.
+
+- **Forward schema migration (B2.1).** `SQLiteStorage` no longer refuses every
+  older database. A new `continuum.storage.migrations` runner seeds a fresh
+  database at `SCHEMA_VERSION`, forward-migrates a one-step-behind database
+  (applying each registered, additive migration and recording it in a
+  `schema_migrations` table), and still raises `SchemaVersionError` for a
+  database written by a newer build or for an older shape with no registered
+  path. The first migration (`v2`) adds the `versions` table and the per-event
+  `source` / `prev_hash` provenance columns. Tests in
+  `tests/test_storage_migrations.py`.
+
+- **Lease / distributed-lock coordinator (B2.2).** New `continuum.concurrency`
+  package guarantees "one agent resumes one run": a `LeaseCoordinator` ABC with
+  `acquire` / `renew` / `release` / `holder`, an `InMemoryLeaseCoordinator`
+  (single process / tests) and a `SQLiteLeaseCoordinator` over a dedicated
+  sidecar database so separate processes coordinate through the filesystem.
+  Leases are short-lived and renewable, and an expired lease is reclaimable by
+  another holder. Tests in `tests/test_lease.py` cover the shared contract,
+  expiry, cross-process contention, and a fuzz loop over many runs.
+
+- **PostgreSQL storage backend (B2.3).** `open_storage` now routes
+  `postgresql://` / `postgres://` URLs to a new `PostgresStorage`
+  (`continuum.storage.postgres`), a synchronous `psycopg` implementation of the
+  full `Storage` contract, so multiple agents or `continuum serve` sidecars can
+  share one durable store. `psycopg` is pulled in via the optional `[postgres]`
+  extra; without it, opening a Postgres URL fails clearly
+  (`RuntimeError: ... psycopg ...`) instead of silently falling back to SQLite.
+  Sequence allocation relies on the same `UNIQUE` constraints as the SQLite
+  engine. `tests/test_storage_postgres.py` exercises the contract but skips
+  cleanly when `CONTINUUM_TEST_POSTGRES_DSN` is unset or `psycopg` is absent, so
+  it runs for real in CI against a Postgres service. **Local note:** this slice
+  is unverified against a live Postgres here (no server / driver in this
+  environment); it type-checks and its tests skip, matching the plan's "skip
+  locally, run in CI" model, and should be validated in CI before relying on it.
+
 - **Security Extension (additive).** New `continuum.security` package on the
   existing recovery and checkpoint substrate, without changing resume, replay,
   or the crash-time revalidation path:
