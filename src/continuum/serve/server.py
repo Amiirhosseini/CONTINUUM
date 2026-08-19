@@ -181,7 +181,9 @@ class SidecarServer:
             try:
                 req = json.loads(line)
             except json.JSONDecodeError as exc:
-                _write(outstream, {"id": None, "error": {"type": "bad_request", "message": str(exc)}})
+                _write(
+                    outstream, {"id": None, "error": {"type": "bad_request", "message": str(exc)}}
+                )
                 continue
             rid = req.get("id")
             try:
@@ -191,7 +193,10 @@ class SidecarServer:
             except Exception as exc:  # noqa: BLE001 - report, never crash the loop
                 _write(
                     outstream,
-                    {"id": rid, "error": {"type": "internal", "message": f"{type(exc).__name__}: {exc}"}},
+                    {
+                        "id": rid,
+                        "error": {"type": "internal", "message": f"{type(exc).__name__}: {exc}"},
+                    },
                 )
             else:
                 _write(outstream, {"id": rid, "result": result})

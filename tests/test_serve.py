@@ -41,7 +41,9 @@ def test_list_methods_covers_the_surface() -> None:
 
 def test_record_progress_creates_the_run() -> None:
     srv = make_server()
-    out = srv.dispatch("record_progress", {"run_id": "r1", "completed": 3, "total": 10, "goal": "g"})
+    out = srv.dispatch(
+        "record_progress", {"run_id": "r1", "completed": 3, "total": 10, "goal": "g"}
+    )
     assert out["completed"] == 3
     assert out["total"] == 10
 
@@ -86,13 +88,16 @@ def test_unknown_method_is_not_found() -> None:
 
 def test_stdio_loop_reads_jsonl_and_answers() -> None:
     srv = make_server()
-    requests = "\n".join(
-        [
-            json_line(0, "record_progress", {"run_id": "r1", "completed": 2, "goal": "g"}),
-            json_line(1, "resume", {"run_id": "r1"}),
-            json_line(2, "bogus", {}),
-        ]
-    ) + "\n"
+    requests = (
+        "\n".join(
+            [
+                json_line(0, "record_progress", {"run_id": "r1", "completed": 2, "goal": "g"}),
+                json_line(1, "resume", {"run_id": "r1"}),
+                json_line(2, "bogus", {}),
+            ]
+        )
+        + "\n"
+    )
     out = io.StringIO()
     srv.serve_stdio(io.StringIO(requests), out)
     lines = [line for line in out.getvalue().splitlines() if line.strip()]
@@ -144,9 +149,7 @@ def test_serve_subprocess_end_to_end(tmp_path) -> None:
         # a fresh action is allowed, then completed
         claim = client.request("intercept_action", run_id="r1", action_type="x.do", key="k1")
         assert claim["proceed"] is True
-        done = client.request(
-            "complete_action", run_id="r1", action_key=claim["action_key"]
-        )
+        done = client.request("complete_action", run_id="r1", action_key=claim["action_key"])
         assert done["status"] == "completed"
     finally:
         client.terminate()
