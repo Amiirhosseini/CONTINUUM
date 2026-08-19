@@ -354,9 +354,18 @@ selected versions are the highest stable semver release for each action as of
 
 Phases 13–14 of the original plan: cloud API, dashboard. The minimal
 CONTINUUM-Bench harness (Phase 12) now ships: `continuum benchmark` runs and
-prints measured numbers across five scenarios (`process_crash`, `dataset_change`,
-`unknown_side_effect`, `partial_completion`, `early_crash`) and three strategies. The fuller
-suite, published baselines, and a dashboard view remain a Phase 12 goal.
+prints measured numbers across five recovery scenarios (`process_crash`,
+`dataset_change`, `unknown_side_effect`, `partial_completion`, `early_crash`) and three
+strategies, plus a dedicated issue #6 idempotency scenario that drives the real
+ActionLedger under argument drift (absolute vs relative path). The Phase 14
+dashboard now ships (`--dashboard`) from the A2 observability work. The fuller
+published-baselines suite remains a Phase 12 goal.
+
+The #6 proof is reproducible and not asserted: `continuum benchmark` reports 0
+duplicate side effects for both `continuum_key` (stable key) and
+`continuum_drift` (drift recognition), while `naive_retry` and `replay` repeat
+every side effect (50 duplicates for 50 actions attempted twice). See the
+regression test `tests/test_benchmark.py`.
 
 ### Framework adapters (Phase 11)
 

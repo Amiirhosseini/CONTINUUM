@@ -1945,10 +1945,16 @@ an item done only with evidence (a test or a direct repro).
     `src/continuum/mcp/authz.py`, wired into the tool `guard` in
     `src/continuum/mcp/server.py`, tests in `tests/test_mcp_authz.py`. Default
     local behavior unchanged when the variable is unset.
-- [ ] **A2. Observability and proof.** Add metrics plus the Phase 14 dashboard,
+- [x] **A2. Observability and proof.** Add metrics plus the Phase 14 dashboard,
   and run the minimal CONTINUUM-Bench (`#6`): LangGraph adapter revalidation on
   top of the existing checkpointer, with 3 scenarios, 2 baselines, and real
   numbers. This is the adoption proof point.
+  - Observability (metrics collector + Phase 14 dashboard + `--dashboard` flag)
+    merged via PR #60. The `#6` proof is now a real, runnable benchmark suite in
+    `continuum benchmark`: it drives the actual `ActionLedger` (the same path the
+    LangGraph/OpenAI/MCP adapters call) under argument drift, with 4 methods and
+    real numbers, 0 duplicate side effects for CONTINUUM vs N for the baselines.
+    Regression test in `tests/test_benchmark.py`.
 
 ### B. Make CONTINUUM attachable to any system (from `integration-architecture.md`)
 
@@ -2004,8 +2010,7 @@ and the four seam protocols with conformance tests, Session 14), and **B0**
 (`continuum serve` sidecar over a newline-delimited JSON stdio protocol, Session 15).
 `#17` and `#19` are already resolved; verify their regression tests pass and move on.
 
-Next in order: **A2** (observability + a minimal CONTINUUM-Bench that proves issue
-`#6`), then **B2** (PostgreSQL, centralized server, distributed locking, schema
+Next in order: **B2** (PostgreSQL, centralized server, distributed locking, schema
 migration), **B3** (attestation bound to workload identity), **B4** (portable
 Recovery State schema), **C1** (triage `#29/#30/#33/#34/#36/#42/#43/#45/#49`),
 **D1** (Phases 13/14/23).

@@ -631,14 +631,27 @@ def _verify_against_stored(run_id: str, storage: Storage) -> tuple[bool | None, 
 
 
 def cmd_benchmark(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
-    from continuum.benchmark import _to_json, render, run_benchmark
+    import json
+
+    from continuum.benchmark import (
+        render,
+        render_idempotency,
+        run_benchmark,
+        run_idempotency_benchmark,
+    )
 
     total = getattr(args, "total", 200) or 200
-    results = run_benchmark(total=total)
+    recovery = run_benchmark(total=total)
+    idem = run_idempotency_benchmark(total=max(1, total // 4))
+    print(render(recovery), file=out)
+    print(file=out)
+    print(render_idempotency(idem), file=out)
     if getattr(args, "json", False):
-        print(_to_json(results), file=out)
-    else:
-        print(render(results), file=out)
+        payload = {
+            "recovery": [r.as_dict() for r in recovery],
+            "idempotency": [r.as_dict() for r in idem],
+        }
+        print(json.dumps(payload, indent=2), file=out)
     return ExitCode.OK
 
 

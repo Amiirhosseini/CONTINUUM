@@ -315,3 +315,37 @@ all pass. Documented in CHANGELOG.md (Unreleased, Added) and project.md (B0).
 
 Open follow-ups (not done here): multi-language SDKs and an HTTP/gRPC transport
 are still future work; the protocol is transport-pluggable but only stdio ships.
+
+## Session 16, 2026-08-19 (A2 proof: CONTINUUM-Bench proves issue #6)
+
+Context: A2's observability half (metrics collector, Phase 14 recovery
+dashboard, `--dashboard` flag) already merged via PR #60. The remaining half was
+the minimal CONTINUUM-Bench that proves issue #6 (idempotency under argument
+drift).
+
+What shipped:
+- `src/continuum/benchmark/__init__.py`: `IdempotencyResult`,
+  `run_idempotency_benchmark(total=50)`, `_try_idem_action`, and
+  `render_idempotency`. The scenario drives the real `ActionLedger` (the same
+  path the LangGraph/OpenAI/MCP adapters call) with an agent that re-attempts
+  each of N external actions twice using a different path shape (absolute vs
+  relative path). Four methods: `continuum_key` (stable key), `continuum_drift`
+  (no key, relies on drift recognition), `naive_retry`, `replay`.
+- `src/continuum/cli/main.py` `cmd_benchmark` now runs both suites (recovery +
+  idempotency) and prints/JSON-dumps both.
+- `tests/test_benchmark.py`: asserts CONTINUUM recovers with 0 duplicate work and
+  detects stale env, and that the #6 scenario yields 0 duplicate side effects
+  for `continuum_key`/`continuum_drift` vs N for the baselines.
+
+Real numbers (run 2026-08-19, total=200 recovery / 50 idempotency):
+  continuum_key        50 actions, 50 attempts, 50 distinct, 0 dups
+  continuum_drift      50 actions, 50 attempts, 50 distinct, 0 dups
+  naive_retry          50 actions, 100 attempts, 50 distinct, 50 dups
+  replay               50 actions, 100 attempts, 50 distinct, 50 dups
+
+Verification: `tests/test_benchmark.py` (3) plus full suite, `ruff`, and
+`mypy --strict` clean. Documented in CHANGELOG.md (Unreleased, Added),
+STATUS.md (benchmark + #6 proof), and project.md (A2 marked done).
+
+A2 is now complete. Next in plan order: B2 (PostgreSQL, centralized server,
+distributed locking, schema migration).

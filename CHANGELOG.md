@@ -63,6 +63,19 @@ All notable changes to this project are documented here. The format follows
   `cmd_serve` entry point wired into `src/continuum/cli/main.py`); tests in
   `tests/test_serve.py` (dispatch unit, stdio loop, and a real subprocess path).
 
+- **CONTINUUM-Bench now proves issue #6 (idempotency under argument drift).**
+  `continuum benchmark` gained a dedicated `argument_drift` scenario that drives
+  the real `ActionLedger` (the same path the LangGraph/OpenAI/MCP adapters call)
+  with an agent that re-attempts each external action twice using a different
+  path shape (absolute vs relative). CONTINUUM dedups via a stable `key`
+  (`continuum_key`) and via drift recognition (`continuum_drift`), each yielding
+  0 duplicate side effects, while `naive_retry` and `replay` repeat every side
+  effect (N duplicates for N actions). `IdempotencyResult`,
+  `run_idempotency_benchmark`, and `render_idempotency` in
+  `src/continuum/benchmark/__init__.py`; regression test in
+  `tests/test_benchmark.py`. The observability half of A2 (metrics collector,
+  Phase 14 dashboard, `--dashboard`) landed earlier via PR #60.
+
 - **Real-LLM crash-and-resume harness.** `examples/langchain_real_llm_crash.py`
   drives the LangChain adapter against a live OpenRouter model through a hard crash:
   the `crash` subcommand lets the wrapped tool perform a real side effect and then
