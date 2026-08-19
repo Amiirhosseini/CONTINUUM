@@ -89,6 +89,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`StateValidator._check_model` reported model-specific assumptions
+  `VALID` when the resume model was unknown (fail-open).** When
+  `expected_model` is `None` (e.g. `continuum validate`/`resume` run without
+  `--model`) or the state itself doesn't record which model produced it,
+  the validator has no way to verify recorded model-specific assumptions —
+  but it reported them `VALID` and left `safe_to_resume=True` anyway,
+  contradicting the module's own rule that it may say "I cannot tell" but
+  must never guess in its own favour. `_check_model` now reports `UNKNOWN`
+  in both cases, which `_UNUSABLE` correctly turns into a blocked resume
+  under the default `strict_unknown=True`. Reported as issue #49 and
+  covered by
+  `tests/test_validator.py::test_no_expected_model_with_assumptions_is_unknown_not_valid`
+  and `::test_unrecorded_model_with_assumptions_is_unknown_not_valid`.
+
 - **`StateValidator._check_progress` no longer downgrades self-certified
   progress to `UNKNOWN`.** The "no source events" check (`source_sequence == 0
   and completed > 0`) ran as a second `if` after the self-certified branch, so a
