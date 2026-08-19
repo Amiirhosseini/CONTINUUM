@@ -295,6 +295,21 @@ def test_the_contract_can_be_printed(db: str) -> None:
     assert "next_allowed:" in out
 
 
+def test_validate_with_dashboard_renders_the_phase_14_dashboard(db: str) -> None:
+    code, out, _ = run("--db", db, "validate", "run_1", "--env", "dataset=v3", "--dashboard")
+    assert code == ExitCode.OK
+    assert "CONTINUUM RECOVERY DASHBOARD" in out
+    assert "run_1" in out
+    assert "safe to resume:" in out
+
+
+def test_validate_without_dashboard_stays_machine_friendly(db: str) -> None:
+    code, out, _ = run("--db", db, "validate", "run_1", "--env", "dataset=v3")
+    assert code == ExitCode.OK
+    assert "CONTINUUM RECOVERY DASHBOARD" not in out
+    assert "RESUME" in out or "REPAIR" in out
+
+
 def test_replay_rederives_state_from_events(db: str) -> None:
     _, out, _ = run("--db", db, "replay", "run_1")
     assert "60 completed" in out

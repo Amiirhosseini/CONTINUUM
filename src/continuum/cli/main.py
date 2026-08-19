@@ -36,6 +36,7 @@ from continuum.cli.exitcodes import ExitCode, exit_code_for
 from continuum.environment import StaticProvider, capture
 from continuum.events import EventType
 from continuum.models import ActionStatus, EnvironmentSnapshot, EnvResource, Origin, RecoveryMode
+from continuum.observability import render_dashboard
 from continuum.recovery import RecoveryEngine, render_contract
 from continuum.security.attestation import (
     generate_keypair,
@@ -343,6 +344,10 @@ def cmd_validate(args: argparse.Namespace, storage: Storage, out: Any, err: Any)
         current_environment=_environment(args, args.run_id),
         expected_model=args.model,
     )
+    if getattr(args, "dashboard", False):
+        out.write(render_dashboard(decision) + "\n")
+        out.flush()
+        return exit_code_for(decision.mode)
     payload = {
         "run_id": decision.run_id,
         "mode": decision.mode.value,
@@ -819,6 +824,9 @@ def build_parser() -> argparse.ArgumentParser:
     validate = with_env(with_run(add("validate", cmd_validate, "Validate state. Read-only.")))
     validate.add_argument("--model", help="model that will run the resumed agent")
     validate.add_argument("--tolerate-unknown", action="store_true")
+    validate.add_argument(
+        "--dashboard", action="store_true", help="render the Phase 14 recovery dashboard"
+    )
 
     resume = with_env(with_run(add("resume", cmd_resume, "Decide how a run may resume.")))
     resume.add_argument("--model", help="model that will run the resumed agent")
