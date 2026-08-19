@@ -1923,3 +1923,68 @@ correct existing labels only (plus the four just created if you added
 them), no em dashes, no AI attribution.
 ```
 
+---
+
+## 7. Next updates to work through (one by one)
+
+Prioritized from the integration-architecture deep dive
+(`references/integration-architecture.md`) and the standing bug list in
+STATUS.md. Work top to bottom, complete and verify each before the next. Mark
+an item done only with evidence (a test or a direct repro).
+
+### A. Close the credibility and trust gaps (these invalidate the core claim)
+
+- [ ] **A1. Fix trust bugs `#1`, `#17`, `#19`.**
+  - `#1`: MCP auth is client-asserted, not verified. Make the server verify the
+    caller instead of trusting a self-reported identity.
+  - `#17`: old-schema databases are silently accepted or break. Add a migration
+    path for the event schema and for projector logic so recovered state does
+    not drift across version upgrades.
+  - `#19`: `resume --repair` is a documented no-op. Either implement the repair
+    or remove the flag and the misleading docs.
+- [ ] **A2. Observability and proof.** Add metrics plus the Phase 14 dashboard,
+  and run the minimal CONTINUUM-Bench (`#6`): LangGraph adapter revalidation on
+  top of the existing checkpointer, with 3 scenarios, 2 baselines, and real
+  numbers. This is the adoption proof point.
+
+### B. Make CONTINUUM attachable to any system (from `integration-architecture.md`)
+
+- [ ] **B0 (Tier 0, boundary).** `continuum serve` sidecar exposing the current
+  CLI surface over a stable wire protocol (reuse MCP or add HTTP/gRPC), plus
+  thin multi-language SDKs and a generic auto-instrumentation shim (HTTP client
+  / DB driver wrappers) so non-Python systems attach with minimal code.
+- [ ] **B1 (Tier 1, teachability).** Add a `Registry` (dependency-injected
+  context) and the four capability seams as `Protocol` interfaces with
+  conformance tests: `EnvironmentProvider` (discover, not declare),
+  `StateExtractor` (map arbitrary internal state), `ActionReconciler`
+  (common idempotency / read-back), `ValidationRule` (domain staleness). Ship
+  at least one real `EnvironmentProvider` (git HEAD or Postgres schema version).
+- [ ] **B2 (Tier 2, production durability).** PostgreSQL storage, a centralized
+  server, distributed locking / lease coordination for runs, and the
+  schema plus projector migration framework from A1/`#17`.
+- [ ] **B3 (Tier 3, trust and ops).** Bind attestation to a workload identity
+  (optional SPIFFE/SPIRE) instead of an ad-hoc key file, emit an attestation
+  propagation token, and add real-time enforcement in `resume` (refuse to
+  continue if the attestation or chain no longer matches).
+- [ ] **B4 (Tier 4, portability).** Define a portable "Recovery State"
+  interchange schema so different systems and versions interoperate and
+  external tools can verify CONTINUUM output.
+
+### C. Triage the remaining open correctness bugs
+
+- [ ] **C1.** Review `#29, #30, #33, #34, #36, #42, #43, #45, #49`. Decide which
+  are real versus stale, file or close accordingly. Do not implement before
+  triage.
+
+### D. Unbuilt roadmap phases
+
+- [ ] **D1.** Phase 13 (Cloud API), Phase 14 (Dashboard), Phase 23
+  (multi-agent coordination). Schedule after B0/B1 land.
+
+### Where to start
+
+Begin with **A1**, specifically `#17` and `#19` (the smallest, highest-leverage
+trust fixes), then immediately follow with **B1** (the `Registry` and the four
+seam protocols with conformance tests) since that is what makes the existing
+recovery teachable and attachable.
+
