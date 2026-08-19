@@ -43,6 +43,7 @@ from continuum.security.attestation import (
     sign_chain,
     verify_attestation,
 )
+from continuum.serve import cmd_serve
 from continuum.state.diff import diff_states, render_diff
 from continuum.state.semantic import ProjectionError, project
 from continuum.state.versioning import state_fingerprint
@@ -871,6 +872,14 @@ def build_parser() -> argparse.ArgumentParser:
         )
     )
     attest_verify.add_argument("--attest", required=True, help="path to attestation JSON")
+
+    serve = add("serve", cmd_serve, "Run the CONTINUUM sidecar (JSON wire protocol over stdio).")
+    serve.add_argument(
+        "--transport",
+        default="stdio",
+        choices=("stdio",),
+        help="wire transport (default: stdio)",
+    )
     return parser
 
 
@@ -902,7 +911,7 @@ def main(
         parser.print_help(file=out)
         return ExitCode.OK
 
-    if args.command in ("benchmark", "attest-keygen"):
+    if args.command in ("benchmark", "attest-keygen", "serve"):
         return int(args.func(args, None, out, err))
 
     try:

@@ -45,7 +45,23 @@ All notable changes to this project are documented here. The format follows
   `ActionReconciler`, `ValidationRule`. The first *discoverable*
   `EnvironmentProvider`, `GitProvider`, reads the current commit from a git
   repository instead of trusting a declared version, and never raises.
-  Conformance tests in `tests/test_plugins.py`.
+   Conformance tests in `tests/test_plugins.py`.
+
+- **`continuum serve` sidecar (Tier 0 boundary, issue-adjacent).** A new,
+  language-agnostic boundary so any external process or agent system can drive
+  CONTINUUM's recovery operations without embedding Python or the `mcp` SDK.
+  `continuum serve` speaks a tiny newline-delimited JSON protocol (request
+  `{"id","method","params"}`, response `{"id","result"}` or
+  `{"id","error":{"type","message"}}`) over stdio. The surface mirrors the MCP
+  tool set: `record_progress`, `checkpoint`, `validate`, `resume`, `confirm`,
+  `intercept_action`, `complete_action`, `fail_action`, `reconcile_action`,
+  `list_actions`. Authentication is a fail-closed shared secret
+  (`CONTINUUM_SERVE_TOKEN`) modeled on the MCP `AuthPolicy`. The server imports
+  only the core (never `continuum.mcp`), and `serve_subprocess` launches a real
+  `continuum serve` child and returns a connected client. Implementation in
+  `src/continuum/serve/` (`server.py` protocol/handlers, `__init__.py` client and
+  `cmd_serve` entry point wired into `src/continuum/cli/main.py`); tests in
+  `tests/test_serve.py` (dispatch unit, stdio loop, and a real subprocess path).
 
 - **Real-LLM crash-and-resume harness.** `examples/langchain_real_llm_crash.py`
   drives the LangChain adapter against a live OpenRouter model through a hard crash:

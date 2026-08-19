@@ -275,3 +275,43 @@ pass; `ruff` and `mypy --strict` clean on the changed files.
 - Re-running the e2e kit after the dedup fix to confirm the positive path
   (`proceed: false` on resume without agent workaround) before closing issue
   #6.
+## Session 15, 2026-08-19 (continuum serve sidecar, B0)
+
+Goal: deliver the Tier 0 attachability boundary from
+references/integration-architecture.md. Any external process, in any language,
+can drive CONTINUUM's recovery operations without embedding Python or the `mcp`
+SDK.
+
+What shipped:
+- `src/continuum/serve/server.py`: `SidecarServer` (newline-delimited JSON over
+  stdio), `SidecarAuth` (fail-closed shared secret via `CONTINUUM_SERVE_TOKEN`,
+  modeled on the MCP `AuthPolicy`), `MalformedRunLog`, `SidecarError`,
+  `MethodNotFound`, `NotAuthorized`, `BadParams`. The 10 handlers mirror the MCP
+  tool surface: `record_progress`, `checkpoint`, `validate`, `resume`, `confirm`,
+  `intercept_action`, `complete_action`, `fail_action`, `reconcile_action`,
+  `list_actions`. The server imports ONLY core modules (never `continuum.mcp`),
+  so `continuum serve` works without the `mcp` extra.
+- `src/continuum/serve/__init__.py`: reference `SidecarClient`, `SubprocessClient`,
+  `serve_subprocess()` (launches a real `continuum serve` child and returns a
+  connected client), `run_serve()`, and `cmd_serve` (wired into
+  `src/continuum/cli/main.py`, added to the storage-bypass tuple alongside
+  `benchmark`/`attest-keygen`).
+- `tests/test_serve.py`: dispatch unit tests, stdio-loop parsing, fail-closed
+  auth (no token required by default; refuses when a token is configured and
+  absent/present-but-wrong), and a real subprocess end-to-end path.
+
+Notable decisions / discoveries:
+- `continuum.mcp.__init__` imports `server`, which imports `mcp.server`, so any
+  `continuum.mcp.*` import drags in the `mcp` SDK. The sidecar deliberately stays
+  core-only for this reason.
+- `RunNotFound` lives in `continuum.storage`, not `continuum.models`.
+- `resume` over a self-certified (agent/MCP-reported) run returns `request_human`
+  and `safe=False` until a human confirms, exactly like the MCP server. The
+  sidecar's `resume` handler reflects that, so external clients see the same
+  contract as MCP clients.
+
+Verification: `tests/test_serve.py` (11), full suite, `ruff`, and `mypy --strict`
+all pass. Documented in CHANGELOG.md (Unreleased, Added) and project.md (B0).
+
+Open follow-ups (not done here): multi-language SDKs and an HTTP/gRPC transport
+are still future work; the protocol is transport-pluggable but only stdio ships.

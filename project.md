@@ -1952,10 +1952,19 @@ an item done only with evidence (a test or a direct repro).
 
 ### B. Make CONTINUUM attachable to any system (from `integration-architecture.md`)
 
-- [ ] **B0 (Tier 0, boundary).** `continuum serve` sidecar exposing the current
+- [x] **B0 (Tier 0, boundary).** `continuum serve` sidecar exposing the current
   CLI surface over a stable wire protocol (reuse MCP or add HTTP/gRPC), plus
   thin multi-language SDKs and a generic auto-instrumentation shim (HTTP client
   / DB driver wrappers) so non-Python systems attach with minimal code.
+  - Implemented as a language-agnostic newline-delimited JSON protocol over
+    stdio in `src/continuum/serve/` (`server.py` handlers, `__init__.py` client
+    and `cmd_serve` wired into `src/continuum/cli/main.py`). The surface mirrors
+    the MCP tools (`record_progress`, `checkpoint`, `validate`, `resume`,
+    `confirm`, `intercept_action`, `complete_action`, `fail_action`,
+    `reconcile_action`, `list_actions`) with fail-closed `CONTINUUM_SERVE_TOKEN`
+    auth. `serve_subprocess()` launches a real `continuum serve` child. Tests in
+    `tests/test_serve.py`. Multi-language SDKs and HTTP/gRPC transport are still
+    open (a follow-up, not required for Tier 0).
 - [x] **B1 (Tier 1, teachability).** Add a `Registry` (dependency-injected
   context) and the four capability seams as `Protocol` interfaces with
   conformance tests: `EnvironmentProvider` (discover, not declare),
@@ -1990,9 +1999,14 @@ an item done only with evidence (a test or a direct repro).
 
 ### Where to start
 
-Begin with **A1/`#1`** (MCP caller authentication), the only remaining trust
-gap, then immediately follow with **B1** (the `Registry` and the four seam
-protocols with conformance tests) since that is what makes the existing recovery
-teachable and attachable. `#17` and `#19` are already resolved; verify their
-regression tests pass and move on.
+Done: **A1/`#1`** (MCP caller authentication, Session 13), **B1** (the `Registry`
+and the four seam protocols with conformance tests, Session 14), and **B0**
+(`continuum serve` sidecar over a newline-delimited JSON stdio protocol, Session 15).
+`#17` and `#19` are already resolved; verify their regression tests pass and move on.
+
+Next in order: **A2** (observability + a minimal CONTINUUM-Bench that proves issue
+`#6`), then **B2** (PostgreSQL, centralized server, distributed locking, schema
+migration), **B3** (attestation bound to workload identity), **B4** (portable
+Recovery State schema), **C1** (triage `#29/#30/#33/#34/#36/#42/#43/#45/#49`),
+**D1** (Phases 13/14/23).
 
