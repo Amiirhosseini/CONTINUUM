@@ -138,6 +138,85 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Three defects found by an adversarial audit of the MCP surface**, driven over
+  the live stdio protocol with every tool result verified against the SQLite store
+  rather than taken at its word. Method and per-claim results in `test.md`:
+  - *Environment drift was detected but invalidated nothing.* `continuum_checkpoint`
+    passed `env` to `capture_state` as an `EnvironmentSnapshot` only, and
+    `StateValidator._apply_dependency_status` returns early for a state with no
+    `external_dependencies` — so a moved dataset was rendered in
+    `environment_changes` while the verdict stayed `safe: true` with the reason
+    "all components verified against the current environment". The core validator
+    was never wrong: given a declared dependency it already yields `CONFLICTED`
+    and `safe_to_resume=False`. The gap was that no MCP client could declare one,
+    and the existing test appended `DEPENDENCY_DECLARED` straight to storage.
+    Checkpointing now records each pinned resource as a `DEPENDENCY_DECLARED`
+    event, so the declaration is durable across projections and restores, covered
+    by the hash chain, and carries `EXTERNAL_AGENT` provenance — which does not
+    weaken the check, since a dependency's status comes from comparing two
+    snapshots rather than from trusting the claim. Only new or re-pinned resources
+    are appended, so checkpointing on a schedule does not grow the log. The
+    `serve` sidecar shared the defect verbatim and is fixed identically; the two
+    surfaces must not disagree about whether drift is safe.
+  - *`continuum_list_actions` under-reported an interrupted action.* A claim left
+    `STARTED` by a crash reported `side_effect_uncertain: false` while
+    `continuum_resume` described the same action as an unknown outcome — the
+    aggregate `unresolved` count was right while the row a human reads said the
+    opposite. `side_effect_uncertain` is only set on escalation to `UNKNOWN`,
+    which has not happened yet for a fresh interruption. Each row now carries
+    `outcome_unresolved`, derived from ledger state so it cannot drift from what
+    recovery reports. Also fixed in the `serve` sidecar.
+  - *WAL "self-healing" could destroy committed transactions.*
+    `_open_server_storage` deleted both sidecars on a startup `OperationalError`,
+    on the stated grounds that they are reconstructable from the main database.
+    That holds for `-shm` and not for `-wal`, which carries transactions committed
+    but not yet checkpointed; measured on a real database the main file was 4 KB
+    while the WAL held all 16 events, and deleting it lost everything *silently*,
+    because an emptied database still verifies as an intact chain. Recovery is now
+    staged least-destructive-first: discard the reconstructable `-shm` and retry,
+    and only if that fails move the `-wal` aside — never unlink it — restoring it
+    if the retry fails anyway, and warning on stderr with the quarantine path when
+    it succeeds. Reachable only when the initial open raises, so latent rather
+    than observed, but it is exactly the hard-kill path the feature advertises.
+
+- **Six correctness defects found by triaging the open bug backlog (issues #29,
+  #30, #33, #36, #42, #43, #45).** Each is covered by a test that fails on the
+  previous code:
+  - *#33 / #36: the ledger's argument-drift fallback ignored whole classes of
+    resource identity.* `_is_strong_token` required a digit, `@`, or `.`, so a
+    plain-word identity (`invoice`, `dataset`) was discarded, and purely numeric
+    ids were discarded outright; separately, `identity_tokens` only tokenised
+    `str`, so an integer id such as `4821` never became a token at all. Both are
+    real identities now. Admitting plain words would let one shared adjective
+    ("both tickets are `urgent`") collapse two distinct actions into one, silently
+    dropping the second side effect, so `ActionLedger._identity_match` no longer
+    matches on a single shared token: it requires one token set to *contain* the
+    other, compared at the leaf (`leaf_tokens`), so a path counts as its basename
+    and an absolute-vs-relative re-rendering still deduplicates while genuinely
+    different resources do not.
+  - *#45: `claim(on_unknown=...)` did not persist its resolution.* A resolver's
+    `ActionOutcome` was returned to the caller but nothing was recorded, so the
+    stored action stayed `UNKNOWN`: the next claim re-raised, `pending()` never
+    drained, and `RecoveryEngine.assess` asked for a human forever. The
+    resolution is now written as an `ACTION_RECONCILED` event.
+  - *#29: `reconcile(occurred=False)` left stale evidence behind.* An action
+    just decided never to have happened kept the `external_id` and `result` from
+    its earlier `COMPLETED` state. Both are cleared.
+  - *#42: `strict_unknown` was silently ignored for uncertain side effects.* The
+    engine escalates an unknown side effect to `REQUEST_HUMAN`, but `plan_repairs`
+    emitted a `reconcile_action` step with `requires_human=False`, so
+    `plan.requires_human` was `False` and the contract permitted the agent to
+    auto-reconcile against the mode. The step now requires a person in strict
+    mode, and its `reason` reports what happened (interrupted) rather than
+    mislabelling it "escalated for review".
+  - *#43: `continuum history` hid checkpoints.* `put_version` returns the same
+    version when the state fingerprint is unchanged, so keying the listing by
+    version collapsed two checkpoints into one row. It now lists checkpoints;
+    the JSON key is `checkpoints` rather than `versions`.
+  - *#30: a deleted tracked file diffed as "changed" instead of "removed".*
+    `FileProvider` recorded a missing file as a resource with `version=None`;
+    it now omits it, which `diff_environments` reads as `REMOVED`.
+
 - **`StateValidator._check_model` reported model-specific assumptions
   `VALID` when the resume model was unknown (fail-open).** When
   `expected_model` is `None` (e.g. `continuum validate`/`resume` run without
