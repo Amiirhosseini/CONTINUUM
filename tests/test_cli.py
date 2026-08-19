@@ -425,10 +425,10 @@ def test_an_empty_env_version_is_refused(db: str) -> None:
     assert "empty version" in err
 
 
-def test_postgres_fails_clearly_rather_than_silently(db: str) -> None:
+def test_postgres_url_is_routed_and_fails_clearly(db: str) -> None:
     code, _, err = run("--db", "postgresql://localhost/x", "runs")
     assert code == ExitCode.ERROR
-    assert "not implemented" in err
+    assert "psycopg" in err or "could not connect" in err
 
 
 def test_benchmark_runs_and_reports_numbers() -> None:
