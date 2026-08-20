@@ -540,3 +540,65 @@ for the legacy verification path, so backward compatibility holds.
   reference it, but no caller was changed in Phase 1.
 - No benchmark numbers are asserted; recovery-decision-accuracy and
   unsafe-resume-rate remain unmeasured (Phase 6).
+
+---
+
+## 13. Phase 2: dependency-localized repair
+
+Phase 2 delivers the differentiator promised by the thesis: when one external
+dependency moves, recover only the subgraph that depends on it and leave the
+rest of the state untouched.
+
+### 13.1 What changed
+
+- **`src/continuum/recovery/impact.py` (new)** - `DependencyGraph` and
+  `ImpactedSet`. `impacted_by(resources)` returns the precise evidence, finding
+  and decision ids invalidated by a set of broken dependency resources, following
+  the same derivation edges the validator uses
+  (`dependency -> evidence -> finding -> decision`). It is a queryable,
+  inspectable view of what a broken resource invalidates.
+- **`src/continuum/state/validator.py`** - `validate` / `validate_state` accept
+  an optional `scope` of dependency resources. When scoped, only those resources
+  are re-checked and only their derivation subtree may go stale; other components
+  keep their recorded status. `scope=None` is byte-for-byte the prior behavior,
+  so all existing validation results are unchanged.
+- **`src/continuum/recovery/engine.py`** - `RecoveryEngine.assess` accepts a
+  `scope` that confines validation and the repair plan to a dependency's subtree.
+  `assess_scoped(run_id, resources, ...)` is a named alias. The issued contract
+  records the scope in its `evidence` field (the Phase 1 explainability field),
+  so an auditor can see that clean parts of the state were intentionally
+  preserved.
+- **`src/continuum/__init__.py` / `recovery/__init__.py`** - export
+  `DependencyGraph` and `ImpactedSet`.
+
+### 13.2 What did not change
+
+- No enum was added, removed, or resemanticked. `RecoveryMode`, `RecoverySafety`,
+  `Component`, `StateStatus` and the existing `plan_repairs` cascade are intact.
+- The full (unscoped) recovery path is untouched; scoped recovery is strictly
+  additive.
+
+### 13.3 Tests
+
+- `tests/test_phase2.py` (7 tests): `impacted_by` subgraph + transitivity,
+  scoped validation tainting only the impacted subtree, scoped recovery
+  preserving a clean dependency (a two-dependency fixture where the unscoped
+  decision would revalidate both but the scoped one leaves the clean one alone),
+  the `assess_scoped` alias equaling the `scope` kwarg, and the scope recorded in
+  contract evidence.
+
+### 13.4 Baseline vs final test result
+
+- Before Phase 2: 909 passed, 9 skipped, 0 failed.
+- After Phase 2: 916 passed, 9 skipped, 0 failed (7 new Phase 2 tests).
+- `ruff check` / `ruff format --check` clean on changed files; `mypy src/continuum`
+  reports no issues.
+
+### 13.5 Known limitations
+
+- The scoped contract lists only scope-related components in `verified` /
+  `invalidated`. Out-of-scope components are intentionally absent, not claimed
+  verified; a full `assess` (no scope) is still the authoritative whole-state
+  decision.
+- `DependencyGraph` is built per call and not yet cached; for very large states a
+  cached graph may be worth adding (tracked separately).
