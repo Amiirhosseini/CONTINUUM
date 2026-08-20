@@ -177,6 +177,7 @@ class CheckpointManager:
             run_id=run_id,
             version=version,
             trigger=trigger,
+            reason=reason,
             state=current.model_copy(update={"version": version}),
             environment=environment,
         ).sealed()
@@ -273,3 +274,69 @@ class CheckpointManager:
 
     def history(self, run_id: str) -> Sequence[StateCheckpoint]:
         return self.storage.list_checkpoints(run_id)
+
+    # -- recovery anchors ------------------------------------------------- #
+
+    def last_recovery_anchor(
+        self, run_id: str, *, before_version: int | None = None
+    ) -> StateCheckpoint | None:
+        """Return the most recent checkpoint taken for a recovery decision.
+
+        A recovery anchor is a checkpoint whose trigger is ``RECOVERY``: it marks
+        the exact state a non-resume decision judged unsafe to continue from, so
+        it is the right place to roll back to. When ``before_version`` is given,
+        only anchors at or before that version are considered, which lets a
+        caller ask "where would I have rolled back to right before event X?"
+        """
+        anchors = [
+            c
+            for c in self.history(run_id)
+            if c.trigger == CheckpointTrigger.RECOVERY
+            and (before_version is None or c.version <= before_version)
+        ]
+        if not anchors:
+            return None
+        return max(anchors, key=lambda c: c.version)
+
+    def checkpoint_on_recovery(
+        self, run_id: str, *, environment: EnvironmentSnapshot | None = None, reason: str = ""
+    ) -> StateCheckpoint:
+        """Take an unconditional recovery anchor.
+
+        This is the hook the agent loop (or CLI) calls right after a recovery
+        decision that is not ``RESUME``: it pins the pre-failure state so the
+        run can later roll back to it. It does not touch the read-only
+        ``RecoveryEngine.assess`` path; callers decide when a decision is
+        recovery-worthy and invoke this explicitly.
+        """
+        return self.checkpoint(
+            run_id,
+            trigger=CheckpointTrigger.RECOVERY,
+            reason=reason or "recovery anchor",
+            environment=environment,
+        )
+
+    def prune(self, run_id: str, *, keep: int = 5, keep_anchors: bool = True) -> list[str]:
+        """Drop old checkpoints while keeping recent history and recovery anchors.
+
+        The ``keep`` newest checkpoints (by version) are always retained. Of the
+        older checkpoints, those whose trigger is ``RECOVERY`` are preserved when
+        ``keep_anchors`` is true, since deleting a known rollback point defeats
+        the purpose of checkpointing. Returns the ids that were removed.
+        """
+        if keep < 1:
+            keep = 1
+        checkpoints = list(self.history(run_id))
+        if len(checkpoints) <= keep:
+            return []
+        ordered = sorted(checkpoints, key=lambda c: c.version)
+        keepers = {c.checkpoint_id for c in ordered[-keep:]}
+        deleted: list[str] = []
+        for c in ordered[:-keep]:
+            if c.checkpoint_id in keepers:
+                continue
+            if keep_anchors and c.trigger == CheckpointTrigger.RECOVERY:
+                continue
+            self.storage.delete_checkpoint(c.checkpoint_id)
+            deleted.append(c.checkpoint_id)
+        return deleted
