@@ -736,3 +736,27 @@ def test_attest_verify_reports_altered_after_new_event(db: str, tmp_path: Path) 
     code, out, _ = run("--db", db, "attest-verify", "run_1", "--attest", str(attest_file))
     assert code == ExitCode.CORRUPTED
     assert "ALTERED" in out
+
+
+# --- provenance view (issue #148) ------------------------------------------- #
+
+
+def test_status_provenance_uses_canonical_labels(db: str) -> None:
+    code, out, _ = run("--db", db, "status", "run_1", "--provenance")
+    assert code == 0
+    # Canonical labels are rendered, not the raw source enums.
+    assert "observed" in out and "verified" in out
+    assert "DETERMINISTIC" not in out
+
+
+def test_status_plain_runs(db: str) -> None:
+    code, out, _ = run("--db", db, "status", "run_1")
+    assert code == 0
+    assert "run_1" in out and "goal" in out
+
+
+def test_status_provenance_json(db: str) -> None:
+    code, out, _ = run("--db", db, "--json", "status", "run_1", "--provenance")
+    assert code == 0
+    data = json.loads(out)
+    assert any(row["who"] == "observed" for row in data["provenance"])

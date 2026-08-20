@@ -37,6 +37,7 @@ from continuum.environment import StaticProvider, capture
 from continuum.events import EventType
 from continuum.models import ActionStatus, EnvironmentSnapshot, EnvResource, Origin, RecoveryMode
 from continuum.observability import render_dashboard
+from continuum.provenance_map import summarize
 from continuum.recovery import RecoveryEngine, render_contract
 from continuum.security.attestation import (
     generate_keypair,
@@ -256,6 +257,71 @@ def cmd_inspect(args: argparse.Namespace, storage: Storage, out: Any, err: Any) 
         stream=out,
         palette=getattr(args, "_palette", None),
     )
+    return ExitCode.OK
+
+
+def cmd_status(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Show run status, optionally as a canonical provenance view (issue #148)."""
+    restored = CheckpointManager(storage).restore(args.run_id)
+    state = restored.state
+
+    if args.provenance:
+        rows: list[dict[str, str]] = []
+        for kind, items in (
+            ("evidence", state.evidence),
+            ("finding", state.findings),
+            ("decision", state.decisions),
+        ):
+            for item in items:
+                view = summarize(item.provenance.origin, item.status, None)
+                item_id = (
+                    getattr(item, "evidence_id", None)
+                    or getattr(item, "finding_id", None)
+                    or getattr(item, "decision_id", None)
+                )
+                rows.append(
+                    {
+                        "kind": kind,
+                        "id": item_id or "",
+                        "who": view.who.value,
+                        "trust": view.how_trusted.value,
+                        "state": view.what_state.value,
+                    }
+                )
+        if args.json:
+            payload = {"provenance": rows}
+            _emit(
+                payload,
+                json.dumps(payload, indent=2),
+                as_json=True,
+                stream=out,
+                palette=getattr(args, "_palette", None),
+            )
+        else:
+            lines = [f"run: {state.run_id}  (provenance view)"]
+            for r in rows:
+                lines.append(
+                    f"  {r['kind']:<8} {r['id']:<14} who={r['who']:<14} "
+                    f"trust={r['trust']:<14} state={r['state']}"
+                )
+            _emit(
+                {},
+                "\n".join(lines),
+                as_json=False,
+                stream=out,
+                palette=getattr(args, "_palette", None),
+            )
+        return ExitCode.OK
+
+    lines = [
+        f"run:      {state.run_id}",
+        f"goal:     {state.goal.description} (v{state.goal.version})",
+        f"version:  v{state.version}",
+        f"progress: {state.progress.completed} completed, "
+        f"{state.progress.pending} pending, {state.progress.failed} failed",
+        f"decisions: {len(state.valid_decisions())}/{len(state.decisions)} valid",
+    ]
+    _emit({}, "\n".join(lines), as_json=False, stream=out, palette=getattr(args, "_palette", None))
     return ExitCode.OK
 
 
@@ -837,6 +903,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     inspect = with_run(add("inspect", cmd_inspect, "Show semantic state."))
     inspect.add_argument("--version", type=int, dest="version", help="inspect a past version")
+
+    status = with_run(add("status", cmd_status, "Show run status."))
+    status.add_argument(
+        "--provenance",
+        action="store_true",
+        help="render the canonical provenance view (issue #148)",
+    )
 
     with_run(add("history", cmd_history, "List state versions and checkpoints."))
 
