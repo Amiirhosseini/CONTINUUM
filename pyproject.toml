@@ -108,6 +108,13 @@ files = ["src/continuum"]
 module = ["psycopg", "psycopg.*"]
 ignore_missing_imports = true
 
+# playwright and kubernetes are optional dependencies of the browser and
+# kubernetes environment adapters. They are imported lazily, so the modules
+# must type-check without them installed.
+[[tool.mypy.overrides]]
+module = ["playwright", "playwright.*", "kubernetes", "kubernetes.*"]
+ignore_missing_imports = true
+
 [tool.pydantic.mypy]
 init_forbid_extra = true
 init_typed = true
