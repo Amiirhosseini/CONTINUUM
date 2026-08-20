@@ -8,6 +8,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Recovery benchmarking and correctness scenarios (Phase 6).** The existing
+  CONTINUUM-Bench (`src/continuum/benchmark/__init__.py`) already provides the
+  harness, metrics schema, baseline strategies (continuum, replay,
+  naive-checkpoint), and report. Phase 6 adds `continuum.benchmark.phase6`: 12
+  recovery-correctness scenarios (dependency corruption, ledger tamper, lease
+  exhaustion, checkpoint rollback, concurrent safety, adapter failure, and more)
+  driven by a tiny timing harness that writes JSON and Markdown reports.
+  `benchmarks/run.py` runs the suite; `tests/test_phase6.py` covers it. This
+  turns the Phases 1-5 guarantees into observable, reproducible evidence.
+
 - **Recovery ledger: append-only, tamper-evident, reconcilable (Phase 5).**
   `continuum.recovery.ledger` adds `RecoveryLedger`, a durable audit record of
   recovery decisions. Entries are hash-chained (tamper-evident, `verify` reports

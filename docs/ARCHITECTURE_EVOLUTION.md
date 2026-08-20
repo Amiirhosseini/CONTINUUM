@@ -806,3 +806,58 @@ lets a later reader check the live state has not drifted from them.
   expectation vs the contract's `invalidated` list) are a natural follow-up.
 - `requires_human` is a simple attempt counter; wiring it into `assess` so the
   engine itself trips the gate is a small, isolated change left for later.
+
+## 17. Phase 6 - Recovery benchmarking and correctness scenarios
+
+### 17.1 What changed
+
+Phase 6 turns the recovery guarantees built in Phases 1-5 into observable,
+reproducible evidence. It rests on two layers:
+
+- **CONTINUUM-Bench (pre-existing, `src/continuum/benchmark/__init__.py`).** A
+  small, honest benchmark that drives the real library (storage, checkpointing,
+  validation, action ledger, recovery) against an in-process simulated agent. It
+  defines three break scenarios (process crash, dataset change, unknown side
+  effect) across three strategies (continuum, full replay, naive checkpoint)
+  and reports metrics like duplicate work and detected staleness. This covers
+  the harness scaffold (#132), the metrics schema (#133), reproducible baselines
+  (#146), and the report (#147).
+- **Phase 6 scenario suite (`src/continuum/benchmark/phase6/`).** An additive
+  layer of 12 recovery-correctness scenarios, each exercising one stress
+  condition against the real engine, validator, checkpoints, ledger, and adapter
+  funnel: single/multi dependency corruption, external edit drift, ledger tamper
+  detected, recovery lease exhaustion, adapter failure across environments,
+  checkpoint rollback correctness, concurrent recovery safety, large state
+  recovery latency, missing dependency graph fallback, human verdict honored,
+  and transient network failure on install. A tiny harness (`harness.py`) times
+  each scenario and converts failure into a `FAIL` result without aborting the
+  suite; `write_report` emits JSON and Markdown. `benchmarks/run.py` runs the
+  suite and writes `benchmarks/out/report.{json,md}`.
+
+### 17.2 What did not change
+
+- No recovery logic was modified; Phase 6 is observation and validation only.
+- The scenario suite is additive under `continuum.benchmark.phase6`, so it does
+  not disturb the existing CONTINUUM-Bench package or `tests/test_benchmark.py`.
+
+### 17.3 Tests
+
+- `tests/test_phase6.py` (15 tests): every scenario runs green under the harness,
+  plus harness self-checks (recorded failure, recorded exception, report +
+  summary). `benchmarks/run.py` executes all 12 scenarios and emits a report.
+- The pre-existing `tests/test_benchmark.py` (CONTINUUM-Bench) continues to pass.
+
+### 17.4 Baseline vs final test result
+
+- Before Phase 6: 937 passed, 9 skipped, 0 failed.
+- After Phase 6: 952 passed, 9 skipped, 0 failed (15 new tests).
+- `ruff check` / `ruff format --check` clean on changed files; `mypy src/continuum`
+  reports no issues.
+
+### 17.5 Known limitations
+
+- Scenario metrics are lightweight (pass/fail, attempts, elapsed). CONTINUUM-Bench
+  carries the richer duplicate-work / compression metrics; the two reports are
+  complementary, not merged.
+- The large-state latency scenario is a smoke check (< 1s), not a tuned
+  performance contract.
