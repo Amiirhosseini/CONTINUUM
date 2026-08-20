@@ -552,6 +552,15 @@ class StateValidationResult(BaseModel):
 
 
 class RecoveryContract(BaseModel):
+    """The machine-readable answer to "what am I allowed to do now, and why?".
+
+    ``evidence`` and ``reason`` are additive, backward-compatible fields added
+    in Phase 1 so a contract can explain *why* CONTINUUM reached its decision
+    and *what* evidence drove it. They are threaded from the existing
+    validation report and recovery rationale; nothing here is invented. Both
+    default to empty so contracts serialized before they existed still load.
+    """
+
     model_config = Frozen
 
     run_id: str
@@ -561,6 +570,8 @@ class RecoveryContract(BaseModel):
     invalidated: list[str] = Field(default_factory=list)
     required_actions: list[str] = Field(default_factory=list)
     next_allowed_action: str | None = None
+    evidence: list[str] = Field(default_factory=list)
+    reason: str = ""
     created_at: datetime = Field(default_factory=utcnow)
     integrity_hash: str | None = None
 

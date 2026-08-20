@@ -23,6 +23,7 @@ from continuum.models import (
     RecoveryContract,
     RecoverySafety,
     StateStatus,
+    StateValidationResult,
     utcnow,
 )
 from continuum.recovery.planner import RepairPlan
@@ -43,11 +44,21 @@ def seal_contract(contract: RecoveryContract) -> RecoveryContract:
 
 
 def verify_contract(contract: RecoveryContract) -> bool:
-    """Whether a contract still matches the terms it was sealed with."""
+    """Whether a contract still matches the terms it was sealed with.
+
+    Two digests are accepted so contracts sealed *before* ``evidence``/``reason``
+    existed still verify: their stored hash was computed over the terms without
+    those fields, so we also try the legacy payload that excludes them.
+    """
     if contract.integrity_hash is None:
         return False
     payload = contract.model_dump(mode="json", exclude={"integrity_hash", "created_at"})
-    return contract.integrity_hash == stable_hash(payload)
+    if contract.integrity_hash == stable_hash(payload):
+        return True
+    legacy = contract.model_dump(
+        mode="json", exclude={"integrity_hash", "created_at", "evidence", "reason"}
+    )
+    return contract.integrity_hash == stable_hash(legacy)
 
 
 def build_contract(
@@ -57,11 +68,19 @@ def build_contract(
     safety: RecoverySafety,
     validation: ValidationOutcome,
     plan: RepairPlan,
+    reason: str | None = None,
+    evidence: list[str] | None = None,
 ) -> RecoveryContract:
     """Assemble a sealed, deterministic contract.
 
     ``verified`` and ``invalidated`` are sorted so two runs over equivalent
     state produce identical contracts regardless of dictionary iteration order.
+
+    ``reason`` and ``evidence`` are threaded from information the engine and
+    validator already produced; they are never invented. ``reason`` defaults to
+    the validation report's reason when the caller supplies none, and
+    ``evidence`` defaults to the validator's per-component details (the existing
+    provenance/validation evidence), so a contract is always self-explaining.
     """
     verified: list[str] = []
     invalidated: list[str] = []
@@ -75,6 +94,11 @@ def build_contract(
 
     next_action = plan.first.action_name if plan.first else None
 
+    if reason is None:
+        reason = validation.report.reason
+    if evidence is None:
+        evidence = _validation_evidence(validation.report)
+
     contract = RecoveryContract(
         run_id=run_id,
         checkpoint_version=checkpoint_version,
@@ -83,9 +107,25 @@ def build_contract(
         invalidated=sorted(invalidated),
         required_actions=[step.action_name for step in plan.steps],
         next_allowed_action=next_action,
+        evidence=evidence,
+        reason=reason,
         created_at=utcnow(),
     )
     return seal_contract(contract)
+
+
+def _validation_evidence(report: StateValidationResult) -> list[str]:
+    """Existing validation evidence, as human-readable strings.
+
+    These are exactly the per-component details the validator already produced;
+    nothing here is fabricated. Sorted so the contract stays deterministic.
+    """
+    return sorted(
+        f"{e.component.value}"
+        f"{f':{e.component_id}' if e.component_id else ''}: {e.detail}"
+        for e in report.statuses
+        if e.detail
+    )
 
 
 def render_contract(contract: RecoveryContract) -> str:
@@ -103,4 +143,9 @@ def render_contract(contract: RecoveryContract) -> str:
         lines.append("required_actions:")
         lines += [f"  - {a}" for a in contract.required_actions]
     lines.append(f"next_allowed:      {contract.next_allowed_action or 'continue'}")
+    if contract.reason:
+        lines.append(f"reason:            {contract.reason}")
+    if contract.evidence:
+        lines.append("evidence:")
+        lines += [f"  - {e}" for e in contract.evidence]
     return "\n".join(lines)

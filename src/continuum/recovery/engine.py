@@ -214,12 +214,14 @@ class RecoveryEngine:
         )
         mode, rationale = self._decide(validation, uncertain, plan, restored, self.strict_unknown)
 
+        reason = "; ".join(rationale) if rationale else validation.report.reason
         contract = build_contract(
             run_id=run_id,
             checkpoint_version=checkpoint_version,
             safety=_SAFETY_FOR_MODE[mode],
             validation=validation,
             plan=plan,
+            reason=reason,
         )
 
         return RecoveryDecision(
