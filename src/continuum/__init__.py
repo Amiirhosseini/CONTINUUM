@@ -21,6 +21,18 @@ from continuum.actions import (
     reconcile_pending,
     unresolved_actions,
 )
+from continuum.adapters import (
+    AdapterRegistry,
+    AgentAdapter,
+    GenericAgentAdapter,
+    LangChainAgentAdapter,
+    LangGraphAgentAdapter,
+    OpenAIAgentAdapter,
+    get_adapter,
+    list_adapters,
+    recover,
+    register_adapter,
+)
 from continuum.checkpoint import (
     CheckpointDecision,
     CheckpointError,
@@ -273,6 +285,17 @@ __all__ = [
     "plan_repairs",
     "render_contract",
     "verify_contract",
+    # agent framework adapters
+    "AdapterRegistry",
+    "AgentAdapter",
+    "GenericAgentAdapter",
+    "LangChainAgentAdapter",
+    "LangGraphAgentAdapter",
+    "OpenAIAgentAdapter",
+    "get_adapter",
+    "list_adapters",
+    "recover",
+    "register_adapter",
     # provenance (canonical mapping)
     "CanonicalProvenance",
     "ProvenanceView",
