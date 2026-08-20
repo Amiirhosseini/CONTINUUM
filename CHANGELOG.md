@@ -180,6 +180,11 @@ All notable changes to this project are documented here. The format follows
 - **CI.** `ruff` pinned to `0.16.2` and `ruff format` applied, so the lint
   job's format-check is reproducible (it had been failing on unpinned ruff).
 
+- **README and STATUS.** Documented the current project structure as a module
+  map (LOC per layer) in the README Architecture section and added a codebase
+  snapshot to STATUS.md. The suite is now 900 tests (up from the 740 recorded
+  earlier; the Postgres backend's tests skip without `CONTINUUM_TEST_POSTGRES_DSN`).
+
 ### Fixed
 
 - **The `continuum serve` sidecar exported a `MUTATING` constant describing an

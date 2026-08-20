@@ -17,7 +17,7 @@ believed, and what is neither.
 
 ## Verified
 
-740 tests pass, 4 skipped, on Python 3.13 with `mcp 2.0.0` installed. The MCP
+900 tests pass, on Python 3.13 with `mcp 2.0.0` installed. The MCP
 server tests are no longer excluded: they load and pass against `mcp>=2.0` (the
 version pinned in `pyproject.toml`). An earlier note recorded them as failing to
 load; that incompatibility is gone with the newer SDK. CI was green on Python
@@ -1222,7 +1222,7 @@ avoid scope creep (no adversarial training, no new policy language).
 
 Tests: `tests/test_trust_gate.py`, `tests/test_revalidation_schedule.py`,
 `tests/test_toy_task_banner_attack.py` (a cookie-consent banner before/after
-pair). All 740 tests pass; `ruff` and `mypy --strict` are clean.
+pair). All 900 tests pass; `ruff` and `mypy --strict` are clean.
 
 What this does NOT claim: Extension 1 does not defeat an optimized pixel-patch
 attack (still open per CaMeLs), it adds an audit trail and escalation.
@@ -1335,3 +1335,33 @@ A stale stash (`90a6d58`, "wip: continuum-mcp name fix + changelog") remains in
 the reflog. It duplicates work already committed in `0cef651`/`dc400f5` (the
 `continuum-mcp` rename and the e2e-autonomy-test restore), so it can be dropped
 with `git stash drop` after a glance. It is harmless where it sits.
+
+---
+
+## Codebase snapshot (2026-08-20)
+
+Captured while preparing the README project-structure section. The tree is 204
+tracked files, 118 Python files, about 30,300 LOC total. The core library
+`src/continuum` is 60 files / about 14,800 LOC; the test suite is 45 files and
+about 900 tests collected.
+
+Layers, by size:
+
+- Mature and heavily tested (the bulk, about 72% of core): `storage/`,
+  `state/`, `adapters/`, `mcp/`, `cli/`, `actions/`, `checkpoint/`,
+  `recovery/`, `events.py`, `models.py`.
+- Committed but newer or not yet fully vetted:
+  - `security/` (provenance, trust gate, revalidation) is marked not part of
+    v0.1.0; `docs/RESULTS.md` mini-benchmark is still pending.
+  - `storage/postgres.py`, `storage/migrations.py`, and `concurrency/` (lease
+    coordinator) are the B2.x work. The Postgres backend is unverified against a
+    live server in this environment (no `CONTINUUM_TEST_POSTGRES_DSN`, no
+    `psycopg`); its tests skip cleanly.
+  - `interchange/` (B4 portable envelope) is done and tested.
+- `benchmark/`, `environment/`, `plugins/`, `observability.py`, and `serve/`
+  round out the surface.
+
+Three entry points from `main`: the `continuum` CLI (`cli/main.py`), the
+`continuum-mcp` server (`mcp/server.py`), and the `continuum serve` sidecar
+(`serve/server.py`). The full module map is in the README Architecture section
+and [references/architecture.md](references/architecture.md).

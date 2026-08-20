@@ -147,7 +147,7 @@ CONTINUUM is verified not just with mock unit tests, but against real LLM agents
 
 ### Automated Test Suite and Benchmarks
 
-- **817 tests passing** on Python 3.11, 3.12, and 3.13 (including unit, `hypothesis` property-based, and concurrency tests).
+- **900 tests passing** on Python 3.11, 3.12, and 3.13 (including unit, `hypothesis` property-based, and concurrency tests).
 - **CONTINUUM-Bench**: `continuum benchmark` executes in-process recovery benchmarks across five scenarios (`process_crash`, `dataset_change`, `unknown_side_effect`, `partial_completion`, `early_crash`), proving 0 duplicate work, 0 duplicate side effects, and automatic detection of stale environment dependencies.
 
 ### Adversarial Audit of the MCP Surface
@@ -253,9 +253,35 @@ The deep reference for each concept lives in [references/concepts.md](references
 
 ## Architecture
 
-The system is built on immutable Pydantic v2 models with a cryptographic hash chain. State is projected from an append-only event log by a pure fold, not stored and mutated. The full reference, including the data model, event log, projection, extraction, versioning, durable storage, checkpointing, recovery context, state validation, action ledger, recovery engine, and security model, is in [references/architecture.md](references/architecture.md). A complete system diagram and enumerated reference (tools, recovery modes, policies, reconcilers) is in [references/architecture-diagram.md](references/architecture-diagram.md). The project structure and module map are in [references/architecture.md](references/architecture.md).
+The system is built on immutable Pydantic v2 models with a cryptographic hash chain. State is projected from an append-only event log by a pure fold, not stored and mutated. The full reference, including the data model, event log, projection, extraction, versioning, durable storage, checkpointing, recovery context, state validation, action ledger, recovery engine, and security model, is in [references/architecture.md](references/architecture.md). A complete system diagram and enumerated reference (tools, recovery modes, policies, reconcilers) is in [references/architecture-diagram.md](references/architecture-diagram.md).
 
 Key guarantees: append-only events, atomic sequence allocation, durability on `append_event` return, write races fail loudly, and corruption is refused rather than returned.
+
+### Project structure
+
+CONTINUUM is one library (`src/continuum`, about 14,800 LOC across 60 files) plus a large test suite (45 files, about 900 tests). The modules are layered and all append to and replay one hash-chained event log:
+
+| Module | LOC | Role |
+|:--|--:|:--|
+| `events.py` | 391 | Append-only, hash-chained event log and `verify()` |
+| `state/` | 1,637 | Projection (`semantic.py`), validation (`validator.py`), extraction |
+| `storage/` | 1,690 | `SQLiteStorage` (v2 schema), `postgres.py`, `migrations.py` |
+| `actions/` | 1,183 | Idempotent action ledger, reconciliation, claim/complete |
+| `checkpoint/` | 924 | Policy-driven checkpoints |
+| `recovery/` | 699 | Engine (max-severity wins), planner, sealed contract |
+| `adapters/` | 1,596 | Generic, LangChain, LangGraph, OpenAI Agents SDK |
+| `mcp/` | 1,334 | Ten stdio tools plus `authz.py` (token auth, allowlist) |
+| `serve/` | 739 | Language-agnostic newline-JSON sidecar mirroring MCP |
+| `cli/` | 1,218 | `argparse` commands, exit codes as verdict |
+| `benchmark/` | 440 | CONTINUUM-Bench scenario harness |
+| `environment/` | 514 | Snapshots and diffs |
+| `security/` | 608 | Provenance, trust gate, revalidation (in progress) |
+| `interchange/` | 312 | B4 portable recovery-state JSON envelope |
+| `concurrency/` | 255 | B2.2 lease and distributed-lock coordinator |
+| `plugins/` | 174 | Registry and capability seams |
+| `models.py`, `observability.py`, `__init__.py` | ~1,100 | Shared models, metrics, public surface |
+
+Three entry points, all from `main`: the `continuum` CLI, the `continuum-mcp` server, and the `continuum serve` sidecar. `storage/`, `state/`, `adapters/`, `mcp/`, `cli/`, `actions/`, and `checkpoint/` hold roughly 72% of the core and are the mature, heavily-tested layers. `security/`, `storage/postgres.py`, `migrations.py`, and `concurrency/` are committed but newer: the Postgres backend is unverified against a live server in this environment (its tests skip without `CONTINUUM_TEST_POSTGRES_DSN` / `psycopg`). `interchange/` is done and tested. The full data model, projection, and recovery reference is in [references/architecture.md](references/architecture.md).
 
 ## API and CLI
 
@@ -319,7 +345,7 @@ Recent preprints that measure or model the same reliability gaps CONTINUUM targe
 
 ## Status and limitations
 
-- **Tested**: 817 tests passing, 4 skipped (see [STATUS.md](STATUS.md)). The MCP surface has also been audited adversarially over the live protocol; see [test.md](test.md).
+- **Tested**: 900 tests passing (a few skip without optional services such as Postgres; see [STATUS.md](STATUS.md)). The MCP surface has also been audited adversarially over the live protocol; see [test.md](test.md).
 - **Not on PyPI.** Install from a clone (see Quick Start).
 - **MCP caller authentication is optional.** When `CONTINUUM_MCP_TOKEN` is set, the server refuses every mutating tool unless the caller presents that shared secret in the `initialize` handshake's `_meta.authToken`. Without it, authorization is by declared identity only (the historical default, preserved for local single-user use). Tracked as [#1](https://github.com/Cyrax321/CONTINUUM/issues/1).
 - **Unbuilt components**: Cloud API (Phase 13) and Dashboard (Phase 14).
