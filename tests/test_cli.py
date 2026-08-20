@@ -760,3 +760,23 @@ def test_status_provenance_json(db: str) -> None:
     assert code == 0
     data = json.loads(out)
     assert any(row["who"] == "observed" for row in data["provenance"])
+
+
+# --- scoped recovery CLI smoke (issue #110) --------------------------------- #
+
+
+def test_validate_is_read_only_and_produces_contract(db: str) -> None:
+    # Read-only scoped-recovery entry. Supplying the declared env yields a safe
+    # resume; omitting --env still runs without mutating state.
+    code, out, _ = run("--db", db, "validate", "run_1", "--env", "dataset=v3")
+    assert code == 0
+    assert "CONTINUUM RECOVERY" in out
+    assert "Recovery decision: RESUME" in out
+
+
+def test_validate_json_carries_mode(db: str) -> None:
+    code, out, _ = run("--db", db, "--json", "validate", "run_1", "--env", "dataset=v3")
+    assert code == 0
+    data = json.loads(out)
+    assert data["mode"] == "resume"
+    assert data["safe"] is True
