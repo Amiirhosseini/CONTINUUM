@@ -17,7 +17,7 @@ believed, and what is neither.
 
 ## Verified
 
-929 tests pass (9 skipped), on Python 3.13 with `mcp 2.0.0` installed. The MCP
+937 tests pass (9 skipped), on Python 3.13 with `mcp 2.0.0` installed. The MCP
 server tests are no longer excluded: they load and pass against `mcp>=2.0` (the
 version pinned in `pyproject.toml`). An earlier note recorded them as failing to
 load; that incompatibility is gone with the newer SDK. CI was green on Python
@@ -39,6 +39,7 @@ notices.
 | Validation | `state/validator.py` | Checks state against the current environment. Staleness propagates `dependency -> evidence -> finding -> decision`. |
 | Action ledger | `actions/` | Idempotent claim/complete. Raises `UnknownSideEffect` rather than guessing when an outcome is unknown. |
 | Recovery engine | `recovery/` | Reduces validation, ledger and checkpoint signals to one `RecoveryMode`. Takes the **maximum** on a severity ordering, so the most cautious signal wins regardless of evaluation order. |
+| Recovery ledger | `recovery/ledger.py` | Append-only, hash-chained audit of recovery decisions. `verify` reports the last trusted index (tamper-evident), `compact` drops old entries while preserving anchors and re-sealing the chain, `record_gate`/`pending_gate` persist human-in-the-loop decisions, `requires_human` enforces an attempt budget, and `reconcile` detects state-vs-ledger drift. Optional `LeaseCoordinator` for cross-process safety. |
 
 ### Interfaces
 

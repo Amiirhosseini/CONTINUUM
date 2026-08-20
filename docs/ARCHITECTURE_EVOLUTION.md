@@ -732,3 +732,77 @@ checkpoint history bounded.
 - The auto-checkpoint hook is not yet invoked automatically by the adapter loop;
   callers must call `checkpoint_on_recovery` after a non-RESUME decision. Wiring
   is a small, well-isolated change left for the next step.
+
+## 16. Phase 5 - Recovery ledger (append-only, tamper-evident, reconcilable)
+
+### 16.1 What changed
+
+Phase 5 adds a durable, auditable record of recovery decisions, separate from
+the event log (which proves what happened) and the contract (which proves what
+was permitted at one moment). The ledger proves the sequence of decisions and
+lets a later reader check the live state has not drifted from them.
+
+- **`RecoveryLedger`** (`src/continuum/recovery/ledger.py`) is append-only. Each
+  `append_decision(run_id, contract, *, anchor, gate, note)` seals a contract as
+  a `RecoveryLedgerEntry` and appends it.
+- **Tamper-evident chaining.** Each entry carries the previous entry's hash, so
+  rewriting any historical entry breaks `verify`, which returns
+  `(chain_ok, trusted_through_index)` (the first broken index). See issue
+  #130 (tamper-evident chaining) and #124 (integrity verification).
+- **Compaction with anchor preservation.** `compact(run_id, keep=50,
+  keep_anchors=True)` drops the oldest non-anchor entries but re-seals the
+  surviving chain (the first kept entry links to `GENESIS`), so the ledger stays
+  bounded without losing its audit anchors or its tamper-evidence. See #127.
+- **Human-in-the-loop gate.** A decision can be recorded with `gate="required"`;
+  `pending_gate` returns it until `record_gate(run_id, "approved")` persists the
+  human decision. See #126.
+- **Recovery lease / attempt budget.** `record_attempt` / `attempts` /
+  `requires_human(run_id, max_attempts=3)` count recovery attempts and trip a
+  human threshold, so the system stops retrying and asks a person. See #125.
+- **Reconciliation.** `reconcile(run_id, state)` returns a `ReconcileReport`
+  flagging drift: a broken chain, or a live state version behind the checkpoint
+  the latest decision was sealed against (implies rollback or corruption). See
+  #129.
+- **Cross-process lock.** The ledger accepts a `LeaseCoordinator` (the same one
+  guarding single-agent resume) and acquires it around every mutation, so two
+  processes cannot append concurrently. See #128. Without a lock it is
+  single-process safe (the storage write is already atomic).
+- **Storage-agnostic backend.** `LedgerBackend` has `MemoryLedgerBackend` (tests)
+  and `FileLedgerBackend` (JSONL, one file per run). No schema migration was
+  needed, keeping Phase 5 additive and low-risk.
+
+### 16.2 What did not change
+
+- The event log and `RecoveryContract` are untouched. The ledger is a new,
+  higher-level audit record that references contracts by value.
+- `RecoveryEngine.assess` stays read-only; nothing auto-appends to the ledger.
+  Callers (CLI, agent loop, or the recover funnel) append after deciding.
+- The cross-process lock reuses the existing `continuum.concurrency` lease
+  coordinator rather than introducing a new locking primitive.
+
+### 16.3 Tests
+
+- `tests/test_recovery_ledger.py` (8 tests): genesis chaining and `verify`,
+  tampering breaks the chain at the right index, compaction keeps anchors plus
+  the newest entries and stays verifiable, attempt counting and the human
+  threshold, human gate persistence and `pending_gate` clearing, reconciliation
+  drift detection, `FileLedgerBackend` round-trip, and `append` under the
+  `InMemoryLeaseCoordinator` lock.
+
+### 16.4 Baseline vs final test result
+
+- Before Phase 5: 929 passed, 9 skipped, 0 failed.
+- After Phase 5: 937 passed, 9 skipped, 0 failed (8 new ledger tests).
+- `ruff check` / `ruff format --check` clean on changed files; `mypy src/continuum`
+  reports no issues.
+
+### 16.5 Known limitations
+
+- The ledger is keyed by `run_id` and stored separately from the run's main
+  storage. A future step could colocate it (via the storage migration framework)
+  so a single `verify` covers events, checkpoints, and the ledger at once.
+- Reconciliation currently checks the chain and the live state version against
+  the latest decision's checkpoint version. Richer drift rules (per-component
+  expectation vs the contract's `invalidated` list) are a natural follow-up.
+- `requires_human` is a simple attempt counter; wiring it into `assess` so the
+  engine itself trips the gate is a small, isolated change left for later.

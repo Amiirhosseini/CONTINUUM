@@ -8,6 +8,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Recovery ledger: append-only, tamper-evident, reconcilable (Phase 5).**
+  `continuum.recovery.ledger` adds `RecoveryLedger`, a durable audit record of
+  recovery decisions. Entries are hash-chained (tamper-evident, `verify` reports
+  the last trusted index), `compact` drops old entries while preserving anchors
+  and re-sealing the chain, `record_gate` / `pending_gate` persist a
+  human-in-the-loop decision, `record_attempt` / `requires_human` enforce a
+  recovery attempt budget before escalating to a human, and `reconcile` detects
+  state-vs-ledger drift. The ledger takes an optional `LeaseCoordinator` for
+  cross-process safety and ships `MemoryLedgerBackend` (tests) and
+  `FileLedgerBackend` (JSONL). Tests in `tests/test_recovery_ledger.py`.
+
 - **Automatic checkpointing: recovery anchors, anchor lookup, and pruning (Phase 4).**
   `CheckpointTrigger.RECOVERY` marks a checkpoint taken because a recovery
   decision judged the run unsafe to continue from. `CheckpointManager` gains
