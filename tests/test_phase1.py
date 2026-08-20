@@ -96,11 +96,7 @@ def _outcome_with_dependency_change() -> ValidationOutcome:
 
 def _repair_plan() -> RepairPlan:
     return RepairPlan(
-        steps=[
-            RepairStep(
-                kind=RepairKind.REVALIDATE_DEPENDENCY, target="dataset", reason="drift"
-            )
-        ]
+        steps=[RepairStep(kind=RepairKind.REVALIDATE_DEPENDENCY, target="dataset", reason="drift")]
     )
 
 
@@ -260,9 +256,7 @@ def test_render_contract_includes_reason_and_evidence() -> None:
 def store() -> SQLiteStorage:
     storage = SQLiteStorage(":memory:")
     storage.create_run(Run(run_id="run_1", goal="Analyze documents"))
-    storage.append_event(
-        "run_1", EventType.RUN_STARTED, {"goal": "Analyze documents", "total": 20}
-    )
+    storage.append_event("run_1", EventType.RUN_STARTED, {"goal": "Analyze documents", "total": 20})
     yield storage
     storage.close()
 
@@ -348,8 +342,7 @@ def test_state_status_maps_to_canonical_what() -> None:
     assert canonical_state_status(StateStatus.UNKNOWN) is CanonicalProvenance.UNKNOWN
     assert canonical_state_status(StateStatus.INVALID) is CanonicalProvenance.CONTRADICTED
     assert (
-        canonical_state_status(StateStatus.REQUIRES_REVIEW)
-        is CanonicalProvenance.REQUIRES_REVIEW
+        canonical_state_status(StateStatus.REQUIRES_REVIEW) is CanonicalProvenance.REQUIRES_REVIEW
     )
     # EXPIRED has no dedicated canonical member; it normalizes to STALE while the
     # original StateStatus.EXPIRED is preserved in the source enum.
@@ -413,15 +406,11 @@ def test_self_certified_progress_stays_requires_review_until_confirmed() -> None
     )
 
     before = validate_state(state)
-    progress_before = next(
-        e for e in before.report.statuses if e.component is Component.PROGRESS
-    )
+    progress_before = next(e for e in before.report.statuses if e.component is Component.PROGRESS)
     assert progress_before.status is StateStatus.REQUIRES_REVIEW
 
     after = validate_state(state, confirmed=True)
-    progress_after = next(
-        e for e in after.report.statuses if e.component is Component.PROGRESS
-    )
+    progress_after = next(e for e in after.report.statuses if e.component is Component.PROGRESS)
     assert progress_after.status is StateStatus.VALID
 
 
@@ -454,6 +443,5 @@ def test_agent_claim_requires_human_then_confirms_to_resume(
     assert confirmed.mode is RecoveryMode.RESUME
     assert confirmed.safe
     assert all(
-        e.status is not StateStatus.REQUIRES_REVIEW
-        for e in confirmed.validation.report.statuses
+        e.status is not StateStatus.REQUIRES_REVIEW for e in confirmed.validation.report.statuses
     )

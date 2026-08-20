@@ -121,8 +121,7 @@ def _validation_evidence(report: StateValidationResult) -> list[str]:
     nothing here is fabricated. Sorted so the contract stays deterministic.
     """
     return sorted(
-        f"{e.component.value}"
-        f"{f':{e.component_id}' if e.component_id else ''}: {e.detail}"
+        f"{e.component.value}{f':{e.component_id}' if e.component_id else ''}: {e.detail}"
         for e in report.statuses
         if e.detail
     )
