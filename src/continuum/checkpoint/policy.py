@@ -59,6 +59,7 @@ class CheckpointTrigger:
     IMPORTANT_STATE_CHANGE = "important_state_change"
     CONTEXT_PRESSURE = "context_pressure"
     RUN_COMPLETED = "run_completed"
+    RECOVERY = "recovery"
 
 
 #: Events that mean the outside world changed. Losing these is expensive:

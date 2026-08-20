@@ -600,6 +600,12 @@ class PostgresStorage(Storage):
             ).fetchall()
         return [self._row_to_checkpoint(row) for row in rows]
 
+    def delete_checkpoint(self, checkpoint_id: str) -> None:
+        with self._write():
+            self._connection.execute(
+                "DELETE FROM checkpoints WHERE checkpoint_id = %s", (checkpoint_id,)
+            )
+
     @staticmethod
     def _row_to_checkpoint(row: Any) -> StateCheckpoint:
         try:

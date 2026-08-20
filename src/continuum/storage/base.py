@@ -206,6 +206,15 @@ class Storage(ABC):
     @abstractmethod
     def list_checkpoints(self, run_id: str) -> Sequence[StateCheckpoint]: ...
 
+    @abstractmethod
+    def delete_checkpoint(self, checkpoint_id: str) -> None:
+        """Remove a checkpoint by id.
+
+        Callers (for example CheckpointManager.prune) are responsible for not
+        deleting a checkpoint that a recovery decision still depends on; the
+        store itself only refuses referential impossibilities.
+        """
+
     # -- convenience ------------------------------------------------------ #
 
     def extend_events(self, events: Iterable[Event]) -> int:

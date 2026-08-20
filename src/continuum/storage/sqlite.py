@@ -568,6 +568,10 @@ class SQLiteStorage(Storage):
             ).fetchall()
         return [self._row_to_checkpoint(row) for row in rows]
 
+    def delete_checkpoint(self, checkpoint_id: str) -> None:
+        with self._write() as conn:
+            conn.execute("DELETE FROM checkpoints WHERE checkpoint_id = ?", (checkpoint_id,))
+
     @staticmethod
     def _row_to_checkpoint(row: sqlite3.Row) -> StateCheckpoint:
         try:

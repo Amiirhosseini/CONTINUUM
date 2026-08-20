@@ -604,6 +604,7 @@ class StateCheckpoint(BaseModel):
     run_id: str
     version: int = 0
     trigger: str = "manual"
+    reason: str = ""
     state: SemanticState
     environment: EnvironmentSnapshot | None = None
     created_at: datetime = Field(default_factory=utcnow)
