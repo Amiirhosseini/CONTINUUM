@@ -23,7 +23,7 @@ abort — is the recovery engine's job in Phase 7.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
 from continuum.environment.diff import EnvironmentDiff, ResourceChange, diff_environments
@@ -122,19 +122,32 @@ class StateValidator:
         checkpoint_version: int = 0,
         expected_model: str | None = None,
         confirmed: bool = False,
+        scope: Iterable[str] | None = None,
     ) -> ValidationOutcome:
         self.confirmed = confirmed
         environment_diff = diff_environments(checkpoint_environment, current_environment)
         entries: list[ComponentValidationEntry] = []
 
         broken = self._broken_resources(environment_diff)
-        state = self._apply_dependency_status(state, environment_diff, entries)
-        state = self._propagate(state, broken, entries)
-        self._check_goal(state, entries)
-        self._check_progress(state, entries)
-        self._check_approvals(state, entries)
-        self._check_model(state, expected_model, entries)
-        self._check_evidence(state, entries)
+
+        if scope is None:
+            state = self._apply_dependency_status(state, environment_diff, entries)
+            state = self._propagate(state, broken, entries)
+            self._check_goal(state, entries)
+            self._check_progress(state, entries)
+            self._check_approvals(state, entries)
+            self._check_model(state, expected_model, entries)
+            self._check_evidence(state, entries)
+        else:
+            # Scoped re-validation: only the named dependency resources are
+            # re-checked and only their derivation subtree is allowed to go
+            # stale. Everything else keeps the status it already had, so a
+            # localized recovery does not re-taint components it is not
+            # responsible for.
+            scope_set = set(scope)
+            broken = {r: c for r, c in broken.items() if r in scope_set}
+            state = self._apply_dependency_status(state, environment_diff, entries, scope=scope_set)
+            state = self._propagate(state, broken, entries)
 
         blocking = [
             e
@@ -173,12 +186,17 @@ class StateValidator:
         state: SemanticState,
         diff: EnvironmentDiff,
         entries: list[ComponentValidationEntry],
+        scope: set[str] | None = None,
     ) -> SemanticState:
         if not state.external_dependencies:
             return state
 
         updated = []
         for dependency in state.external_dependencies:
+            if scope is not None and dependency.resource not in scope:
+                # Out of scope: preserve the status already recorded for it.
+                updated.append(dependency)
+                continue
             delta = diff.for_resource(dependency.resource)
             status = dependency.status
             detail = ""
@@ -466,8 +484,14 @@ def validate_state(
     expected_model: str | None = None,
     strict_unknown: bool = True,
     confirmed: bool = False,
+    scope: Iterable[str] | None = None,
 ) -> ValidationOutcome:
-    """Validate a state against the current environment."""
+    """Validate a state against the current environment.
+
+    When ``scope`` names specific dependency resources, only those resources are
+    re-checked and only their derivation subtree may go stale; the rest of the
+    state keeps its recorded status (localized recovery).
+    """
     return StateValidator(strict_unknown=strict_unknown, confirmed=confirmed).validate(
         state,
         current_environment=current_environment,
@@ -475,4 +499,5 @@ def validate_state(
         checkpoint_version=checkpoint_version,
         expected_model=expected_model,
         confirmed=confirmed,
+        scope=scope,
     )
