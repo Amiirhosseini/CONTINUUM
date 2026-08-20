@@ -8,6 +8,34 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Leftover issue sweep (Phases 2, 3, and provenance).** Closed the remaining
+  open issues from the master plan with working, tested code:
+  - Source-level `DependencyGraph` (`continuum.analysis.depends`): reads
+    `pyproject.toml`/`requirements.txt` and parses `import`/`from` via the stdlib
+    `ast` module; `owner_of`/`files_using` plus stdlib vs third-party distinction
+    (#100). Degrades gracefully when no manifest is present (#109).
+  - `dep_scope` on `Action`, threaded through `ActionLedger.claim` and
+    `AgentAdapter.intercept_action`, so operations can be tagged with the
+    dependency they belong to (#103). (The plan's `OperationContext` does not
+    exist in the current architecture, so the intent was applied to `Action`.)
+  - `AdapterAction`/`AdapterResult` and `run_action`, a uniform facade over
+    `AgentAdapter.intercept_action` so recovery treats every adapter the same
+    (#112).
+  - Environment adapters behind `AgentAdapter`: `FilesystemSandboxAdapter`
+    (CI-safe default, #160), `PythonInProcAdapter` (CI-verified, #116), and
+    guarded `ContainerAdapter` (#116), `BrowserAdapter` (#158, playwright), and
+    `KubernetesAdapter` (#159, kubectl). The latter three import their optional
+    dependency lazily and skip smoke tests when it is absent.
+  - `continuum status --provenance` renders the canonical provenance projection
+    per state item (#148).
+  - Benchmark scripts `benchmarks/localized_repair.py` (#106) and
+    `benchmarks/graph_build_overhead.py` (#111); both are synthetic and make no
+    external-world claims.
+  - CLI scoped-recovery smoke test and recovery-policy regression tests
+    (#110, #104).
+
+### Added
+
 - **Recovery benchmarking and correctness scenarios (Phase 6).** The existing
   CONTINUUM-Bench (`src/continuum/benchmark/__init__.py`) already provides the
   harness, metrics schema, baseline strategies (continuum, replay,
