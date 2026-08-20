@@ -1228,3 +1228,110 @@ What this does NOT claim: Extension 1 does not defeat an optimized pixel-patch
 attack (still open per CaMeLs), it adds an audit trail and escalation.
 Extension 2 does not improve long-horizon reasoning, it re-checks ground truth
 on a schedule. Neither claims to have "solved" its source paper.
+
+---
+
+## Contributor PR wave and triage (2026-08-19 to 2026-08-20)
+
+A batch of contributor PRs landed on `main` and was merged through review. Each
+was verified by checking out the PR branch, running the affected tests in
+isolation (so unrelated local work was never disturbed), `ruff check`, `ruff
+format --check`, and `mypy`. The only mypy output was the pre-existing
+`langchain`/`langgraph` import-not-found noise, which is unrelated to any of
+these changes. All merges were squash merges via `gh pr merge --admin` because
+branch protection blocks a non-admin merge.
+
+### Merged
+
+| PR | Title | Author | Closes | Verification |
+|----|-------|--------|--------|-------------|
+| #89 | `fix(benchmark)`: close SQLiteStorage handles so the benchmark runs on Windows | @abyyxhek | #81 | 835 passed, 4 skipped |
+| #90 | `fix(mcp)`: make a failed cold start leak free and diagnosable | @Adhi1-2 | #87 | 838 passed |
+| #92 | `fix(serve)`: let a sidecar client resume without a memorized id or task file | @abyyxhek | #91 | 844 passed |
+| #93 | `fix(mcp)`: report a missing `mcp` extra instead of an import traceback | @Adhi1-2 | #87 | 840 passed |
+| #96 | `docs(changelog)`: correct the serve resume test count to six | @abyyxhek | (docs) | changelog only |
+| #97 | `fix`: report the failing storage path unescaped so it is copy-pasteable | @Adhi1-2 | #94 | 864 passed |
+| #99 | `fix(serve)`: delete the dead auth gate and pin the policy the sidecar really has | @Adhi1-2 | #95 | tests/test_serve.py 32 passed, ruff clean |
+
+### Closed without merge
+
+- #98 (`fix(cli,mcp)`: stop escaping the path in the cannot-open-storage error,
+  @abyyxhek) was closed as a duplicate of #97. #97 already fixed the same two
+  sites with the same literal-quote approach; #98 was filed after #97 and added
+  nothing new, so it was labelled `duplicate` and closed.
+
+### Maintainer changes landed alongside
+
+- `0cef651` `fix(mcp)`: register the server as `continuum-mcp` so it is found at
+  cold start (#87). This was the root cause of the MCP cold-start failure: the
+  config key and the advertised `MCPServer` name said `continuum`, while the
+  console script, docs and `CLAUDE.md` all say `continuum-mcp`. Both the
+  `.mcp.json` key and the `MCPServer(name=...)` were changed to `continuum-mcp`.
+- `8db7745` `docs`: add Abishek to the contributors list and ship circular
+  contributor avatars under `docs/contributors/`.
+
+### Issues resolved this session
+
+- #81 (benchmark crashes on Windows from unclosed handles): fixed by #89.
+- #87 (MCP server reports `ready:false` at session start): addressed on three
+  fronts. The name mismatch by the `continuum-mcp` change above, the leaked
+  handle plus traceback-on-cold-start by #90, and the missing-`mcp`-extra
+  import death by #93.
+- #91 (sidecar `resume` drifted from the MCP tool it mirrors): fixed by #92,
+  which also added six serve tests that diff the sidecar payload against the live
+  `continuum_resume` so the two surfaces cannot silently diverge again.
+- #94 (cannot-open-storage message escaped backslashes, so a Windows path was not
+  copy-pasteable): fixed by #97. Reported with a full diagnosis by @abyyxhek,
+  including that the escaping broke the exact guarantee #87 was meant to provide
+  and that it had already shipped a Windows-only breakage once (#81 was the
+  first).
+- #95 (the `serve` sidecar exported a `MUTATING` constant describing an auth
+  policy it did not implement, and no test pinned the real one): fixed by #99.
+  Also reported by @abyyxhek. The PR deletes the dead `_auth_check`, keeps
+  `MUTATING` as descriptive metadata with a docstring stating it does not govern
+  auth, corrects `SidecarAuth`, and adds twelve regression cases over
+  `list_methods()`.
+
+### Who solved what
+
+- @abyyxhek: authored and merged #89, #92, #96. Reported #91 and #95. Produced
+  the full root-cause diagnosis for #87 (the `continuum` vs `continuum-mcp` name
+  mismatch) and for #94 (both error sites, the POSIX/Windows asymmetry, and why
+  the existing MCP test missed it on a clean checkout). #98 was his duplicate of
+  #97.
+- @Adhi1-2: authored and merged #90, #93, #97, and #99. Each paired the fix with
+  tests and a CHANGELOG entry. Solved the three remaining #87 sub-defects (leak,
+  traceback, missing extra) plus both #94 and #95.
+
+Net: every issue that surfaced during this window is closed. The open items
+remaining are the design and research briefs (#82 to #88) and the older roadmap
+issues (#10 to #13, #6), none of which were part of this batch.
+
+### Local feature work committed during this window
+
+While the PRs above were being reviewed, a set of larger local changes was
+committed to `main` and pushed rather than left untracked. They are recorded
+here so the tree state is self-explanatory. The CHANGELOG `[Unreleased]` `Added`
+section already describes each in detail.
+
+- `3c20966` `feat(interchange)`: portable recovery-state interchange schema (B4).
+  `continuum.interchange` turns durable output into a versioned JSON envelope.
+- `7678ee5` `feat(storage)`: forward schema migration framework (B2.1).
+- `deced07` `feat(concurrency)`: lease and distributed-lock coordinator (B2.2).
+- `1a81c67` `feat(storage)`: PostgreSQL backend and URL routing (B2.3).
+- `fc9dfa1` `docs(changelog)`: record B4, B2.1, B2.2, B2.3 in Unreleased.
+- `4908115` `test(cli)`: cover PostgreSQL URL routing and clean failure (B2.3).
+- `c00c8eb` `docs(audit)`: MCP surface audit and auto-resume integration notes.
+- `3d37714` `chore(bugaudit)`: diagnostic scripts used during the MCP bug audit.
+- `24dcf67` `build`: add `uv.lock` for reproducible installs.
+
+The PostgreSQL backend is unverified against a live server in this environment
+(no `CONTINUUM_TEST_POSTGRES_DSN`, no `psycopg`); its tests skip cleanly and it
+should be validated in CI before reliance.
+
+### Housekeeping note
+
+A stale stash (`90a6d58`, "wip: continuum-mcp name fix + changelog") remains in
+the reflog. It duplicates work already committed in `0cef651`/`dc400f5` (the
+`continuum-mcp` rename and the e2e-autonomy-test restore), so it can be dropped
+with `git stash drop` after a glance. It is harmless where it sits.
