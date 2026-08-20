@@ -479,6 +479,7 @@ class Action(BaseModel):
     action_id: str = Field(default_factory=lambda: make_id("action"))
     run_id: str
     action_type: str
+    dep_scope: str | None = None
     arguments: Mapping[str, Any] = Field(default_factory=dict)
     arguments_hash: str | None = None
     status: ActionStatus = ActionStatus.PLANNED

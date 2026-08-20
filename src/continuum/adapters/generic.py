@@ -134,6 +134,7 @@ class GenericAgentAdapter(AgentAdapter):
         scoped_to_run: bool = True,
         on_unknown: Callable[[Any], ActionOutcome | None] | None = None,
         key: str | None = None,
+        dep_scope: str | None = None,
     ) -> Any:
         """Intercept and safely execute an external side effect.
 
@@ -171,6 +172,7 @@ class GenericAgentAdapter(AgentAdapter):
             scoped_to_run=scoped_to_run,
             on_unknown=on_unknown,
             key=key,
+            dep_scope=dep_scope,
         )
 
         if not outcome.fresh:

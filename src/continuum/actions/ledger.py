@@ -377,6 +377,7 @@ class ActionLedger:
         scoped_to_run: bool = True,
         key: str | None = None,
         on_unknown: Callable[[Action], ActionOutcome | None] | None = None,
+        dep_scope: str | None = None,
     ) -> ActionOutcome:
         """Register intent to perform an action, or report it already happened.
 
@@ -417,6 +418,7 @@ class ActionLedger:
             action = Action(
                 run_id=self.run_id,
                 action_type=action_type,
+                dep_scope=dep_scope,
                 arguments=dict(arguments or {}),
                 arguments_hash=arguments_hash(arguments, volatile=volatile),
                 status=ActionStatus.STARTED,
