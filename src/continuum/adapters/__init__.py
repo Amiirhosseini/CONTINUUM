@@ -1,5 +1,10 @@
 """Framework adapters for CONTINUUM."""
 
+from continuum.adapters.actions import (
+    AdapterAction,
+    AdapterResult,
+    run_action,
+)
 from continuum.adapters.base import AgentAdapter
 from continuum.adapters.generic import GenericAgentAdapter
 from continuum.adapters.langchain import LangChainAgentAdapter, langchain_available
@@ -14,7 +19,9 @@ from continuum.adapters.registry import (
 )
 
 __all__ = [
+    "AdapterAction",
     "AdapterRegistry",
+    "AdapterResult",
     "AgentAdapter",
     "ContinuumContext",
     "GenericAgentAdapter",
@@ -28,4 +35,5 @@ __all__ = [
     "openai_agents_available",
     "recover",
     "register_adapter",
+    "run_action",
 ]
