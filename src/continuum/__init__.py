@@ -95,6 +95,14 @@ from continuum.models import (
     UnknownSideEffect,
     utcnow,
 )
+from continuum.provenance_map import (
+    CanonicalProvenance,
+    ProvenanceView,
+    canonical_origin,
+    canonical_state_status,
+    canonical_trust,
+    summarize,
+)
 from continuum.recovery import (
     RecoveryDecision,
     RecoveryEngine,
@@ -261,4 +269,11 @@ __all__ = [
     "plan_repairs",
     "render_contract",
     "verify_contract",
+    # provenance (canonical mapping)
+    "CanonicalProvenance",
+    "ProvenanceView",
+    "canonical_origin",
+    "canonical_state_status",
+    "canonical_trust",
+    "summarize",
 ]
