@@ -7,10 +7,13 @@ from continuum.recovery.contract import (
     verify_contract,
 )
 from continuum.recovery.engine import SEVERITY, RecoveryDecision, RecoveryEngine
+from continuum.recovery.impact import DependencyGraph, ImpactedSet
 from continuum.recovery.planner import RepairKind, RepairPlan, RepairStep, plan_repairs
 
 __all__ = [
     "SEVERITY",
+    "DependencyGraph",
+    "ImpactedSet",
     "RecoveryDecision",
     "RecoveryEngine",
     "RepairKind",

@@ -104,6 +104,8 @@ from continuum.provenance_map import (
     summarize,
 )
 from continuum.recovery import (
+    DependencyGraph,
+    ImpactedSet,
     RecoveryDecision,
     RecoveryEngine,
     RepairKind,
@@ -260,6 +262,8 @@ __all__ = [
     "reconcile_pending",
     "unresolved_actions",
     # recovery engine
+    "DependencyGraph",
+    "ImpactedSet",
     "RecoveryDecision",
     "RecoveryEngine",
     "RepairKind",

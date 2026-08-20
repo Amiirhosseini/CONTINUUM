@@ -18,6 +18,8 @@ enforcement would gate nothing.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from continuum.models import (
     Component,
     RecoveryContract,
@@ -70,6 +72,7 @@ def build_contract(
     plan: RepairPlan,
     reason: str | None = None,
     evidence: list[str] | None = None,
+    scope: Iterable[str] | None = None,
 ) -> RecoveryContract:
     """Assemble a sealed, deterministic contract.
 
@@ -81,6 +84,10 @@ def build_contract(
     the validation report's reason when the caller supplies none, and
     ``evidence`` defaults to the validator's per-component details (the existing
     provenance/validation evidence), so a contract is always self-explaining.
+
+    When ``scope`` names specific dependency resources, the contract records that
+    the recovery was localized to them, so an auditor can see at a glance that
+    clean parts of the state were intentionally preserved.
     """
     verified: list[str] = []
     invalidated: list[str] = []
@@ -98,6 +105,13 @@ def build_contract(
         reason = validation.report.reason
     if evidence is None:
         evidence = _validation_evidence(validation.report)
+    if scope is not None:
+        named = sorted(set(scope))
+        if named:
+            evidence = [
+                *evidence,
+                f"localized recovery scoped to: {', '.join(named)}",
+            ]
 
     contract = RecoveryContract(
         run_id=run_id,

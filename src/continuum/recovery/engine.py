@@ -34,7 +34,7 @@ against a live database.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from continuum.actions.ledger import ActionLedger
@@ -177,8 +177,15 @@ class RecoveryEngine:
         current_environment: EnvironmentSnapshot | None = None,
         expected_model: str | None = None,
         replay: bool = True,
+        scope: Iterable[str] | None = None,
     ) -> RecoveryDecision:
-        """Decide how ``run_id`` may resume, without changing anything."""
+        """Decide how ``run_id`` may resume, without changing anything.
+
+        When ``scope`` names specific dependency resources, validation and the
+        resulting repair plan are confined to those resources' derivation
+        subtree; the rest of the state is left exactly as it was. The issued
+        contract records the scope so the localization is auditable.
+        """
         restored = self._manager.restore(run_id, replay=replay)
         checkpoint_environment = restored.checkpoint.environment if restored.checkpoint else None
         checkpoint_version = restored.checkpoint.version if restored.checkpoint else 0
@@ -197,6 +204,7 @@ class RecoveryEngine:
             checkpoint_version=checkpoint_version,
             expected_model=expected_model,
             confirmed=has_confirmation,
+            scope=scope,
         )
 
         ledger = ActionLedger(self.storage, run_id)
@@ -222,6 +230,7 @@ class RecoveryEngine:
             validation=validation,
             plan=plan,
             reason=reason,
+            scope=scope,
         )
 
         return RecoveryDecision(
@@ -236,6 +245,29 @@ class RecoveryEngine:
         )
 
     # -- the decision rule ------------------------------------------------ #
+
+    def assess_scoped(
+        self,
+        run_id: str,
+        resources: Iterable[str],
+        *,
+        current_environment: EnvironmentSnapshot | None = None,
+        expected_model: str | None = None,
+        replay: bool = True,
+    ) -> RecoveryDecision:
+        """Assess ``run_id`` confined to the derivation subtree of ``resources``.
+
+        A thin wrapper over :meth:`assess` that passes ``scope`` through; kept as
+        a named entry point so callers express intent (localized recovery) rather
+        than remembering the keyword.
+        """
+        return self.assess(
+            run_id,
+            current_environment=current_environment,
+            expected_model=expected_model,
+            replay=replay,
+            scope=resources,
+        )
 
     def _decide(
         self,
