@@ -112,7 +112,7 @@ ignore_missing_imports = true
 # kubernetes environment adapters. They are imported lazily, so the modules
 # must type-check without them installed.
 [[tool.mypy.overrides]]
-module = ["playwright", "playwright.*", "kubernetes", "kubernetes.*"]
+module = ["playwright", "playwright.*", "kubernetes"]
 ignore_missing_imports = true
 
 [tool.pydantic.mypy]
