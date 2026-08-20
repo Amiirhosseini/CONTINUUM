@@ -602,3 +602,60 @@ rest of the state untouched.
   decision.
 - `DependencyGraph` is built per call and not yet cached; for very large states a
   cached graph may be worth adding (tracked separately).
+
+---
+
+## 14. Phase 3: adapter funnel (registry + uniform dispatch)
+
+Phase 3 makes recovery framework-agnostic: one discovery layer and one recovery
+entry point work across every agent adapter, so a run can be recovered without
+the caller knowing which framework produced it.
+
+### 14.1 What changed
+
+- **`src/continuum/adapters/registry.py` (new)** - `AdapterRegistry` plus the
+  module-level `register_adapter`, `get_adapter`, `list_adapters` and
+  `recover`. Registration is *lazy*: each built-in adapter is stored as a
+  factory that imports the adapter only when requested, so importing
+  `continuum` never pulls in `langchain` / `openai` / `langgraph`. The four
+  built-ins (generic, langchain, langgraph, openai) are pre-registered.
+- **`recover(adapter_name, run_id, storage, ...)`** - the single funnel entry
+  point. It looks the adapter up by name, instantiates it with `storage` (plus
+  any adapter-specific keyword arguments), and delegates to its `resume`
+  method, returning a `RecoveryDecision`.
+- **Exports** - `AdapterRegistry`, `get_adapter`, `list_adapters`, `recover`
+  and the adapter classes are exported from `continuum.adapters` and from the
+  top-level `continuum` namespace.
+
+### 14.2 What did not change
+
+- The `AgentAdapter` interface and every existing adapter are untouched. Each
+  already exposed `resume() -> RecoveryDecision`, so the funnel only adds
+  discovery and dispatch on top of the interface that existed.
+- No recovery-decision logic moved; `recover` delegates to the adapter's own
+  `resume`, which delegates to `RecoveryEngine.assess` (generic) or the
+  framework-specific assess path.
+
+### 14.3 Tests
+
+- `tests/test_adapters_registry.py` (6 tests): built-ins registered, `get_adapter`
+  returns the class, unknown name raises, a local `AdapterRegistry` registers
+  and retrieves, `recover` dispatches through the generic adapter to a RESUME
+  decision, and unknown adapter name errors from `recover`.
+
+### 14.4 Baseline vs final test result
+
+- Before Phase 3: 916 passed, 9 skipped, 0 failed.
+- After Phase 3: 922 passed, 9 skipped, 0 failed (6 new registry tests).
+- `ruff check` / `ruff format --check` clean on changed files; `mypy src/continuum`
+  reports no issues.
+
+### 14.5 Known limitations
+
+- `recover` instantiates the adapter from `storage` plus caller-supplied
+  keyword arguments. Adapters with required constructor arguments (for example
+  langgraph's `graph`) must be passed those via `**adapter_kwargs`; this is by
+  design so the funnel stays generic.
+- No new environment adapters (python-inproc, container) were added this phase;
+  the registry makes adding them a localized, low-risk change (see the adapter
+  authoring guide). They remain tracked as future work.
