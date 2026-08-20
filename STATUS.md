@@ -17,7 +17,7 @@ believed, and what is neither.
 
 ## Verified
 
-900 tests pass, on Python 3.13 with `mcp 2.0.0` installed. The MCP
+929 tests pass (9 skipped), on Python 3.13 with `mcp 2.0.0` installed. The MCP
 server tests are no longer excluded: they load and pass against `mcp>=2.0` (the
 version pinned in `pyproject.toml`). An earlier note recorded them as failing to
 load; that incompatibility is gone with the newer SDK. CI was green on Python
@@ -35,7 +35,7 @@ notices.
 | Event log | `events.py` | Append-only, hash-chained, per-run sequencing. `verify()` reports `trusted_through` so a partially tampered run can still be recovered up to its last good event. |
 | State projection | `state/semantic.py` | Pure fold over an event prefix. Reproducible and prefix-closed. |
 | Storage | `storage/sqlite.py` | WAL, `synchronous=FULL`, `IMMEDIATE` write transactions, `UNIQUE(run_id, sequence)`. Schema **v2**. |
-| Checkpoints | `checkpoint/` | Policy-driven (manual, interval, event, semantic, context-pressure, hybrid). Restore replays events recorded after the checkpoint. |
+| Checkpoints | `checkpoint/` | Policy-driven (manual, interval, event, semantic, context-pressure, hybrid). Restore replays events recorded after the checkpoint. Phase 4 added `RECOVERY` anchors (`checkpoint_on_recovery`), `last_recovery_anchor` lookup, `prune` (keeps newest + anchors), and `Storage.delete_checkpoint` (SQLite + Postgres); `StateCheckpoint.reason` is now stored. |
 | Validation | `state/validator.py` | Checks state against the current environment. Staleness propagates `dependency -> evidence -> finding -> decision`. |
 | Action ledger | `actions/` | Idempotent claim/complete. Raises `UnknownSideEffect` rather than guessing when an outcome is unknown. |
 | Recovery engine | `recovery/` | Reduces validation, ledger and checkpoint signals to one `RecoveryMode`. Takes the **maximum** on a severity ordering, so the most cautious signal wins regardless of evaluation order. |

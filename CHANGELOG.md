@@ -8,6 +8,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Automatic checkpointing: recovery anchors, anchor lookup, and pruning (Phase 4).**
+  `CheckpointTrigger.RECOVERY` marks a checkpoint taken because a recovery
+  decision judged the run unsafe to continue from. `CheckpointManager` gains
+  `checkpoint_on_recovery` (the explicit hook to call after a non-RESUME
+  decision), `last_recovery_anchor` (lookup the newest recovery anchor, optionally
+  before a version), and `prune` (drop old checkpoints while keeping the newest
+  `keep` and preserving RECOVERY anchors). `Storage.delete_checkpoint` is added to
+  the ABC and implemented for SQLite and Postgres, and `StateCheckpoint` gains an
+  optional `reason` field so an anchor is self-describing. The recovery engine
+  stays read-only; auto-checkpointing is an opt-in call, not a hidden mutation.
+  Tests in `tests/test_checkpoint_phase4.py`.
+
 - **Portable interchange format (B4).** New `continuum.interchange` package turns
   durable output into a versioned, self-validating JSON envelope so external
   tools can read and verify CONTINUUM without embedding Python. `export_*` /

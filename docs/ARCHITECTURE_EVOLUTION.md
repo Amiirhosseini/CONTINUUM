@@ -659,3 +659,76 @@ the caller knowing which framework produced it.
 - No new environment adapters (python-inproc, container) were added this phase;
   the registry makes adding them a localized, low-risk change (see the adapter
   authoring guide). They remain tracked as future work.
+
+## 15. Phase 4 - Automatic checkpointing (recovery anchors, anchor lookup, pruning)
+
+### 15.1 What changed
+
+CONTINUUM already had automatic checkpoint timing via `CheckpointManager` and a
+policy (`HybridPolicy` fires on side effects, milestones, and meaning, not on
+volume). Phase 4 fills the remaining checkpoint gaps: pinning a known rollback
+point when a failure is detected, looking that anchor up, and keeping the
+checkpoint history bounded.
+
+- **`CheckpointTrigger.RECOVERY = "recovery"`** (`src/continuum/checkpoint/policy.py`)
+  marks a checkpoint taken precisely because a recovery decision judged the run
+  unsafe to continue from. It is distinct from MANUAL/SIDE_EFFECT/MILESTONE so
+  anchors are findable.
+- **`CheckpointManager.checkpoint_on_recovery(run_id, *, environment, reason)`**
+  (`src/continuum/checkpoint/manager.py`) takes an unconditional recovery anchor.
+  This is the explicit hook the agent loop or CLI calls right after a non-RESUME
+  decision. It deliberately does not live inside `RecoveryEngine.assess`, which
+  stays read-only (no side effects), preserving the architecture's promise that
+  judging is separate from acting.
+- **`CheckpointManager.last_recovery_anchor(run_id, *, before_version=None)`**
+  returns the newest RECOVERY checkpoint, optionally limited to anchors at or
+  before a version. This answers "where would I have rolled back to right before
+  event X?" and is the lookup a recovery strategy needs before restoring.
+- **`CheckpointManager.prune(run_id, *, keep=5, keep_anchors=True)`** keeps the
+  `keep` newest checkpoints and removes older ones, but always preserves
+  RECOVERY anchors when `keep_anchors` is true (deleting a known rollback point
+  would defeat the purpose). Returns the list of removed checkpoint ids.
+- **`Storage.delete_checkpoint(checkpoint_id)`** added to the `Storage` ABC and
+  implemented in `SQLiteStorage` and `PostgresStorage`, so pruning is supported
+  on both backends.
+- **`StateCheckpoint.reason`** (`src/continuum/models.py`) is a new optional field
+  carrying the checkpoint's reason (already recorded on the version and the
+  `STATE_CHECKPOINTED` event). It makes a recovery anchor self-describing.
+
+### 15.2 What did not change
+
+- `RecoveryEngine.assess` and `assess_scoped` remain read-only. Auto-checkpointing
+  is an explicit, opt-in call (`checkpoint_on_recovery`), not a hidden mutation
+  inside judgment.
+- The existing `maybe_checkpoint`/policy timing is untouched; Phase 4 adds the
+  recovery-specific anchor on top of it.
+- No adapter internals were modified to auto-checkpoint; the hook is provided
+  and documented so the agent loop can call it. Wiring it into each adapter's
+  `resume`/action loop is a small follow-up (would change behavior, so kept
+  separate).
+
+### 15.3 Tests
+
+- `tests/test_checkpoint_phase4.py` (7 tests): RECOVERY trigger exists,
+  `checkpoint_on_recovery` creates a RECOVERY-trigger checkpoint with its reason,
+  `last_recovery_anchor` finds the newest anchor and respects `before_version`,
+  `prune` keeps the newest `keep` and preserves RECOVERY anchors while dropping
+  old plain checkpoints, `prune` can drop anchors when `keep_anchors=False`, and
+  `prune` is a no-op within `keep`.
+
+### 15.4 Baseline vs final test result
+
+- Before Phase 4: 922 passed, 9 skipped, 0 failed.
+- After Phase 4: 929 passed, 9 skipped, 0 failed (7 new checkpoint tests).
+- `ruff check` / `ruff format --check` clean on changed files; `mypy src/continuum`
+  reports no issues.
+
+### 15.5 Known limitations
+
+- `prune` preserves RECOVERY anchors and the newest `keep`, but does not yet
+  honor a sealed `RecoveryContract` dependency (Phase 5 ledger linkage). A
+  contract sealed against a checkpoint version should also be preserved; that
+  cross-reference arrives with the contract ledger.
+- The auto-checkpoint hook is not yet invoked automatically by the adapter loop;
+  callers must call `checkpoint_on_recovery` after a non-RESUME decision. Wiring
+  is a small, well-isolated change left for the next step.
