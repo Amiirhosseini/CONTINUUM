@@ -8,14 +8,30 @@ from continuum.recovery.contract import (
 )
 from continuum.recovery.engine import SEVERITY, RecoveryDecision, RecoveryEngine
 from continuum.recovery.impact import DependencyGraph, ImpactedSet
+from continuum.recovery.ledger import (
+    FileLedgerBackend,
+    LedgerBackend,
+    LedgerEntryKind,
+    MemoryLedgerBackend,
+    ReconcileReport,
+    RecoveryLedger,
+    RecoveryLedgerEntry,
+)
 from continuum.recovery.planner import RepairKind, RepairPlan, RepairStep, plan_repairs
 
 __all__ = [
     "SEVERITY",
     "DependencyGraph",
+    "FileLedgerBackend",
     "ImpactedSet",
+    "LedgerBackend",
+    "LedgerEntryKind",
+    "MemoryLedgerBackend",
+    "ReconcileReport",
     "RecoveryDecision",
     "RecoveryEngine",
+    "RecoveryLedger",
+    "RecoveryLedgerEntry",
     "RepairKind",
     "RepairPlan",
     "RepairStep",

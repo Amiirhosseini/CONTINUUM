@@ -1,0 +1,394 @@
+"""The recovery ledger.
+
+A recovery ledger is the durable, auditable record of every recovery decision
+CONTINUUM made for a run. The event log already proves what happened; the ledger
+proves what was *decided* and *permitted*, and lets a later reader check that the
+live state has not drifted from those decisions.
+
+Three properties matter and the design defends all three:
+
+* Append-only. Entries are never edited in place. A decision that was sealed
+  stays sealed; corrections are new entries, not overwrites.
+* Tamper-evident. Each entry carries the previous entry's hash, so rewriting any
+  historical entry breaks the chain from that point on. ``verify`` reports the
+  index of the last entry it still trusts.
+* Compaction with anchor preservation. A long run accumulates entries. ``compact``
+  drops the oldest non-anchor entries but re-seals the remaining chain, so the
+  ledger stays bounded without losing its audit anchors or its tamper-evidence.
+
+The ledger is storage-agnostic: it talks to a small ``LedgerBackend`` (in-memory
+for tests, JSONL file for real use). For cross-process safety it can take a
+``LeaseCoordinator`` (the same one that guards single-agent resume) so two
+processes cannot append concurrently.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
+from dataclasses import dataclass, replace
+from datetime import datetime, timedelta
+from enum import StrEnum
+from typing import Any
+
+from continuum.concurrency.lease import LeaseCoordinator
+from continuum.models import RecoveryContract, utcnow
+from continuum.security.hashing import make_id, stable_hash
+
+__all__ = [
+    "LedgerEntryKind",
+    "RecoveryLedgerEntry",
+    "ReconcileReport",
+    "RecoveryLedger",
+    "LedgerBackend",
+    "MemoryLedgerBackend",
+    "FileLedgerBackend",
+    "LedgerError",
+    "LedgerLockError",
+]
+
+GENESIS = "genesis"
+
+
+class LedgerError(RuntimeError):
+    """Base class for ledger failures."""
+
+
+class LedgerLockError(LedgerError):
+    """Raised when the cross-process ledger lock cannot be acquired."""
+
+
+class LedgerEntryKind(StrEnum):
+    DECISION = "decision"
+    GATE = "gate"
+    ATTEMPT = "attempt"
+
+
+@dataclass(frozen=True)
+class RecoveryLedgerEntry:
+    """One append-only, hash-chained ledger entry."""
+
+    entry_id: str
+    run_id: str
+    sequence: int
+    prev_hash: str
+    content_hash: str
+    kind: str
+    contract: RecoveryContract | None
+    gate: str | None
+    anchor: bool
+    created_at: datetime
+    note: str = ""
+
+    def content(self) -> dict[str, Any]:
+        """The sealed portion of the entry, excluding its own hash."""
+        return {
+            "entry_id": self.entry_id,
+            "run_id": self.run_id,
+            "sequence": self.sequence,
+            "prev_hash": self.prev_hash,
+            "kind": self.kind,
+            "contract": self.contract.model_dump(mode="json") if self.contract else None,
+            "gate": self.gate,
+            "anchor": self.anchor,
+            "created_at": self.created_at.isoformat(),
+            "note": self.note,
+        }
+
+    def verify(self) -> bool:
+        """Whether the entry's content hash still matches its content."""
+        return self.content_hash == stable_hash(self.content())
+
+    def to_record(self) -> dict[str, Any]:
+        return self.content() | {"content_hash": self.content_hash}
+
+    @classmethod
+    def from_record(cls, rec: dict[str, Any]) -> RecoveryLedgerEntry:
+        contract = rec.get("contract")
+        return cls(
+            entry_id=rec["entry_id"],
+            run_id=rec["run_id"],
+            sequence=rec["sequence"],
+            prev_hash=rec["prev_hash"],
+            content_hash=rec["content_hash"],
+            kind=rec["kind"],
+            contract=RecoveryContract.model_validate(contract) if contract else None,
+            gate=rec.get("gate"),
+            anchor=rec.get("anchor", False),
+            created_at=datetime.fromisoformat(rec["created_at"]),
+            note=rec.get("note", ""),
+        )
+
+
+class LedgerBackend:
+    """Where ledger entries live. Storage-agnostic by design."""
+
+    def load(self, run_id: str) -> list[RecoveryLedgerEntry]:
+        raise NotImplementedError
+
+    def save(self, entry: RecoveryLedgerEntry) -> None:
+        raise NotImplementedError
+
+    def replace(self, run_id: str, entries: Sequence[RecoveryLedgerEntry]) -> None:
+        raise NotImplementedError
+
+
+class MemoryLedgerBackend(LedgerBackend):
+    def __init__(self) -> None:
+        self._store: dict[str, list[RecoveryLedgerEntry]] = {}
+
+    def load(self, run_id: str) -> list[RecoveryLedgerEntry]:
+        return list(self._store.get(run_id, []))
+
+    def save(self, entry: RecoveryLedgerEntry) -> None:
+        self._store.setdefault(entry.run_id, []).append(entry)
+
+    def replace(self, run_id: str, entries: Sequence[RecoveryLedgerEntry]) -> None:
+        self._store[run_id] = list(entries)
+
+
+class FileLedgerBackend(LedgerBackend):
+    """One JSONL file per run. Each line is one entry record."""
+
+    def __init__(self, directory: str) -> None:
+        self._directory = directory
+        os.makedirs(directory, exist_ok=True)
+
+    def _path(self, run_id: str) -> str:
+        safe = run_id.replace("/", "_").replace("\\", "_")
+        return os.path.join(self._directory, f"ledger-{safe}.jsonl")
+
+    def load(self, run_id: str) -> list[RecoveryLedgerEntry]:
+        path = self._path(run_id)
+        if not os.path.exists(path):
+            return []
+        out: list[RecoveryLedgerEntry] = []
+        with open(path, encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                out.append(RecoveryLedgerEntry.from_record(json.loads(line)))
+        return out
+
+    def save(self, entry: RecoveryLedgerEntry) -> None:
+        with open(self._path(entry.run_id), "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry.to_record()) + "\n")
+
+    def replace(self, run_id: str, entries: Sequence[RecoveryLedgerEntry]) -> None:
+        with open(self._path(run_id), "w", encoding="utf-8") as handle:
+            for entry in entries:
+                handle.write(json.dumps(entry.to_record()) + "\n")
+
+
+@dataclass
+class ReconcileReport:
+    """Result of comparing the ledger against the live state."""
+
+    drift: bool
+    details: list[str]
+
+
+class RecoveryLedger:
+    """Append-only, tamper-evident record of recovery decisions for a run."""
+
+    def __init__(
+        self,
+        backend: LedgerBackend,
+        *,
+        lock: LeaseCoordinator | None = None,
+        holder_id: str = "recovery-ledger",
+        ttl: timedelta | None = None,
+    ) -> None:
+        self._backend = backend
+        self._lock = lock
+        self._holder_id = holder_id
+        self._ttl = ttl
+
+    # -- locking ---------------------------------------------------------- #
+
+    @contextmanager
+    def _locked(self, run_id: str) -> Iterator[None]:
+        if self._lock is None:
+            yield
+            return
+        if not self._lock.acquire(run_id, self._holder_id, self._ttl):
+            raise LedgerLockError(f"could not acquire ledger lock for run {run_id!r}")
+        try:
+            yield
+        finally:
+            self._lock.release(run_id, self._holder_id)
+
+    # -- writing ---------------------------------------------------------- #
+
+    def _make_entry(
+        self,
+        run_id: str,
+        *,
+        kind: LedgerEntryKind,
+        contract: RecoveryContract | None = None,
+        gate: str | None = None,
+        anchor: bool = False,
+        note: str = "",
+    ) -> RecoveryLedgerEntry:
+        entries = self._backend.load(run_id)
+        prev = entries[-1].content_hash if entries else GENESIS
+        partial = RecoveryLedgerEntry(
+            entry_id=make_id("ledger"),
+            run_id=run_id,
+            sequence=len(entries),
+            prev_hash=prev,
+            content_hash="",
+            kind=kind.value,
+            contract=contract,
+            gate=gate,
+            anchor=anchor,
+            created_at=utcnow(),
+            note=note,
+        )
+        sealed = replace(partial, content_hash=stable_hash(partial.content()))
+        self._backend.save(sealed)
+        return sealed
+
+    def append_decision(
+        self,
+        run_id: str,
+        contract: RecoveryContract,
+        *,
+        anchor: bool = False,
+        gate: str | None = None,
+        note: str = "",
+    ) -> RecoveryLedgerEntry:
+        """Record a recovery decision (a sealed contract)."""
+        with self._locked(run_id):
+            return self._make_entry(
+                run_id,
+                kind=LedgerEntryKind.DECISION,
+                contract=contract,
+                anchor=anchor,
+                gate=gate,
+                note=note,
+            )
+
+    def record_attempt(self, run_id: str, *, note: str = "") -> int:
+        """Record one recovery attempt and return the new attempt count."""
+        with self._locked(run_id):
+            self._make_entry(run_id, kind=LedgerEntryKind.ATTEMPT, note=note)
+            return self.attempts(run_id)
+
+    def attempts(self, run_id: str) -> int:
+        return sum(1 for e in self.entries(run_id) if e.kind == LedgerEntryKind.ATTEMPT.value)
+
+    def requires_human(self, run_id: str, *, max_attempts: int = 3) -> bool:
+        """True once attempts have reached the human-in-the-loop threshold."""
+        return self.attempts(run_id) >= max_attempts
+
+    def record_gate(self, run_id: str, status: str, *, note: str = "") -> RecoveryLedgerEntry:
+        """Persist a human-in-the-loop gate event (required/approved/rejected)."""
+        with self._locked(run_id):
+            return self._make_entry(run_id, kind=LedgerEntryKind.GATE, gate=status, note=note)
+
+    def pending_gate(self, run_id: str) -> RecoveryLedgerEntry | None:
+        """Return the latest decision still awaiting human approval, if any."""
+        entries = self.entries(run_id)
+        approved = any(
+            e.kind == LedgerEntryKind.GATE.value and e.gate == "approved" for e in entries
+        )
+        if approved:
+            return None
+        for entry in reversed(entries):
+            if entry.kind == LedgerEntryKind.DECISION.value and entry.gate == "required":
+                return entry
+        return None
+
+    # -- reading ---------------------------------------------------------- #
+
+    def entries(self, run_id: str) -> list[RecoveryLedgerEntry]:
+        return sorted(self._backend.load(run_id), key=lambda e: e.sequence)
+
+    def last_decision(self, run_id: str) -> RecoveryLedgerEntry | None:
+        decisions = [e for e in self.entries(run_id) if e.kind == LedgerEntryKind.DECISION.value]
+        return decisions[-1] if decisions else None
+
+    def verify(self, run_id: str) -> tuple[bool, int]:
+        """Return (chain_ok, trusted_through_index).
+
+        ``trusted_through_index`` is the number of contiguous entries that still
+        verify from the start; if ``chain_ok`` is False it is the first broken
+        index, so a reader knows exactly where trust ends.
+        """
+        prev = GENESIS
+        for index, entry in enumerate(self.entries(run_id)):
+            if entry.prev_hash != prev or not entry.verify():
+                return (False, index)
+            prev = entry.content_hash
+        return (True, len(self.entries(run_id)))
+
+    # -- compaction ------------------------------------------------------- #
+
+    def compact(self, run_id: str, *, keep: int = 50, keep_anchors: bool = True) -> int:
+        """Drop old entries but keep the newest ``keep`` and any anchors.
+
+        The surviving entries are re-sealed into a fresh chain (the first kept
+        entry links to ``GENESIS``), so the ledger stays tamper-evident after
+        compaction. Returns the number of entries removed.
+        """
+        if keep < 1:
+            keep = 1
+        with self._locked(run_id):
+            entries = self.entries(run_id)
+            if len(entries) <= keep:
+                return 0
+            newest_ids = {e.entry_id for e in entries[-keep:]}
+            kept = list(entries[-keep:])
+            for entry in entries[:-keep]:
+                if entry.entry_id in newest_ids:
+                    continue
+                if keep_anchors and entry.anchor:
+                    kept.append(entry)
+            kept.sort(key=lambda e: e.sequence)
+
+            prev = GENESIS
+            rechained: list[RecoveryLedgerEntry] = []
+            for entry in kept:
+                rebuilt = replace(entry, prev_hash=prev, content_hash="")
+                rebuilt = replace(rebuilt, content_hash=stable_hash(rebuilt.content()))
+                rechained.append(rebuilt)
+                prev = rebuilt.content_hash
+
+            self._backend.replace(run_id, rechained)
+            return len(entries) - len(rechained)
+
+    # -- reconciliation --------------------------------------------------- #
+
+    def reconcile(self, run_id: str, state: object) -> ReconcileReport:
+        """Detect drift between the ledger and the live state.
+
+        Two checks: the ledger chain must verify, and the live state must not be
+        behind the checkpoint version the latest decision was sealed against
+        (a state older than its own contract implies rollback or corruption).
+        """
+        details: list[str] = []
+        ok, trusted = self.verify(run_id)
+        if not ok:
+            details.append(f"ledger chain broken at index {trusted}")
+
+        last = self.last_decision(run_id)
+        if last is None:
+            details.append("no ledger decision to reconcile against")
+            return ReconcileReport(drift=bool(details), details=details)
+        if last.contract is None:
+            details.append("latest decision carries no contract to compare")
+            return ReconcileReport(drift=bool(details), details=details)
+
+        state_version = getattr(state, "version", None)
+        if state_version is None:
+            details.append("live state exposes no version to compare")
+        elif state_version < last.contract.checkpoint_version:
+            details.append(
+                f"live state version {state_version} is behind the contract "
+                f"checkpoint v{last.contract.checkpoint_version}"
+            )
+        return ReconcileReport(drift=bool(details), details=details)
