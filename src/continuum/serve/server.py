@@ -314,6 +314,7 @@ def _decision_payload(decision: Any, *, goal: str) -> dict[str, Any]:
             "failed": decision.state.progress.failed,
             "total": decision.state.progress.total,
         },
+        "tail_evidence": decision.tail_evidence,
         "contract": decision.contract.model_dump(mode="json"),
         "contract_text": render_contract(decision.contract),
         "report": decision.render(),
