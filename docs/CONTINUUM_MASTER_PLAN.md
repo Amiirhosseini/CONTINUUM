@@ -178,6 +178,9 @@ remove existing tests or weaken existing guarantees.**
 Goal: make recovery decisions explainable and make provenance/verification
 semantics internally consistent, without changing existing recovery behavior.
 
+See also docs/recovery_walkthrough.md for an end-to-end trace of one failure
+from adapter error to sealed contract, generated from real output.
+
 ### 4.1 What changed
 
 - `src/continuum/models.py` (`RecoveryContract`): additive `evidence: list[str]`
