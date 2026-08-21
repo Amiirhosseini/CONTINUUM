@@ -38,6 +38,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from continuum.actions.ledger import ActionLedger
+from continuum.analysis.depends import DependencyGraph as SourceDependencyGraph
 from continuum.checkpoint.manager import CheckpointManager, RestoredRun
 from continuum.environment.diff import EnvironmentDiff
 from continuum.events import EventType
@@ -93,6 +94,7 @@ class RecoveryDecision:
     restored: RestoredRun
     uncertain_actions: tuple[Action, ...] = ()
     rationale: tuple[str, ...] = ()
+    impacted_files: frozenset[str] = frozenset()
 
     @property
     def state(self) -> SemanticState:
@@ -178,6 +180,7 @@ class RecoveryEngine:
         expected_model: str | None = None,
         replay: bool = True,
         scope: Iterable[str] | None = None,
+        source_graph: SourceDependencyGraph | None = None,
     ) -> RecoveryDecision:
         """Decide how ``run_id`` may resume, without changing anything.
 
@@ -185,6 +188,16 @@ class RecoveryEngine:
         resulting repair plan are confined to those resources' derivation
         subtree; the rest of the state is left exactly as it was. The issued
         contract records the scope so the localization is auditable.
+
+        Scoping also applies to the action ledger. An uncertain side effect
+        explicitly tagged via ``dep_scope`` to a dependency outside the scope
+        cannot have invalidated the part being resumed, so it does not block
+        this decision. Untagged actions stay blocking: they could have touched
+        anything, which is the conservative reading.
+
+        Passing ``source_graph`` (the source-level graph from
+        :mod:`continuum.analysis`) records on the returned decision every file
+        whose imports belong to a scoped dependency.
         """
         restored = self._manager.restore(run_id, replay=replay)
         checkpoint_environment = restored.checkpoint.environment if restored.checkpoint else None
@@ -208,12 +221,30 @@ class RecoveryEngine:
         )
 
         ledger = ActionLedger(self.storage, run_id)
-        uncertain = tuple(
+        all_uncertain = tuple(
             a
             for a in ledger.all()
             if a.status
             in (ActionStatus.UNKNOWN, ActionStatus.STARTED, ActionStatus.REQUIRES_REVIEW)
         )
+        # An action tagged to a dependency outside the repair scope cannot have
+        # invalidated the part being resumed, so it does not block here. An
+        # untagged action could have touched anything and stays blocking.
+        if scope is None:
+            uncertain = all_uncertain
+        else:
+            allowed = frozenset(scope)
+            uncertain = tuple(
+                a for a in all_uncertain if a.dep_scope is None or a.dep_scope in allowed
+            )
+
+        impacted_files: frozenset[str] = frozenset()
+        if source_graph is not None and scope is not None:
+            impacted_files = frozenset(
+                str(path)
+                for resource in frozenset(scope)
+                for path in source_graph.files_using(resource)
+            )
 
         plan = plan_repairs(
             validation.report.statuses,
@@ -242,6 +273,7 @@ class RecoveryEngine:
             restored=restored,
             uncertain_actions=uncertain,
             rationale=rationale,
+            impacted_files=impacted_files,
         )
 
     # -- the decision rule ------------------------------------------------ #
@@ -254,12 +286,14 @@ class RecoveryEngine:
         current_environment: EnvironmentSnapshot | None = None,
         expected_model: str | None = None,
         replay: bool = True,
+        source_graph: SourceDependencyGraph | None = None,
     ) -> RecoveryDecision:
         """Assess ``run_id`` confined to the derivation subtree of ``resources``.
 
         A thin wrapper over :meth:`assess` that passes ``scope`` through; kept as
         a named entry point so callers express intent (localized recovery) rather
-        than remembering the keyword.
+        than remembering the keyword. ``source_graph`` forwards to
+        :meth:`assess` for impacted-file reporting.
         """
         return self.assess(
             run_id,
@@ -267,6 +301,7 @@ class RecoveryEngine:
             expected_model=expected_model,
             replay=replay,
             scope=resources,
+            source_graph=source_graph,
         )
 
     def _decide(
