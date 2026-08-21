@@ -42,15 +42,52 @@ def render_dashboard_html(storage: Storage) -> str:
 </table></body></html>"""
 
 
-def serve_dashboard(storage: Storage, port: int = 8000) -> None:
-    html_content = render_dashboard_html(storage)
+def render_run_detail_html(storage: Storage, run_id: str) -> str:
+    try:
+        run = storage.get_run(run_id)
+    except Exception as exc:
+        return f"""<!doctype html><html><body><h1>Run not found</h1><p>{html.escape(str(exc))}</p></body></html>"""
+    engine = RecoveryEngine(storage)
+    try:
+        decision = engine.assess(run_id)
+        contract_html = html.escape(decision.contract.model_dump_json(indent=2))
+        validation_rows = "".join(
+            f"<tr><td>{html.escape(e.component.value)}</td><td>{html.escape(e.status.value)}</td><td>{html.escape(e.detail or '')}</td></tr>"
+            for e in decision.validation.report.statuses
+        )
+        ledger_html = f"<pre>{contract_html}</pre>"
+        validation_html = f'<table border="1" cellpadding="4"><tr><th>Component</th><th>Status</th><th>Detail</th></tr>{validation_rows}</table>'
+    except Exception as exc:
+        ledger_html = f"<p>{html.escape(str(exc))}</p>"
+        validation_html = ""
+    events = storage.read_events(run_id)
+    events_rows = "".join(
+        f"<tr><td>{e.sequence}</td><td>{html.escape(e.type.value)}</td><td>{html.escape(str(e.payload))}</td></tr>"
+        for e in events[-20:]
+    )
+    events_html = f'<table border="1" cellpadding="4"><tr><th>Seq</th><th>Type</th><th>Payload</th></tr>{events_rows}</table>'
+    return f"""<!doctype html>
+<html><head><meta charset=\"utf-8\"><title>Run {html.escape(run_id)}</title></head>
+<body><h1>Run {html.escape(run_id)}</h1>
+<p>Goal: {html.escape(run.goal)} | Status: {html.escape(run.status.value)}</p>
+<h2>Contract</h2>{ledger_html}
+<h2>Validation</h2>{validation_html}
+<h2>Recent events</h2>{events_html}
+<p><a href=\"/\">Back to dashboard</a></p></body></html>"""
 
+
+def serve_dashboard(storage: Storage, port: int = 8000) -> None:
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802
+            if self.path.startswith("/runs/"):
+                run_id = self.path.split("/runs/")[1].split("?")[0].split("/")[0]
+                content = render_run_detail_html(storage, run_id)
+            else:
+                content = render_dashboard_html(storage)
             self.send_response(200)
             self.send_header("Content-type", "text/html; charset=utf-8")
             self.end_headers()
-            self.wfile.write(html_content.encode("utf-8"))
+            self.wfile.write(content.encode("utf-8"))
 
         def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
             return
