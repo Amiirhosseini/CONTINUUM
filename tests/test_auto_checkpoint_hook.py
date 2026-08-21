@@ -1,6 +1,13 @@
+from pathlib import Path
+
 from continuum.checkpoint import CheckpointManager
 from continuum.events import EventType
-from continuum.hooks import make_async_auto_checkpoint_hook, make_auto_checkpoint_hook
+from continuum.hooks import (
+    count_sections,
+    make_async_auto_checkpoint_hook,
+    make_auto_checkpoint_hook,
+    make_file_derived_progress_hook,
+)
 from continuum.models import Run
 from continuum.storage import SQLiteStorage
 
@@ -36,3 +43,24 @@ def test_async_hook_does_not_block_and_still_checkpoints() -> None:
 
     time.sleep(0.2)
     assert storage.latest_checkpoint("run_1") is not None
+
+
+def test_count_sections_counts_headings(tmp_path: Path) -> None:
+    file = tmp_path / "guide.md"
+    file.write_text("# Title\n\n## A\n\n## B\n\nText\n", encoding="utf-8")
+    assert count_sections(file) == 2
+
+
+def test_file_derived_hook_records_from_file(tmp_path: Path) -> None:
+    storage = SQLiteStorage(":memory:")
+    storage.create_run(Run(run_id="run_1", goal="g"))
+    storage.append_event("run_1", EventType.RUN_STARTED, {"goal": "g", "total": 8})
+    manager = CheckpointManager(storage)
+    file = tmp_path / "guide.md"
+    file.write_text("## 1\n## 2\n## 3\n", encoding="utf-8")
+    hook = make_file_derived_progress_hook(manager, "run_1", file, total=8)
+    hook()
+    from continuum.state.semantic import project
+
+    state = project("run_1", storage.read_events("run_1"))
+    assert state.progress.completed == 3

@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import concurrent.futures
 from collections.abc import Callable
+from pathlib import Path
 
 from continuum.checkpoint import CheckpointManager
-from continuum.models import EnvironmentSnapshot
+from continuum.events import EventType
+from continuum.models import EnvironmentSnapshot, Origin
 
 
 def make_auto_checkpoint_hook(
@@ -56,6 +58,45 @@ def make_async_auto_checkpoint_hook(
 
     def hook() -> bool:
         executor.submit(manager.maybe_checkpoint, run_id, environment=environment)
+        return True
+
+    return hook
+
+
+def count_sections(file_path: str | Path) -> int:
+    """Count markdown sections by ^##  headings, the file as ground truth."""
+    try:
+        text = Path(file_path).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return 0
+    return sum(1 for line in text.splitlines() if line.startswith("## "))
+
+
+def make_file_derived_progress_hook(
+    manager: CheckpointManager,
+    run_id: str,
+    file_path: str | Path,
+    total: int,
+    *,
+    environment: EnvironmentSnapshot | None = None,
+) -> Callable[[], bool]:
+    """Derive completed from the file and record it atomically with a checkpoint.
+
+    After each file write, count ^##  headings in file_path and append a
+    TASK_UPDATED with that count, then maybe checkpoint. The file is ground
+    truth, the ledger just mirrors it, so the counter can never run ahead as
+    it did in issue 188. Returns True when progress was recorded.
+    """
+
+    def hook() -> bool:
+        completed = count_sections(file_path)
+        manager.storage.append_event(
+            run_id,
+            EventType.TASK_UPDATED,
+            {"completed": completed, "total": total},
+            source=Origin.EXTERNAL_AGENT,
+        )
+        manager.maybe_checkpoint(run_id, environment=environment)
         return True
 
     return hook
