@@ -72,6 +72,19 @@ def count_sections(file_path: str | Path) -> int:
     return sum(1 for line in text.splitlines() if line.startswith("## "))
 
 
+def get_tail_section(file_path: str | Path) -> str:
+    """Return the last ^##  section, about 180 words, for style matching."""
+    try:
+        text = Path(file_path).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return ""
+    parts = text.split("## ")
+    if len(parts) <= 1:
+        return ""
+    tail = "## " + parts[-1]
+    return tail[:2000]
+
+
 def make_file_derived_progress_hook(
     manager: CheckpointManager,
     run_id: str,
@@ -96,6 +109,18 @@ def make_file_derived_progress_hook(
             {"completed": completed, "total": total},
             source=Origin.EXTERNAL_AGENT,
         )
+        tail = get_tail_section(file_path)
+        if tail:
+            manager.storage.append_event(
+                run_id,
+                EventType.EVIDENCE_ADDED,
+                {
+                    "evidence_id": f"tail_{completed}",
+                    "summary": tail[:500],
+                    "source": str(file_path),
+                },
+                source=Origin.EXTERNAL_AGENT,
+            )
         manager.maybe_checkpoint(run_id, environment=environment)
         return True
 
