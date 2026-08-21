@@ -45,7 +45,7 @@ def test_evidence_derived_from_validation_not_spoofed() -> None:
 
 
 def test_empty_evidence_still_verifies_but_is_weaker() -> None:
-    from continuum.models import RecoveryContract, RecoverySafety
+    from continuum.models import RecoveryContract
     from continuum.recovery.contract import seal_contract
 
     storage = SQLiteStorage(":memory:")
