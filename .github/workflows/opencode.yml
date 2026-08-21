@@ -32,3 +32,4 @@ jobs:
           model: opencode/muse-spark-1.2-contributor-free
           use_github_token: true
           mentions: "/c"
+          share: false
