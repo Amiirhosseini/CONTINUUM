@@ -17,7 +17,7 @@ believed, and what is neither.
 
 ## Verified
 
-981 tests pass (9 skipped), on Python 3.13 with `mcp 2.0.0` installed. The MCP
+991 tests pass (9 skipped), on Python 3.13 with `mcp 2.0.0` installed. The MCP
 server tests are no longer excluded: they load and pass against `mcp>=2.0` (the
 version pinned in `pyproject.toml`). An earlier note recorded them as failing to
 load; that incompatibility is gone with the newer SDK. CI was green on Python

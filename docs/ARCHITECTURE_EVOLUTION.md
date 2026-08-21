@@ -861,3 +861,43 @@ reproducible evidence. It rests on two layers:
   complementary, not merged.
 - The large-state latency scenario is a smoke check (< 1s), not a tuned
   performance contract.
+
+## 18. Wiring dep_scope and the source graph into localized recovery
+
+### 18.1 What changed
+
+Phases 2 and 3 built the pieces; this closes the loop so localized repair is
+functional end to end rather than two standalone modules:
+
+- **Scope-aware action ledger (#103, #184).** When `assess` is given a scope,
+  an uncertain side effect explicitly tagged via `Action.dep_scope` to a
+  dependency outside the scope no longer blocks the scoped decision: it cannot
+  have invalidated the part being resumed. Untagged actions stay blocking,
+  because they could have touched anything. This keeps the engine's
+  conservative bias while making scoping meaningful for side effects.
+- **Impacted source files on decisions (#100, #184).** `assess` and
+  `assess_scoped` accept the source-level `DependencyGraph`
+  (`continuum.analysis.depends`) and record every file whose imports belong to
+  a scoped dependency as `RecoveryDecision.impacted_files`. A corrupted
+  dependency now yields both the invalidated derivation subtree and the source
+  files that own it.
+
+### 18.2 What did not change
+
+- The engine remains read-only.
+- Whole-state assessment (`scope=None`) is unchanged and still considers every
+  uncertain action regardless of tagging.
+
+### 18.3 Tests
+
+- `tests/test_dep_scope_recovery.py` (5 tests): out-of-scope tagged side effect
+  does not block, in-scope tagged side effect blocks, untagged blocks
+  conservatively, whole-state sees everything, and impacted files match exactly
+  the files importing the broken dependency.
+- Phase 6 gains the `out_of_scope_side_effect` scenario, asserting both the
+  filtered and conservative paths through the real engine.
+
+### 18.4 Known limitations
+
+- `impacted_files` reports files by import ownership only; it does not attempt
+  runtime provenance or trace which files an action actually wrote.

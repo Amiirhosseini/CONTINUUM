@@ -8,6 +8,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Localized recovery is now dep_scope-aware and file-aware (#184).**
+  `RecoveryEngine.assess` respects `Action.dep_scope` when a scope is given: an
+  uncertain side effect tagged to a dependency outside the scope no longer
+  blocks that scoped decision, while untagged actions stay blocking. Passing the
+  source-level `DependencyGraph` to `assess`/`assess_scoped` surfaces every file
+  importing a scoped dependency as `RecoveryDecision.impacted_files`. Phase 6
+  gains an `out_of_scope_side_effect` scenario covering both paths.
+
+### Added
+
 - **Leftover issue sweep (Phases 2, 3, and provenance).** Closed the remaining
   open issues from the master plan with working, tested code:
   - Source-level `DependencyGraph` (`continuum.analysis.depends`): reads
