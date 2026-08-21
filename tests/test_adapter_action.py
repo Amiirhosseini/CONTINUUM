@@ -62,7 +62,9 @@ def test_telemetry_receives_action_and_result() -> None:
     adapter = _adapter()
     seen: list[tuple[AdapterAction, AdapterResult]] = []
     action = AdapterAction(name="pkg.install", params={"x": 1}, dep_scope="numpy")
-    result = run_action(adapter, "run_1", action, lambda: 7, on_event=lambda a, r: seen.append((a, r)))
+    result = run_action(
+        adapter, "run_1", action, lambda: 7, on_event=lambda a, r: seen.append((a, r))
+    )
     assert len(seen) == 1
     observed_action, observed_result = seen[0]
     assert observed_action == action
@@ -92,6 +94,8 @@ def test_raising_observer_cannot_break_the_action() -> None:
     def bad_observer(a: AdapterAction, r: AdapterResult) -> None:
         raise RuntimeError("observer bug")
 
-    result = run_action(adapter, "run_1", AdapterAction(name="t"), lambda: 42, on_event=bad_observer)
+    result = run_action(
+        adapter, "run_1", AdapterAction(name="t"), lambda: 42, on_event=bad_observer
+    )
     assert result.status == "completed"
     assert result.output == 42
