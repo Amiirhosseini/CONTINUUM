@@ -19,9 +19,11 @@ from continuum.recovery.ledger import (
     RecoveryLedger,
     RecoveryLedgerEntry,
 )
+from continuum.recovery.cleanup import cleanup_ephemeral_artifacts
 from continuum.recovery.planner import RepairKind, RepairPlan, RepairStep, plan_repairs
 
 __all__ = [
+    "cleanup_ephemeral_artifacts",
     "SEVERITY",
     "DependencyGraph",
     "FileLedgerBackend",
