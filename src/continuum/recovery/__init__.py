@@ -1,5 +1,6 @@
 """Recovery decisions, repair planning and contracts."""
 
+from continuum.recovery.cleanup import cleanup_ephemeral_artifacts
 from continuum.recovery.contract import (
     build_contract,
     render_contract,
@@ -19,7 +20,6 @@ from continuum.recovery.ledger import (
     RecoveryLedger,
     RecoveryLedgerEntry,
 )
-from continuum.recovery.cleanup import cleanup_ephemeral_artifacts
 from continuum.recovery.planner import RepairKind, RepairPlan, RepairStep, plan_repairs
 
 __all__ = [
