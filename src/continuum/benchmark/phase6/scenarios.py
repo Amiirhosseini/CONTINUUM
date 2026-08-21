@@ -40,6 +40,7 @@ from continuum.recovery import (
 )
 from continuum.recovery.ledger import LedgerLockError
 from continuum.storage import SQLiteStorage
+from continuum.testing import environment_fixture
 
 
 def _new_store() -> SQLiteStorage:
@@ -101,22 +102,20 @@ def _contract(version: int = 0) -> RecoveryContract:
 
 
 def scenario_single_dependency_corruption(ctx: ScenarioContext) -> None:
-    store = _new_store()
-    seed_two(store)
-    decision = RecoveryEngine(store).assess(
-        "run_1", current_environment=env_multi(dataset="v4", other="v3"), scope={"dataset"}
-    )
+    with environment_fixture(dependencies=("dataset", "other")) as fx:
+        decision = fx.engine.assess(
+            fx.run_id, current_environment=fx.capture(dataset="v2"), scope={"dataset"}
+        )
     assert "dataset" in str(decision.contract.invalidated)
     other = decision.state.dependency("other")
     assert other is not None and other.status is StateStatus.VALID
 
 
 def scenario_multi_dependency_corruption(ctx: ScenarioContext) -> None:
-    store = _new_store()
-    seed_two(store)
-    decision = RecoveryEngine(store).assess(
-        "run_1", current_environment=env_multi(dataset="v4", other="v4")
-    )
+    with environment_fixture(dependencies=("dataset", "other")) as fx:
+        decision = fx.engine.assess(
+            fx.run_id, current_environment=fx.capture(dataset="v2", other="v2")
+        )
     assert "dataset" in str(decision.contract.invalidated)
     assert "other" in str(decision.contract.invalidated)
 
