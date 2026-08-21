@@ -36,10 +36,19 @@ class GenericAgentAdapter(AgentAdapter):
     or interact directly with storage handles, event log streams, or ledger objects.
     """
 
-    def __init__(self, storage: Storage, *, engine: RecoveryEngine | None = None) -> None:
+    def __init__(
+        self,
+        storage: Storage,
+        *,
+        engine: RecoveryEngine | None = None,
+        auto_file: str | None = None,
+        auto_total: int | None = None,
+    ) -> None:
         self.storage = storage
         self.manager = CheckpointManager(storage)
         self.engine = engine or RecoveryEngine(storage)
+        self.auto_file = auto_file
+        self.auto_total = auto_total
 
     def start_run(
         self,
@@ -72,6 +81,22 @@ class GenericAgentAdapter(AgentAdapter):
         # to invalidate. Mirrors the MCP server and serve sidecar (issue #25).
         if environment is not None:
             self._declare_dependencies(run_id, environment)
+        if self.auto_file is not None and self.auto_total is not None:
+            from pathlib import Path
+
+            from continuum.events import EventType as _EventType
+            from continuum.hooks import count_sections as _count_sections
+            from continuum.models import Origin as _Origin
+
+            completed = _count_sections(Path(self.auto_file))
+            self.storage.append_event(
+                run_id,
+                _EventType.TASK_UPDATED,
+                {"completed": completed, "total": self.auto_total},
+                source=_Origin.EXTERNAL_AGENT,
+            )
+            # Reproject so the checkpoint captures the derived progress
+            state = project(run_id, self.storage.read_events(run_id))
         return self.manager.checkpoint(
             run_id,
             state=state,
