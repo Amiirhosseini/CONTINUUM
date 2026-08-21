@@ -13,9 +13,7 @@ def test_every_recovery_mutation_is_ledgered() -> None:
     mgr = CheckpointManager(storage)
     ledger = RecoveryLedger(MemoryLedgerBackend())
 
-    checkpoint = mgr.checkpoint_on_recovery(
-        "run_1", reason="test anchor", environment=None
-    )
+    checkpoint = mgr.checkpoint_on_recovery("run_1", reason="test anchor", environment=None)
     assert checkpoint.trigger == CheckpointTrigger.RECOVERY
 
     contract = RecoveryContract(
