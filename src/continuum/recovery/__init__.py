@@ -20,10 +20,13 @@ from continuum.recovery.ledger import (
     RecoveryLedger,
     RecoveryLedgerEntry,
 )
+from continuum.recovery.limits import RecoveryTimeoutError, run_with_limits
 from continuum.recovery.planner import RepairKind, RepairPlan, RepairStep, plan_repairs
 
 __all__ = [
+    "RecoveryTimeoutError",
     "cleanup_ephemeral_artifacts",
+    "run_with_limits",
     "SEVERITY",
     "DependencyGraph",
     "FileLedgerBackend",
