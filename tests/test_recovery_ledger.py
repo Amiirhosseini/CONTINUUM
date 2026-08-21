@@ -101,6 +101,53 @@ def test_file_backend_round_trips(tmp_path) -> None:  # type: ignore[no-untyped-
     assert reopened.verify("run_1")[0] is True
 
 
+def test_pending_gate_survives_prior_approval(ledger: RecoveryLedger) -> None:
+    # Regression for #176: an approval for an earlier decision must not clear
+    # the gate of a later gate-required decision.
+    ledger.append_decision("run_1", _contract(0), gate="required")
+    ledger.record_gate("run_1", "approved")
+    second = ledger.append_decision("run_1", _contract(1), gate="required")
+
+    pending = ledger.pending_gate("run_1")
+    assert pending is not None
+    assert pending.entry_id == second.entry_id
+
+
+def test_requires_human_survives_compaction(ledger: RecoveryLedger) -> None:
+    # Regression for #177: once the attempt threshold is crossed the escalation
+    # marker is anchored, so compaction cannot silently reset it.
+    for _ in range(3):
+        ledger.record_attempt("run_1", max_attempts=3)
+    assert ledger.requires_human("run_1", max_attempts=3) is True
+
+    ledger.append_decision("run_1", _contract(0))
+    ledger.compact("run_1", keep=1)
+    assert ledger.attempts("run_1") == 0
+    assert ledger.requires_human("run_1", max_attempts=3) is True
+
+
+def test_reconcile_uses_high_water_mark(ledger: RecoveryLedger) -> None:
+    # Regression for #178: a later decision with a lower checkpoint version
+    # must not lower the watermark drift is measured against.
+    ledger.append_decision("run_1", _contract(version=10))
+    ledger.append_decision("run_1", _contract(version=6))
+
+    report = ledger.reconcile("run_1", SimpleNamespace(version=7))
+    assert report.drift is True
+    assert any("v10" in detail for detail in report.details)
+
+
+def test_file_backend_defers_directory_creation(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    # Regression for #180 (constructor side effects): constructing a backend
+    # must not touch the filesystem until something is written.
+    target = tmp_path / "not-yet-created"
+    FileLedgerBackend(str(target))
+    assert not target.exists()
+
+    RecoveryLedger(FileLedgerBackend(str(target))).append_decision("run_1", _contract(0))
+    assert target.exists()
+
+
 def test_append_under_cross_process_lock() -> None:
     ledger = RecoveryLedger(MemoryLedgerBackend(), lock=InMemoryLeaseCoordinator())
     ledger.append_decision("run_1", _contract())
