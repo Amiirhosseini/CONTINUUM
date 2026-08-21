@@ -14,6 +14,7 @@ import types
 from dataclasses import replace
 from typing import Any, NoReturn
 
+from continuum.actions.ledger import ActionLedger
 from continuum.adapters import recover, register_adapter
 from continuum.adapters.base import AgentAdapter
 from continuum.benchmark.phase6.harness import ScenarioContext, ScenarioFn
@@ -25,6 +26,7 @@ from continuum.models import (
     EnvironmentSnapshot,
     EnvResource,
     RecoveryContract,
+    RecoveryMode,
     RecoverySafety,
     Run,
     SemanticState,
@@ -151,6 +153,27 @@ def scenario_recovery_lease_exhaustion(ctx: ScenarioContext) -> None:
     ctx.attempts = ledger.attempts("run_1")
     assert ledger.attempts("run_1") == 3
     assert ledger.requires_human("run_1", max_attempts=3) is True
+
+
+def scenario_out_of_scope_side_effect(ctx: ScenarioContext) -> None:
+    """An uncertain side effect tagged outside the repair scope must not block."""
+    store = _new_store()
+    seed_two(store)
+    ledger = ActionLedger(store, "run_1")
+    ledger.claim("model.push", {"x": 1}, dep_scope="other")
+    decision = RecoveryEngine(store).assess(
+        "run_1", current_environment=env_multi(dataset="v4", other="v3"), scope={"dataset"}
+    )
+    assert decision.mode is RecoveryMode.REPAIR_AND_RESUME
+    assert decision.uncertain_actions == ()
+
+    # Conservative counterpart: an untagged action still blocks the scoped call.
+    ledger.claim("notify.slack", {"x": 2})
+    rescope = RecoveryEngine(store).assess(
+        "run_1", current_environment=env_multi(dataset="v4", other="v3"), scope={"dataset"}
+    )
+    assert rescope.mode is not RecoveryMode.RESUME
+    assert len(rescope.uncertain_actions) == 1
 
 
 def scenario_adapter_failure_across_environments(ctx: ScenarioContext) -> None:
@@ -280,6 +303,7 @@ ALL_SCENARIOS: list[tuple[str, ScenarioFn]] = [
     ("external_edit_drift", scenario_external_edit_drift),
     ("ledger_tamper_detected", scenario_ledger_tamper_detected),
     ("recovery_lease_exhaustion", scenario_recovery_lease_exhaustion),
+    ("out_of_scope_side_effect", scenario_out_of_scope_side_effect),
     ("adapter_failure_across_environments", scenario_adapter_failure_across_environments),
     ("checkpoint_rollback_correctness", scenario_checkpoint_rollback_correctness),
     ("concurrent_recovery_safety", scenario_concurrent_recovery_safety),
