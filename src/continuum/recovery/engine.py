@@ -132,7 +132,7 @@ class RecoveryDecision:
             mark = "[ok]" if entry.status is StateStatus.VALID else "[!!]"
             label = entry.component.value.replace("_", " ")
             identifier = f" {entry.component_id}" if entry.component_id else ""
-            detail = f" — {entry.detail}" if entry.detail else ""
+            detail = f" - {entry.detail}" if entry.detail else ""
             lines.append(f"  {mark} {label}{identifier}{detail}")
 
         if self.uncertain_actions:

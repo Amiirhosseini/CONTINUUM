@@ -96,7 +96,7 @@ class RepairStep(BaseModel):
 
     def render(self) -> str:
         mark = "[human]" if self.requires_human else "[auto] "
-        detail = f" — {self.reason}" if self.reason else ""
+        detail = f" - {self.reason}" if self.reason else ""
         return f"{mark} {self.kind.value} {self.target}{detail}"
 
 

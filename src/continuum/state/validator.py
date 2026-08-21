@@ -88,7 +88,7 @@ class ValidationOutcome:
             mark = symbols.get(entry.status, "[!!]")
             label = entry.component.value.replace("_", " ")
             identifier = f" {entry.component_id}" if entry.component_id else ""
-            detail = f" — {entry.detail}" if entry.detail else ""
+            detail = f" - {entry.detail}" if entry.detail else ""
             lines.append(f"{mark} {label}{identifier}: {entry.status}{detail}")
         lines.append("")
         lines.append(f"Safe to resume: {'yes' if self.safe else 'no'}")
