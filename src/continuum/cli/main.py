@@ -985,6 +985,19 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("stdio",),
         help="wire transport (default: stdio)",
     )
+
+    def cmd_dashboard(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:  # type: ignore[no-untyped-def]
+        from continuum.dashboard import serve_dashboard as _serve
+
+        print(f"Serving dashboard at http://localhost:{args.port}", file=out)
+        _serve(storage, port=args.port)
+        return 0
+
+    dashboard = add("dashboard", cmd_dashboard, "Serve the dashboard (presentation over run data).")
+    dashboard.add_argument(
+        "--port", type=int, default=8000, help="port to listen on (default: 8000)"
+    )
+
     return parser
 
 
