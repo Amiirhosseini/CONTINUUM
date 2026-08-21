@@ -877,6 +877,12 @@ def build_server(
             }
         )
 
+    if os.environ.get("CONTINUUM_MCP_SLIM") == "1":
+        keep = {"continuum_resume", "continuum_validate", "continuum_confirm"}
+        for name in list(server._tool_manager._tools.keys()):
+            if name not in keep:
+                del server._tool_manager._tools[name]
+
     return server, ctx
 
 
