@@ -7,14 +7,20 @@ live state has not drifted from those decisions.
 
 Three properties matter and the design defends all three:
 
-* Append-only. Entries are never edited in place. A decision that was sealed
-  stays sealed; corrections are new entries, not overwrites.
+* Append-only between compactions. Entries are never edited in place; corrections
+  are new entries, not overwrites. The one sanctioned rewrite is ``compact``,
+  which drops a bounded prefix and re-seals the surviving chain from
+  ``GENESIS``: entry content is preserved but hashes change, so tamper-evidence
+  holds only from the most recent compaction forward. An auditor holding a
+  pre-compaction copy cannot reconcile it against the compacted file.
 * Tamper-evident. Each entry carries the previous entry's hash, so rewriting any
   historical entry breaks the chain from that point on. ``verify`` reports the
   index of the last entry it still trusts.
 * Compaction with anchor preservation. A long run accumulates entries. ``compact``
   drops the oldest non-anchor entries but re-seals the remaining chain, so the
   ledger stays bounded without losing its audit anchors or its tamper-evidence.
+  Safety signals that must outlive compaction (such as the human-escalation
+  marker written by ``record_attempt``) are recorded as anchors.
 
 The ledger is storage-agnostic: it talks to a small ``LedgerBackend`` (in-memory
 for tests, JSONL file for real use). For cross-process safety it can take a
@@ -50,6 +56,7 @@ __all__ = [
 ]
 
 GENESIS = "genesis"
+HUMAN_REQUIRED = "human_required"
 
 
 class LedgerError(RuntimeError):
@@ -154,11 +161,13 @@ class FileLedgerBackend(LedgerBackend):
 
     def __init__(self, directory: str) -> None:
         self._directory = directory
-        os.makedirs(directory, exist_ok=True)
 
     def _path(self, run_id: str) -> str:
         safe = run_id.replace("/", "_").replace("\\", "_")
         return os.path.join(self._directory, f"ledger-{safe}.jsonl")
+
+    def _ensure_directory(self) -> None:
+        os.makedirs(self._directory, exist_ok=True)
 
     def load(self, run_id: str) -> list[RecoveryLedgerEntry]:
         path = self._path(run_id)
@@ -174,10 +183,12 @@ class FileLedgerBackend(LedgerBackend):
         return out
 
     def save(self, entry: RecoveryLedgerEntry) -> None:
+        self._ensure_directory()
         with open(self._path(entry.run_id), "a", encoding="utf-8") as handle:
             handle.write(json.dumps(entry.to_record()) + "\n")
 
     def replace(self, run_id: str, entries: Sequence[RecoveryLedgerEntry]) -> None:
+        self._ensure_directory()
         with open(self._path(run_id), "w", encoding="utf-8") as handle:
             for entry in entries:
                 handle.write(json.dumps(entry.to_record()) + "\n")
@@ -223,9 +234,10 @@ class RecoveryLedger:
 
     # -- writing ---------------------------------------------------------- #
 
-    def _make_entry(
+    def _seal_and_save(
         self,
         run_id: str,
+        entries: Sequence[RecoveryLedgerEntry],
         *,
         kind: LedgerEntryKind,
         contract: RecoveryContract | None = None,
@@ -233,7 +245,6 @@ class RecoveryLedger:
         anchor: bool = False,
         note: str = "",
     ) -> RecoveryLedgerEntry:
-        entries = self._backend.load(run_id)
         prev = entries[-1].content_hash if entries else GENESIS
         partial = RecoveryLedgerEntry(
             entry_id=make_id("ledger"),
@@ -251,6 +262,26 @@ class RecoveryLedger:
         sealed = replace(partial, content_hash=stable_hash(partial.content()))
         self._backend.save(sealed)
         return sealed
+
+    def _make_entry(
+        self,
+        run_id: str,
+        *,
+        kind: LedgerEntryKind,
+        contract: RecoveryContract | None = None,
+        gate: str | None = None,
+        anchor: bool = False,
+        note: str = "",
+    ) -> RecoveryLedgerEntry:
+        return self._seal_and_save(
+            run_id,
+            self._backend.load(run_id),
+            kind=kind,
+            contract=contract,
+            gate=gate,
+            anchor=anchor,
+            note=note,
+        )
 
     def append_decision(
         self,
@@ -272,18 +303,46 @@ class RecoveryLedger:
                 note=note,
             )
 
-    def record_attempt(self, run_id: str, *, note: str = "") -> int:
-        """Record one recovery attempt and return the new attempt count."""
+    def record_attempt(
+        self, run_id: str, *, note: str = "", max_attempts: int | None = None
+    ) -> int:
+        """Record one recovery attempt and return the new attempt count.
+
+        When ``max_attempts`` is given and the new count reaches it, an anchored
+        ``human_required`` gate entry is written (once), so the escalation
+        survives later compaction of the ATTEMPT entries.
+        """
         with self._locked(run_id):
-            self._make_entry(run_id, kind=LedgerEntryKind.ATTEMPT, note=note)
-            return self.attempts(run_id)
+            entries = self._backend.load(run_id)
+            sealed = self._seal_and_save(run_id, entries, kind=LedgerEntryKind.ATTEMPT, note=note)
+            count = sum(1 for e in entries if e.kind == LedgerEntryKind.ATTEMPT.value) + 1
+            escalated = any(
+                e.kind == LedgerEntryKind.GATE.value and e.gate == HUMAN_REQUIRED for e in entries
+            )
+            if max_attempts is not None and count >= max_attempts and not escalated:
+                self._seal_and_save(
+                    run_id,
+                    [*entries, sealed],
+                    kind=LedgerEntryKind.GATE,
+                    gate=HUMAN_REQUIRED,
+                    anchor=True,
+                    note=f"attempt {count} reached the escalation threshold {max_attempts}",
+                )
+            return count
 
     def attempts(self, run_id: str) -> int:
         return sum(1 for e in self.entries(run_id) if e.kind == LedgerEntryKind.ATTEMPT.value)
 
     def requires_human(self, run_id: str, *, max_attempts: int = 3) -> bool:
-        """True once attempts have reached the human-in-the-loop threshold."""
-        return self.attempts(run_id) >= max_attempts
+        """True once attempts have reached the human-in-the-loop threshold.
+
+        Also True if a persisted ``human_required`` marker exists, so a prior
+        escalation is not forgotten when compaction drops old ATTEMPT entries.
+        """
+        entries = self.entries(run_id)
+        if any(e.kind == LedgerEntryKind.GATE.value and e.gate == HUMAN_REQUIRED for e in entries):
+            return True
+        return sum(1 for e in entries if e.kind == LedgerEntryKind.ATTEMPT.value) >= max_attempts
 
     def record_gate(self, run_id: str, status: str, *, note: str = "") -> RecoveryLedgerEntry:
         """Persist a human-in-the-loop gate event (required/approved/rejected)."""
@@ -291,16 +350,21 @@ class RecoveryLedger:
             return self._make_entry(run_id, kind=LedgerEntryKind.GATE, gate=status, note=note)
 
     def pending_gate(self, run_id: str) -> RecoveryLedgerEntry | None:
-        """Return the latest decision still awaiting human approval, if any."""
+        """Return the latest decision still awaiting human approval, if any.
+
+        An approval clears only the decision it follows: a later gate-required
+        decision is pending again even if an earlier one was approved.
+        """
         entries = self.entries(run_id)
-        approved = any(
-            e.kind == LedgerEntryKind.GATE.value and e.gate == "approved" for e in entries
-        )
-        if approved:
-            return None
         for entry in reversed(entries):
             if entry.kind == LedgerEntryKind.DECISION.value and entry.gate == "required":
-                return entry
+                cleared = any(
+                    e.kind == LedgerEntryKind.GATE.value
+                    and e.gate == "approved"
+                    and e.sequence > entry.sequence
+                    for e in entries
+                )
+                return None if cleared else entry
         return None
 
     # -- reading ---------------------------------------------------------- #
@@ -341,11 +405,9 @@ class RecoveryLedger:
             entries = self.entries(run_id)
             if len(entries) <= keep:
                 return 0
-            newest_ids = {e.entry_id for e in entries[-keep:]}
-            kept = list(entries[-keep:])
+            newest = entries[-keep:]
+            kept = list(newest)
             for entry in entries[:-keep]:
-                if entry.entry_id in newest_ids:
-                    continue
                 if keep_anchors and entry.anchor:
                     kept.append(entry)
             kept.sort(key=lambda e: e.sequence)
@@ -367,28 +429,30 @@ class RecoveryLedger:
         """Detect drift between the ledger and the live state.
 
         Two checks: the ledger chain must verify, and the live state must not be
-        behind the checkpoint version the latest decision was sealed against
-        (a state older than its own contract implies rollback or corruption).
+        behind the highest checkpoint version any surviving decision was sealed
+        against (a high-water mark, so a later decision sealed from a stale or
+        rolled-back state cannot silently lower the bar).
         """
         details: list[str] = []
         ok, trusted = self.verify(run_id)
         if not ok:
             details.append(f"ledger chain broken at index {trusted}")
 
-        last = self.last_decision(run_id)
-        if last is None:
+        versions = [
+            e.contract.checkpoint_version
+            for e in self.entries(run_id)
+            if e.kind == LedgerEntryKind.DECISION.value and e.contract is not None
+        ]
+        if not versions:
             details.append("no ledger decision to reconcile against")
             return ReconcileReport(drift=bool(details), details=details)
-        if last.contract is None:
-            details.append("latest decision carries no contract to compare")
-            return ReconcileReport(drift=bool(details), details=details)
 
+        watermark = max(versions)
         state_version = getattr(state, "version", None)
         if state_version is None:
             details.append("live state exposes no version to compare")
-        elif state_version < last.contract.checkpoint_version:
+        elif state_version < watermark:
             details.append(
-                f"live state version {state_version} is behind the contract "
-                f"checkpoint v{last.contract.checkpoint_version}"
+                f"live state version {state_version} is behind the contract checkpoint v{watermark}"
             )
         return ReconcileReport(drift=bool(details), details=details)
