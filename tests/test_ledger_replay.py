@@ -14,7 +14,9 @@ def test_stale_replay_is_detected() -> None:
     mgr.checkpoint("run_1", environment=capture("run_1", StaticProvider(dataset="v1")))
 
     storage.append_event(
-        "run_1", EventType.EVIDENCE_ADDED, {"evidence_id": "e1", "summary": "s", "source": "dataset"}
+        "run_1",
+        EventType.EVIDENCE_ADDED,
+        {"evidence_id": "e1", "summary": "s", "source": "dataset"},
     )
     mgr.checkpoint("run_1", environment=capture("run_1", StaticProvider(dataset="v1")))
 

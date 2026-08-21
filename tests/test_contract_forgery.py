@@ -24,7 +24,9 @@ def _seed_run(storage: SQLiteStorage) -> None:
         EventType.EVIDENCE_ADDED,
         {"evidence_id": "e1", "summary": "s", "source": "dataset"},
     )
-    CheckpointManager(storage).checkpoint("run_1", environment=capture("run_1", StaticProvider(dataset="v3")))
+    CheckpointManager(storage).checkpoint(
+        "run_1", environment=capture("run_1", StaticProvider(dataset="v3"))
+    )
 
 
 def test_forged_digest_is_rejected() -> None:
