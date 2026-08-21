@@ -3,7 +3,8 @@
 > Single consolidated source of truth (as of 2026-08-20). Companion to
 > `STATUS.md` (deep operational detail), `docs/ARCHITECTURE_EVOLUTION.md`
 > (north-star migration plan), `CHANGELOG.md`, and the "Differentiator &
-> Shipping Plan" brief.
+> Shipping Plan" brief. New contributors start with `docs/CONTRIBUTING_ONBOARDING.md`.
+> Terms are defined in `docs/GLOSSARY.md`.
 >
 > Scope rule: this document records what is verified, what is believed, and what
 > is neither. No benchmark numbers are invented. The thesis is a hypothesis to
