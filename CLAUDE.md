@@ -24,13 +24,20 @@ Your **first action** is to call `continuum_resume` with **no `run_id`**.
 Do **not** read or write any task file — the task is the run's `goal`, which
 `continuum_resume` returns, so a resumed session already knows what to continue.
 
-## While working, record every step (cheap, no extra files)
+For instant detection without waiting for a user message, install
+`scripts/session_start_resume.sh` as a SessionStart hook. It runs
+`continuum resume --json` out of band and injects the banner before the model
+starts, so no inference is spent on detection.
 
-After each meaningful unit of work, call:
+## While working, progress is recorded automatically
 
-- `continuum_record_progress(run_id, completed, total, goal="<the task>")`
-- `continuum_checkpoint(run_id)`
+Durability is handled by an auto checkpoint hook that calls
+`CheckpointManager.maybe_checkpoint` after each file write. You do not need to
+call `continuum_checkpoint` after every unit. Just do the work; the hook will
+checkpoint when the policy says the state meaningfully changed. If you finish a
+major milestone you may call `continuum_checkpoint` explicitly, but it is not
+required per section.
 
-That is all the durable state CONTINUUM needs. Never spawn exploration or write
-side files to "track" the task — the goal string and the progress counter are
-enough for a resumed session to pick up the next unit.
+Record progress with `continuum_record_progress` as you complete units. That is
+all the durable state CONTINUUM needs. Never spawn exploration or write side
+files to track the task.
