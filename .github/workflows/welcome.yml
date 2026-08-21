@@ -1,0 +1,26 @@
+name: Welcome
+
+on:
+  issues:
+    types: [opened]
+  pull_request_target:
+    types: [opened]
+
+jobs:
+  welcome:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/first-interaction@v1
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          issue-message: |
+            Thanks for opening your first issue in CONTINUUM! 🎉
+            A maintainer will take a look soon. If you can, add reproduction
+            steps and your Python version, that speeds things up a lot.
+          pr-message: |
+            Thanks for your first pull request in CONTINUUM! 🎉
+            Make sure CI is green and the PR title follows conventional commits
+            (e.g. `feat:`, `fix:`). A maintainer will review it shortly.
