@@ -95,6 +95,7 @@ class RecoveryDecision:
     uncertain_actions: tuple[Action, ...] = ()
     rationale: tuple[str, ...] = ()
     impacted_files: frozenset[str] = frozenset()
+    tail_evidence: str | None = None
 
     @property
     def state(self) -> SemanticState:
@@ -264,6 +265,12 @@ class RecoveryEngine:
             scope=scope,
         )
 
+        tail_evidence: str | None = None
+        for ev in reversed(validation.state.evidence):
+            if ev.evidence_id.startswith("tail_"):
+                tail_evidence = ev.summary
+                break
+
         return RecoveryDecision(
             run_id=run_id,
             mode=mode,
@@ -274,6 +281,7 @@ class RecoveryEngine:
             uncertain_actions=uncertain,
             rationale=rationale,
             impacted_files=impacted_files,
+            tail_evidence=tail_evidence,
         )
 
     # -- the decision rule ------------------------------------------------ #

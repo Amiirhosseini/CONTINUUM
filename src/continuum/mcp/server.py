@@ -587,6 +587,7 @@ def build_server(
         # any external task file. The run's goal is the single source of truth
         # for "what was this task?" across interruptions.
         goal = ctx.storage.get_run(run_id).goal
+        tail_evidence = decision.tail_evidence
         return _json(
             {
                 "run_id": run_id,
@@ -619,6 +620,7 @@ def build_server(
                     "failed": decision.state.progress.failed,
                     "total": decision.state.progress.total,
                 },
+                "tail_evidence": tail_evidence,
                 "contract": decision.contract.model_dump(mode="json"),
                 "contract_text": render_contract(decision.contract),
                 "report": decision.render(),
