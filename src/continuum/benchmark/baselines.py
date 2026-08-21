@@ -74,7 +74,7 @@ class ContinuumSemanticCheckpoint:
         return {"checkpoint_id": checkpoint.checkpoint_id, "mode": "continuum"}
 
 
-BASELINES: tuple[Baseline, ...] = (
+BASELINES: tuple[Baseline, ...] = (  # type: ignore[assignment]
     FullTranscriptReplay(),
     SimpleConversationSummarization(),
     NaiveCheckpointing(),
