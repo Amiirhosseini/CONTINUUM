@@ -1,6 +1,6 @@
 # Project status
 
-**As of 2026-08-17** (commit `ca5f723`). On 2026-08-14 a repository-wide bug
+**As of 2026-08-21** (commit `8932bfd` and later). On 2026-08-14 a repository-wide bug
 audit ran: every behavioural module was read and exercised, surfacing 20
 evidence-backed issues (#29-"#49, excluding the externally-filed #39). They are
 labelled `good first issue` or `help wanted` (plus `adapter`/`detector` where
@@ -17,7 +17,7 @@ believed, and what is neither.
 
 ## Verified
 
-1024 tests pass (9 skipped), on Python 3.13 with `mcp 2.0.0` installed. The MCP
+1047 tests collected, 1038 passing, 9 skipped, on Python 3.13 with `mcp 2.0.0` installed. The MCP
 server tests are no longer excluded: they load and pass against `mcp>=2.0` (the
 version pinned in `pyproject.toml`). An earlier note recorded them as failing to
 load; that incompatibility is gone with the newer SDK. CI was green on Python

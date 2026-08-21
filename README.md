@@ -147,7 +147,7 @@ CONTINUUM is verified not just with mock unit tests, but against real LLM agents
 
 ### Automated Test Suite and Benchmarks
 
-- **900 tests passing** on Python 3.11, 3.12, and 3.13 (including unit, `hypothesis` property-based, and concurrency tests).
+- **1038 tests passing, 9 skipped** on Python 3.11, 3.12, and 3.13 (including unit, `hypothesis` property-based, concurrency, and adversarial tests).
 - **CONTINUUM-Bench**: `continuum benchmark` executes in-process recovery benchmarks across five scenarios (`process_crash`, `dataset_change`, `unknown_side_effect`, `partial_completion`, `early_crash`), proving 0 duplicate work, 0 duplicate side effects, and automatic detection of stale environment dependencies.
 
 ### Adversarial Audit of the MCP Surface
@@ -174,11 +174,16 @@ Ten tools over stdio. Three are read-only (`continuum_validate`, `continuum_resu
 
 ## Framework Integration
 
-CONTINUUM plugs into agent frameworks without becoming one. Four adapters ship in `src/continuum/adapters/` (one in-process facade plus three framework integrations), all optional installs so the core stays standard-library-only:
+CONTINUUM plugs into agent frameworks without becoming one. Nine adapters ship in `src/continuum/adapters/` (one in-process facade plus eight integrations), all optional installs so the core stays standard-library-only:
 
 | Adapter | Class | Notes |
 |:--|:--|:--|
 | Generic Python agent | `GenericAgentAdapter` | In-process facade; writes trusted (`Origin.DETERMINISTIC`) state. |
+| Filesystem sandbox | `FilesystemSandboxAdapter` | Local directory sandbox, no external service, default for docs and CI. |
+| Python in-process | `PythonInProcAdapter` | Runs Python in a temp workdir, records via ledger. |
+| Container | `ContainerAdapter` | Docker backed, guarded skip when `docker` is absent. |
+| Browser | `BrowserAdapter` | Playwright backed, guarded skip when not installed. |
+| Kubernetes | `KubernetesAdapter` | `kubectl` backed, guarded skip when not configured. |
 | OpenAI Agents SDK | `OpenAIAgentAdapter` | Experimental. Hooks `ToolContext` / `RunHooks`; optional `openai-agents`. |
 | LangGraph | `LangGraphAgentAdapter` | Experimental. Wraps a `StateGraph`; optional `langgraph`. |
 | LangChain | `LangChainAgentAdapter` | Experimental. Drops `checkpoint_node` into an LCEL `Runnable` pipeline and the `create_agent` tool-calling loop; optional `langchain`. |
@@ -259,7 +264,7 @@ Key guarantees: append-only events, atomic sequence allocation, durability on `a
 
 ### Project structure
 
-CONTINUUM is one library (`src/continuum`, about 14,800 LOC across 60 files) plus a large test suite (45 files, about 900 tests). The modules are layered and all append to and replay one hash-chained event log:
+CONTINUUM is one library (`src/continuum`, about 80 Python files) plus a large test suite (68 files, 1038 tests). The modules are layered and all append to and replay one hash-chained event log:
 
 | Module | LOC | Role |
 |:--|--:|:--|
@@ -345,7 +350,7 @@ Recent preprints that measure or model the same reliability gaps CONTINUUM targe
 
 ## Status and limitations
 
-- **Tested**: 900 tests passing (a few skip without optional services such as Postgres; see [STATUS.md](STATUS.md)). The MCP surface has also been audited adversarially over the live protocol; see [test.md](test.md).
+- **Tested**: 1038 tests passing, 9 skipped (a few skip without optional services such as Postgres; see [STATUS.md](STATUS.md)). The MCP surface has also been audited adversarially over the live protocol; see [test.md](test.md).
 - **Not on PyPI.** Install from a clone (see Quick Start).
 - **MCP caller authentication is optional.** When `CONTINUUM_MCP_TOKEN` is set, the server refuses every mutating tool unless the caller presents that shared secret in the `initialize` handshake's `_meta.authToken`. Without it, authorization is by declared identity only (the historical default, preserved for local single-user use). Tracked as [#1](https://github.com/Cyrax321/CONTINUUM/issues/1).
 - **Unbuilt components**: Cloud API (Phase 13) and Dashboard (Phase 14).
