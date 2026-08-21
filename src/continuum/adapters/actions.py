@@ -12,6 +12,7 @@ adapter interfaces changes.
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -46,11 +47,16 @@ class AdapterResult:
     error: str | None = None
 
 
+TelemetryHook = Callable[[AdapterAction, AdapterResult], None]
+
+
 def run_action(
     adapter: AgentAdapter,
     run_id: str,
     action: AdapterAction,
     fn: Callable[[], Any],
+    *,
+    on_event: TelemetryHook | None = None,
 ) -> AdapterResult:
     """Execute ``action`` through ``adapter`` and return an ``AdapterResult``.
 
@@ -58,6 +64,13 @@ def run_action(
     still owns idempotency and side-effect safety; this only normalizes the
     request/response shape so the recovery pipeline treats every adapter the
     same. Failures are captured into ``AdapterResult`` instead of raised.
+
+    ``on_event`` is an opt-in telemetry hook (issue #162), disabled by default.
+    It is invoked once with the action and the final result, whether the action
+    completed or failed. An exception escaping the hook is swallowed:
+    observability must never be able to break the action it observes. The
+    lower-level ``intercept_action`` deliberately bypasses telemetry; hooks
+    attach at this facade, where the uniform shape exists.
     """
     try:
         output = adapter.intercept_action(
@@ -68,5 +81,17 @@ def run_action(
             dep_scope=action.dep_scope,
         )
     except Exception as exc:  # adapter already recorded the attempt uncertain
-        return AdapterResult(status="failed", error=f"{type(exc).__name__}: {exc}")
-    return AdapterResult(status="completed", output=output)
+        result = AdapterResult(status="failed", error=f"{type(exc).__name__}: {exc}")
+        _emit(on_event, action, result)
+        return result
+    result = AdapterResult(status="completed", output=output)
+    _emit(on_event, action, result)
+    return result
+
+
+def _emit(hook: TelemetryHook | None, action: AdapterAction, result: AdapterResult) -> None:
+    if hook is None:
+        return
+    # A failing observer must not fail the action it observes.
+    with contextlib.suppress(Exception):
+        hook(action, result)
