@@ -4,7 +4,7 @@
 > `STATUS.md` (deep operational detail), `docs/ARCHITECTURE_EVOLUTION.md`
 > (north-star migration plan), `CHANGELOG.md`, and the "Differentiator &
 > Shipping Plan" brief. New contributors start with `docs/CONTRIBUTING_ONBOARDING.md`.
-> Terms are defined in `docs/GLOSSARY.md`.
+> Terms are defined in `docs/GLOSSARY.md`. Threats and assumptions are scoped in `docs/threat_model.md`.
 >
 > Scope rule: this document records what is verified, what is believed, and what
 > is neither. No benchmark numbers are invented. The thesis is a hypothesis to
