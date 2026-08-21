@@ -986,7 +986,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="wire transport (default: stdio)",
     )
 
-    def cmd_dashboard(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:  # type: ignore[no-untyped-def]
+    def cmd_dashboard(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
         from continuum.dashboard import serve_dashboard as _serve
 
         print(f"Serving dashboard at http://localhost:{args.port}", file=out)
