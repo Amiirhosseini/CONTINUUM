@@ -83,12 +83,24 @@ def observe_event_payload(raw: Mapping[str, Any]) -> dict[str, Any]:
         return payload
 
     payload["path"] = path
+    # Read in bounded chunks rather than whole: the hook runs after every
+    # file-mutating tool call, and a multi-gigabyte artifact must not be held
+    # in memory just to hash it. Size and digest are only recorded after the
+    # read completes, so a mid-read failure records neither.
+    digest = hashlib.sha256()
+    size = 0
     try:
-        data = Path(path).read_bytes()
+        with Path(path).open("rb") as source:
+            while True:
+                chunk = source.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                digest.update(chunk)
     except OSError:
         return payload
-    payload["bytes"] = len(data)
-    payload["sha256"] = hashlib.sha256(data).hexdigest()
+    payload["bytes"] = size
+    payload["sha256"] = digest.hexdigest()
     return payload
 
 
