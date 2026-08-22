@@ -542,6 +542,11 @@ def cmd_confirm(args: argparse.Namespace, storage: Storage, out: Any, err: Any) 
 
 def cmd_checkpoint(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
     """Force a checkpoint. Mutates the run."""
+    # Check existence before projecting: otherwise a typo'd run name surfaces
+    # as a ProjectionError about a missing RUN_STARTED event (exit 1) instead
+    # of the truth (exit 2), which is the same misdiagnosis issue #18 fixed
+    # for `events`. Every other mutating command checks first; this one does too.
+    storage.get_run(args.run_id)  # raises RunNotFound -> NOT_FOUND by the dispatcher
     manager = CheckpointManager(storage)
     checkpoint = manager.checkpoint(
         args.run_id,

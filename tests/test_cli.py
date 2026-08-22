@@ -118,28 +118,38 @@ def test_a_missing_run_is_distinguishable(db: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "command",
+    "command,extra",
     [
-        "inspect",
-        "history",
-        "events",
-        "verify",
-        "actions",
-        "replay",
-        "resume",
-        "validate",
-        "show-contract",
+        ("inspect", []),
+        ("history", []),
+        ("events", []),
+        ("verify", []),
+        ("actions", []),
+        ("replay", []),
+        ("resume", []),
+        ("validate", []),
+        ("show-contract", []),
+        # Mutating commands were added after issue #202: `checkpoint` used to
+        # fail with a ProjectionError (exit 1) instead of NOT_FOUND because it
+        # projected before checking the run existed.
+        ("checkpoint", []),
+        ("confirm", []),
+        ("attest", []),
+        ("attest-verify", ["--attest", "irrelevant-on-missing-run.json"]),
     ],
 )
-def test_no_command_reports_success_for_a_run_that_does_not_exist(db: str, command: str) -> None:
+def test_no_command_reports_success_for_a_run_that_does_not_exist(
+    db: str, command: str, extra: list[str]
+) -> None:
     """A typo'd run name must never look like a clean bill of health.
 
     An empty run has a trivially valid (empty) event chain and no recorded
     actions, so `verify` and `actions` would happily exit 0 — letting
     `continuum verify $TYPO && deploy` succeed against a name nobody has ever
-    written to.
+    written to. Mutating commands owe the same distinction: `checkpoint`
+    diagnosed a missing run as a projection error until issue #202.
     """
-    code, _, err = run("--db", db, command, "definitely-not-a-run")
+    code, _, err = run("--db", db, command, "definitely-not-a-run", *extra)
     assert code != ExitCode.OK, f"{command} reported success for a nonexistent run"
     assert code == ExitCode.NOT_FOUND, f"{command} misdiagnosed a missing run (exit {code})"
     assert "definitely-not-a-run" in err
