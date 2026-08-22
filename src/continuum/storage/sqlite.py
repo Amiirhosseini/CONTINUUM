@@ -154,6 +154,37 @@ class SQLiteStorage(Storage):
                 raise ConcurrentWriteError(f"run {run.run_id!r} already exists") from exc
         return run
 
+    def create_run_started(self, run: Run, *, source: Origin = Origin.DETERMINISTIC) -> Run:
+        """Create the run row and its first event in one transaction."""
+        with self._write() as conn:
+            try:
+                conn.execute(
+                    "INSERT INTO runs(run_id, goal, status, created_at, updated_at, metadata) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        run.run_id,
+                        run.goal,
+                        run.status.value,
+                        run.created_at.isoformat(),
+                        run.updated_at.isoformat(),
+                        json.dumps(dict(run.metadata), sort_keys=True),
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise ConcurrentWriteError(f"run {run.run_id!r} already exists") from exc
+            event = Event(
+                event_id=make_id("event"),
+                run_id=run.run_id,
+                sequence=1,
+                type=EventType.RUN_STARTED,
+                timestamp=utcnow(),
+                payload={"goal": run.goal},
+                source=source,
+                prev_hash=None,
+            ).sealed()
+            self._insert_event(conn, event)
+        return run
+
     def get_run(self, run_id: str) -> Run:
         with self._read() as conn:
             row = conn.execute("SELECT * FROM runs WHERE run_id = ?", (run_id,)).fetchone()

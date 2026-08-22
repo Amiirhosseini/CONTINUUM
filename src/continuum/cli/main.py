@@ -200,21 +200,19 @@ def cmd_start(args: argparse.Namespace, storage: Storage, out: Any, err: Any) ->
 
     Until now a run could only be created through the Python API or an MCP
     client, which left the CLI's own "start one with ..." hint pointing at
-    nothing (issue #204). The run row and the RUN_STARTED event are written
-    here exactly as the adapters write them; the goal is asserted by a human
-    at the keyboard, so it is sourced Origin.HUMAN rather than self-certified.
+    nothing (issue #204). The run row and its RUN_STARTED event are one fact,
+    so they are written in a single transaction (a crash between two separate
+    writes would strand a run that can be neither projected nor resumed); the
+    goal is asserted by a human at the keyboard, so it is sourced Origin.HUMAN
+    rather than self-certified.
     """
     try:
-        run = storage.create_run(Run(run_id=args.run_id, goal=args.goal))
+        run = storage.create_run_started(
+            Run(run_id=args.run_id, goal=args.goal), source=Origin.HUMAN
+        )
     except ConcurrentWriteError as exc:
         print(f"error: {exc}", file=err)
         return ExitCode.ERROR
-    storage.append_event(
-        args.run_id,
-        EventType.RUN_STARTED,
-        {"goal": args.goal},
-        source=Origin.HUMAN,
-    )
     _emit(
         {"run_id": run.run_id, "goal": run.goal},
         f"Started run {run.run_id}: {args.goal}",

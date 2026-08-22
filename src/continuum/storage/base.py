@@ -123,6 +123,17 @@ class Storage(ABC):
     def create_run(self, run: Run) -> Run: ...
 
     @abstractmethod
+    def create_run_started(self, run: Run, *, source: Origin = Origin.DETERMINISTIC) -> Run:
+        """Create a run and its ``RUN_STARTED`` event as one atomic write.
+
+        The run row and its first event are two inserts but one fact: without
+        the event the run cannot be projected, and without the row the event
+        violates its foreign key. Writing them separately admits a half-created
+        run that can be neither resumed nor deleted whenever the process dies
+        between the two statements. Engines must commit both or neither.
+        """
+
+    @abstractmethod
     def get_run(self, run_id: str) -> Run: ...
 
     @abstractmethod
