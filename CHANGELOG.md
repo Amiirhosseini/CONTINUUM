@@ -29,8 +29,6 @@ All notable changes to this project are documented here. The format follows
   state. Tests in `tests/test_cli_observe.py` include driving the exact
   command string baked into settings.json through a real shell.
 
-### Added
-
 - **`scoped_to_run=False` now enforces global uniqueness (#34).** An unscoped
   idempotency key claims store-global identity but the ledger only replayed its
   own run's log, so two runs could each open a fresh slot for the same
