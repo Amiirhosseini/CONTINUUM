@@ -25,7 +25,11 @@ from continuum.actions.ledger import ActionLedger
 from continuum.checkpoint import CheckpointManager
 from continuum.environment import StaticProvider, capture
 from continuum.events import EventType
-from continuum.mcp.authz import CLIENT_TOKENS_ENV_VAR, AuthorizationPolicy
+from continuum.mcp.authz import (
+    CLIENT_TOKENS_ENV_VAR,
+    CONFIRM_ENV_VAR,
+    AuthorizationPolicy,
+)
 from continuum.mcp.server import (
     DEFAULT_DB,
     ContinuumMCP,
@@ -36,10 +40,20 @@ from continuum.mcp.server import (
 )
 from continuum.models import ActionStatus, Origin, RecoveryMode, Run
 from continuum.state.semantic import project
-from continuum.storage import SQLiteStorage
+from continuum.storage import RunNotFound, SQLiteStorage
 from tests.mcp_helpers import fake_context as _ctx
 
 TEST_CLIENT = "pytest-client"
+
+
+@pytest.fixture(autouse=True)
+def _no_confirm_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the confirmation gate deterministic (issue #201).
+
+    The confirm policy refuses by default; a stray CONTINUUM_MCP_CONFIRM_TOKEN
+    in the operator's environment would silently flip that for every test here.
+    """
+    monkeypatch.delenv(CONFIRM_ENV_VAR, raising=False)
 
 
 @pytest.fixture
@@ -71,6 +85,23 @@ async def seed_run(server: Any, run_id: str = "run_1", completed: int = 20) -> N
         completed=completed,
         total=100,
         goal="Analyze 100 documents",
+    )
+
+
+def seed_human_confirmation(server_ctx: tuple[Any, Any], run_id: str = "run_1") -> None:
+    """Record REVIEW_CONFIRMED the way the human CLI path does (issue #201).
+
+    ``continuum_confirm`` over MCP now refuses without CONTINUUM_MCP_CONFIRM_TOKEN
+    (an agent must not confirm its own self-report), so a test that only wants
+    the confirmation on record writes the same event directly, sourced from
+    Origin.HUMAN exactly as ``continuum confirm`` writes it.
+    """
+    _, ctx = server_ctx
+    ctx.storage.append_event(
+        run_id,
+        EventType.REVIEW_CONFIRMED,
+        {"components": ["goal", "progress"]},
+        source=Origin.HUMAN,
     )
 
 
@@ -295,6 +326,39 @@ async def test_agent_self_reported_state_is_never_reported_as_verified(
 
 
 @pytest.mark.asyncio
+async def test_an_agent_cannot_confirm_its_own_self_report(
+    server_ctx: tuple[Any, Any],
+) -> None:
+    """The self-certification exploit must not come back through one extra call.
+
+    The 9738b9e fix made record_progress -> checkpoint -> resume answer
+    request_human. Adding continuum_confirm (issue #35) gave that same
+    allowlisted agent a tool that clears the REQUIRES_REVIEW, so the exploit
+    returned as record_progress -> checkpoint -> confirm -> resume with
+    safe=True (issue #201). Confirmation over MCP now needs its own secret,
+    so an agent that stops at what it is allowed to do cannot unblock itself.
+    """
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    server, _ = server_ctx
+    await seed_run(server)
+    await call(server, "continuum_checkpoint", run_id="run_1")
+
+    before = await call(server, "continuum_resume", run_id="run_1")
+    assert before["safe"] is False
+    assert before["mode"] == RecoveryMode.REQUEST_HUMAN.value
+
+    # The caller may mutate (it is allowlisted), but confirming is a different
+    # grant: without the operator's confirm secret the tool refuses.
+    with pytest.raises(ToolError, match="CONTINUUM_MCP_CONFIRM_TOKEN"):
+        await call(server, "continuum_confirm", run_id="run_1")
+
+    after = await call(server, "continuum_resume", run_id="run_1")
+    assert after["safe"] is False
+    assert after["mode"] == RecoveryMode.REQUEST_HUMAN.value
+
+
+@pytest.mark.asyncio
 async def test_validate_flags_a_changed_dependency(server_ctx: tuple[Any, Any]) -> None:
     server, ctx = server_ctx
     await seed_run(server)
@@ -357,7 +421,7 @@ async def test_drift_in_an_env_declared_dependency_blocks_resume(
     server, _ = server_ctx
     await seed_run(server)
     await call(server, "continuum_checkpoint", run_id="run_1", env={"dataset": "sha256:aaaa"})
-    await call(server, "continuum_confirm", run_id="run_1")
+    seed_human_confirmation(server_ctx)
 
     clean = await call(server, "continuum_validate", run_id="run_1", env={"dataset": "sha256:aaaa"})
     assert clean["safe"] is True, "an unchanged environment must still resume"
@@ -392,7 +456,7 @@ async def test_only_the_changed_dependency_is_invalidated(
         run_id="run_1",
         env={"dataset": "sha256:aaaa", "schema": "2.1"},
     )
-    await call(server, "continuum_confirm", run_id="run_1")
+    seed_human_confirmation(server_ctx)
 
     payload = await call(
         server,

@@ -62,8 +62,10 @@ from continuum.events import EventType
 from continuum.mcp.authz import (
     AuthorizationPolicy,
     AuthPolicy,
+    ConfirmPolicy,
     caller_name,
     load_auth,
+    load_confirm,
     load_policy,
     token_from,
 )
@@ -323,6 +325,7 @@ def build_server(
     storage: Storage | None = None,
     policy: AuthorizationPolicy | None = None,
     auth: AuthPolicy | None = None,
+    confirm_auth: ConfirmPolicy | None = None,
 ) -> tuple[MCPServer, ContinuumMCP]:
     """Construct the MCP server and its backing context.
 
@@ -335,6 +338,13 @@ def build_server(
     ``auth`` verifies a shared secret before any mutating tool runs. Omitted,
     it is resolved from ``CONTINUUM_MCP_TOKEN`` and is disabled when that is
     unset, leaving the default local, no-account behavior unchanged.
+
+    ``confirm_auth`` gates ``continuum_confirm`` specifically. Unlike the other
+    two, it fails closed when unconfigured (issue #201): an agent allowed to
+    record progress must not also be able to confirm that progress, which
+    would reinstate the self-certification exploit. Omitted, confirmation over
+    MCP refuses every caller; a human confirms with ``continuum confirm``, or
+    the operator sets ``CONTINUUM_MCP_CONFIRM_TOKEN`` to opt in.
 
     Raises ``ModuleNotFoundError`` when the optional ``mcp`` extra is not
     installed; ``main`` reports that as an actionable error rather than a
@@ -356,6 +366,7 @@ def build_server(
     # never started. Nothing here depends on the store, so the order is free.
     policy = load_policy() if policy is None else policy
     auth = load_auth() if auth is None else auth
+    confirm_auth = load_confirm() if confirm_auth is None else confirm_auth
     ctx = ContinuumMCP(database, storage=storage)
     server = MCPServer(
         name="continuum-mcp",
@@ -399,6 +410,39 @@ def build_server(
         # have no `ctx`. Re-advertise it in both the annotations and the
         # signature, or the guard is never handed a context and every caller
         # looks unidentified.
+        original = inspect.signature(fn)
+        wrapper.__annotations__ = {**fn.__annotations__, "ctx": Context}
+        wrapper.__signature__ = original.replace(  # type: ignore[attr-defined]
+            parameters=[
+                *original.parameters.values(),
+                inspect.Parameter(
+                    "ctx", inspect.Parameter.KEYWORD_ONLY, default=None, annotation=Context
+                ),
+            ]
+        )
+        return wrapper
+
+    def confirm_gate(fn: Callable[..., str]) -> Callable[..., str]:
+        """Authorize and authenticate ``continuum_confirm`` on its own terms.
+
+        This replaces ``guard`` rather than stacking onto it (issue #201). The
+        handshake carries a single ``_meta.authToken``, so a stacked check
+        would demand two different secrets through one slot. Confirmation gets
+        its own credential instead: the caller must be on the mutation
+        allowlist *and* present the dedicated confirm secret. Without that
+        secret configured the tool refuses everyone, because an agent allowed
+        to record progress must not silently be able to confirm it too.
+        """
+
+        @functools.wraps(fn)
+        def wrapper(*args: Any, ctx: Context | None = None, **kwargs: Any) -> str:
+            caller = caller_name(ctx)
+            policy.require(caller, fn.__name__)
+            confirm_auth.verify(token_from(ctx))
+            return fn(*args, **kwargs)
+
+        # Same fix-up as ``guard``: re-advertise the context parameter or the
+        # SDK never hands us one and every caller looks tokenless.
         original = inspect.signature(fn)
         wrapper.__annotations__ = {**fn.__annotations__, "ctx": Context}
         wrapper.__signature__ = original.replace(  # type: ignore[attr-defined]
@@ -632,13 +676,15 @@ def build_server(
         description=(
             "Confirm a run's self-reported goal and progress so it can resume. "
             "MCP/agent-reported runs are self_certified and would otherwise be "
-            "stuck at request_human forever. Call this (as the human operator) to "
-            "record a REVIEW_CONFIRMED event, then call continuum_resume again. "
-            "Mutates the run."
+            "stuck at request_human forever. REFUSED unless the server operator "
+            "set CONTINUUM_MCP_CONFIRM_TOKEN and you present that secret in the "
+            "handshake _meta.authToken: an agent must not confirm its own "
+            "self-reported state. The normal path is for a human to run "
+            "'continuum confirm <run_id>' on the host. Mutates the run."
         ),
         annotations=mutating,
     )
-    @guard
+    @confirm_gate
     def continuum_confirm(
         run_id: str,
         expected_model: str | None = None,
