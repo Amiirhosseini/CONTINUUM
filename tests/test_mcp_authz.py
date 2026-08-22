@@ -246,7 +246,10 @@ def test_caller_name_is_none_when_absent() -> None:
 async def test_a_stranger_cannot_use_any_mutating_tool(server: Any, tool: str) -> None:
     from mcp.server.mcpserver.exceptions import ToolError
 
-    with pytest.raises(ToolError, match="not permitted"):
+    # continuum_confirm authenticates before authorizing (CodeRabbit review,
+    # PR #206), so a tokenless caller hits its confirmation refusal rather
+    # than the allowlist one. Either way the mutation is refused.
+    with pytest.raises(ToolError, match="not permitted|CONTINUUM_MCP_CONFIRM_TOKEN"):
         await server.call_tool(tool, MUTATING_CALLS[tool], context=fake_context(STRANGER))
 
 
@@ -737,3 +740,56 @@ async def test_confirmation_over_mcp_needs_the_dedicated_secret(
     )
     payload = json.loads(result.content[0].text)
     assert "mode" in payload
+
+
+# --- one secret must not unlock both progress and confirmation (PR #206) -----
+
+
+def test_a_confirm_secret_matching_the_session_secret_is_refused_at_startup(
+    store: SQLiteStorage,
+) -> None:
+    """Reusing the session secret as the confirm secret makes the gate a no-op.
+
+    Every holder of a mutating credential would also hold the confirmation
+    credential, so build_server refuses the configuration instead of running
+    with a boundary that protects nothing.
+    """
+    with pytest.raises(ValueError, match=CONFIRM_ENV_VAR):
+        build_server(
+            storage=store,
+            policy=AuthorizationPolicy([ALLOWED]),
+            auth=AuthPolicy("same-secret"),
+            confirm_auth=ConfirmPolicy("same-secret"),
+        )
+
+
+def test_a_confirm_secret_matching_a_per_client_token_is_refused_at_startup(
+    store: SQLiteStorage,
+) -> None:
+    with pytest.raises(ValueError, match="trusted-agent"):
+        build_server(
+            storage=store,
+            policy=AuthorizationPolicy([ALLOWED]),
+            auth=AuthPolicy(tokens={ALLOWED: "tok-a"}),
+            confirm_auth=ConfirmPolicy("tok-a"),
+        )
+
+
+def test_a_distinct_confirm_secret_starts_normally(store: SQLiteStorage) -> None:
+    srv, _ = build_server(
+        storage=store,
+        policy=AuthorizationPolicy([ALLOWED]),
+        auth=AuthPolicy("session-secret"),
+        confirm_auth=ConfirmPolicy("confirm-secret"),
+    )
+    assert srv is not None
+
+
+def test_an_unconfigured_confirm_secret_never_conflicts(store: SQLiteStorage) -> None:
+    """The refusing default has no secret to collide with."""
+    srv, _ = build_server(
+        storage=store,
+        policy=AuthorizationPolicy([ALLOWED]),
+        auth=AuthPolicy("session-secret"),
+    )
+    assert srv is not None

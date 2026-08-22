@@ -60,6 +60,7 @@ from continuum.adapters.generic import GenericAgentAdapter
 from continuum.environment import StaticProvider, capture
 from continuum.events import EventType
 from continuum.mcp.authz import (
+    CONFIRM_ENV_VAR,
     AuthorizationPolicy,
     AuthPolicy,
     ConfirmPolicy,
@@ -367,6 +368,7 @@ def build_server(
     policy = load_policy() if policy is None else policy
     auth = load_auth() if auth is None else auth
     confirm_auth = load_confirm() if confirm_auth is None else confirm_auth
+    _reject_reused_confirmation_secret(auth, confirm_auth)
     ctx = ContinuumMCP(database, storage=storage)
     server = MCPServer(
         name="continuum-mcp",
@@ -437,8 +439,12 @@ def build_server(
         @functools.wraps(fn)
         def wrapper(*args: Any, ctx: Context | None = None, **kwargs: Any) -> str:
             caller = caller_name(ctx)
-            policy.require(caller, fn.__name__)
+            # Authenticate before authorizing (CodeRabbit review, PR #206):
+            # a caller that cannot present the confirmation secret must not
+            # be able to probe the allowlist, or receive its contents in the
+            # refusal, by sending requests without a token.
             confirm_auth.verify(token_from(ctx))
+            policy.require(caller, fn.__name__)
             return fn(*args, **kwargs)
 
         # Same fix-up as ``guard``: re-advertise the context parameter or the
@@ -936,6 +942,32 @@ def build_server(
 
 def _json(payload: Mapping[str, Any]) -> str:
     return json.dumps(payload, indent=2, sort_keys=True, default=str)
+
+
+def _reject_reused_confirmation_secret(auth: AuthPolicy, confirm_auth: ConfirmPolicy) -> None:
+    """Refuse a configuration where one secret unlocks both progress and confirmation.
+
+    The confirmation gate exists so that a caller trusted to record progress is
+    not automatically trusted to certify it (issue #201). If the operator sets
+    ``CONTINUUM_MCP_CONFIRM_TOKEN`` to the same value as the session secret, or
+    to any per-client token, every holder of a mutating credential becomes a
+    holder of the confirmation credential and the gate protects nothing. That
+    is a configuration mistake, not a decision, so it fails fast at startup.
+    """
+    if confirm_auth.disabled or auth.disabled:
+        return
+    expected = confirm_auth.expected
+    assert expected is not None  # disabled is checked above
+    overlaps = [name for name, secret in (auth.tokens or {}).items() if secret == expected]
+    if auth.expected == expected:
+        overlaps.append("<shared session secret>")
+    if overlaps:
+        raise ValueError(
+            f"{CONFIRM_ENV_VAR} must be distinct from every mutating credential; "
+            f"it matches: {', '.join(overlaps)}. Reusing one secret would let an "
+            f"agent that records progress also confirm it, which is what the "
+            f"confirmation gate exists to prevent."
+        )
 
 
 def main(argv: list[str] | None = None) -> int:
