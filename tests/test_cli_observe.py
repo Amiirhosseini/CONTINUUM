@@ -93,11 +93,18 @@ def test_observe_reads_stdin_when_no_payload_file_is_given(
 
 
 def test_observe_targets_the_requested_run_not_the_active_one(
-    db: str, tmp_path: Path, written_file: Path
+    tmp_path: Path, written_file: Path
 ) -> None:
+    """The explicit flag must win over active-run fallback selection.
+
+    A second, more recently started run stays in the same database so the
+    fallback would pick *it* if the flag were ignored; asserting it received
+    nothing is what makes this test discriminate.
+    """
     other = str(tmp_path / "other.db")
     with SQLiteStorage(other) as store:
         store.create_run_started(Run(run_id="run_2", goal="Another thing"))
+        store.create_run_started(Run(run_id="run_z", goal="Active run"))
 
     payload_file = tmp_path / "hook.json"
     payload_file.write_text(json.dumps(payload_for(written_file)))
@@ -108,7 +115,9 @@ def test_observe_targets_the_requested_run_not_the_active_one(
 
     with SQLiteStorage(other) as store:
         events = store.read_events("run_2")
-    assert events[-1].type is EventType.TOOL_COMPLETED
+        assert events[-1].type is EventType.TOOL_COMPLETED
+        # The fallback target must have been left untouched.
+        assert store.last_sequence("run_z") == 1
 
 
 def test_observe_with_no_active_run_drops_the_observation_without_failing(
