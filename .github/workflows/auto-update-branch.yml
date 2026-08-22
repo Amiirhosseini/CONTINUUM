@@ -1,0 +1,99 @@
+name: Auto Update Branch
+
+# Keeps open pull requests up to date with main automatically: when a PR is
+# behind the default branch, GitHub rebase-updates it via the official
+# branch-update API (PUT /repos/{owner}/{repo}/pulls/{n}/update-branch with
+# update_method=rebase), which is the server-side equivalent of the
+# "Update branch" button. Conflicted branches are refused by the API and are
+# simply skipped rather than buried under rebase markers. Dependabot PRs are
+# left to the dedicated daily workflow that comments "@dependabot rebase".
+#
+# Token note: pushes made with the default GITHUB_TOKEN do not trigger CI
+# workflows, so a rebased branch could sit with stale checks. If your repo
+# defines an AUTO_UPDATE_TOKEN secret (a fine-grained PAT or App token with
+# contents write), it is used instead so CI re-runs after every automatic
+# update. Without it the bot still works; you may just need to close-and-
+# reopen, push, or comment to get checks running on the rebased head.
+
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    # Every 30 minutes, so branches also catch up when mergeability was still
+    # being computed during the last pass.
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: auto-update-branch
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Rebase outdated pull requests onto main
+        uses: actions/github-script@v7
+        with:
+          # Prefer a PAT when one is configured: API updates pushed with it DO
+          # trigger the repository's CI workflows on the new head commit.
+          github-token: ${{ secrets.AUTO_UPDATE_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const { owner, repo } = context.repo;
+            const repoInfo = await github.rest.repos.get({ owner, repo });
+            const defaultBranch = repoInfo.data.default_branch;
+
+            const prs = await github.paginate(github.rest.pulls.list, {
+              owner,
+              repo,
+              state: "open",
+              per_page: 100,
+            });
+
+            let updated = 0;
+            let skipped = 0;
+            for (const pr of prs) {
+              // Dependabot PRs are handled by the daily "@dependabot rebase"
+              // workflow; touching both would race.
+              if (pr.user.login === "dependabot[bot]") continue;
+              if (pr.draft) continue;
+              if (pr.base.ref !== defaultBranch) continue;
+
+              // "behind" is the only state worth acting on: clean but
+              // outdated. "dirty"/"blocked" etc. mean conflicts or unmet
+              // requirements that an automatic update should not paper over.
+              if (pr.mergeable_state !== "behind") continue;
+
+              try {
+                await github.rest.pulls.updateBranch({
+                  owner,
+                  repo,
+                  pull_number: pr.number,
+                  update_method: "rebase",
+                });
+                console.log(`Rebased PR #${pr.number} (${pr.head.ref}) onto main`);
+                updated += 1;
+              } catch (error) {
+                // 422 usually means the branch now conflicts with main, or it
+                // stopped being behind between listing and updating. Both are
+                // fine to leave for the next pass.
+                console.log(
+                  `Could not update PR #${pr.number}: ${error.status ?? ""} ${error.message}`
+                );
+                skipped += 1;
+              }
+            }
+
+            core.summary
+              .addHeading("Auto Update Branch")
+              .addTable([
+                [{ data: "Result", header: true }, { data: "Count", header: true }],
+                ["Rebased onto main", String(updated)],
+                ["Skipped (conflicts or raced)", String(skipped)],
+              ])
+              .write();
