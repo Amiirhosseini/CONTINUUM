@@ -6,10 +6,10 @@ evidence-backed issues (#29-"#49, excluding the externally-filed #39). They are
 labelled `good first issue` or `help wanted` (plus `adapter`/`detector` where
 relevant) and formed the contributor backlog. All twenty have since been fixed
 and merged to `main`; the Known issues at launch table below records each one as
-Resolved. (An earlier revision of this file described nine of them, #29, #30,
-#33, #34, #36, #42, #43, #45 and #49, as open contributor work; that was stale,
-and a 2026-08-22 audit confirmed all nine closed on GitHub with their fixes on
-`main`.)
+Resolved. (An earlier revision of this file described issues `#29`, `#30`,
+`#33`, `#34`, `#36`, `#42`, `#43`, `#45` and `#49` as open contributor work;
+that was stale, and a 2026-08-22 audit confirmed all nine closed on GitHub with
+their fixes on `main`.)
 
 A factual snapshot for whoever picks this up next, human or otherwise, with no
 memory of how any of it was found. It records what is verified, what is
@@ -267,7 +267,7 @@ The three launch-critical defects were fixed and closed in `e8271bd`:
 The remaining **9 were real but non-launch-critical**. All are now closed on
 GitHub and their fixes are on `main`:
 
-#29, #30, #33, #34, #36, #42, #43, #45, #49.
+issues `#29`, `#30`, `#33`, `#34`, `#36`, `#42`, `#43`, `#45` and `#49`.
 
 #### Known issues at launch
 
