@@ -33,6 +33,13 @@ from continuum.actions import ActionLedger
 from continuum.checkpoint import CheckpointError, CheckpointManager
 from continuum.cli.colour import Palette
 from continuum.cli.exitcodes import ExitCode, exit_code_for
+from continuum.clienthooks import (
+    DEFAULT_MATCHER,
+    install_claude_code_hook,
+    observe_command,
+    observe_event_payload,
+    remove_claude_code_hook,
+)
 from continuum.environment import StaticProvider, capture
 from continuum.events import EventType
 from continuum.models import (
@@ -607,6 +614,108 @@ def cmd_checkpoint(args: argparse.Namespace, storage: Storage, out: Any, err: An
     return ExitCode.OK
 
 
+def cmd_observe(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Record one observed tool completion as durable evidence (issue #207).
+
+    Reads a Claude Code PostToolUse hook payload (JSON on stdin, or from
+    ``--payload-file``) and appends a ``TOOL_COMPLETED`` event to the target
+    run: the explicit ``--run-id``, else the most recently active non-terminal
+    run. This is what closes part of the durability gap: the recording happens
+    in a host-side hook after every file-mutating tool call, outside the
+    model's control, so work that landed on disk is never invisible to
+    recovery even when no checkpoint was ever taken.
+
+    With no active run the observation is dropped with exit 0 rather than an
+    error: hooks fire for every Claude Code session in this directory,
+    including ones with nothing to do with CONTINUUM, and a wall of failures
+    would pressure the user into uninstalling the instrumentation. The note on
+    stderr keeps the drop visible.
+    """
+    if args.payload_file:
+        raw_text = Path(args.payload_file).read_text(encoding="utf-8")
+    else:
+        raw_text = sys.stdin.read()
+    try:
+        raw = json.loads(raw_text) if raw_text.strip() else None
+    except json.JSONDecodeError as exc:
+        print(f"error: observe payload is not valid JSON: {exc}", file=err)
+        return ExitCode.ERROR
+
+    run_id = args.run_id
+    if not run_id:
+        active = storage.get_active_run()
+        run_id = active.run_id if active else None
+    if not run_id:
+        print("No active CONTINUUM run; observation not recorded.", file=err)
+        return ExitCode.OK
+
+    storage.get_run(run_id)  # raises RunNotFound -> NOT_FOUND by the dispatcher
+
+    payload = observe_event_payload(raw if isinstance(raw, dict) else {})
+    event = storage.append_event(
+        run_id,
+        EventType.TOOL_COMPLETED,
+        payload,
+        source=Origin.EXTERNAL_AGENT,
+    )
+    _emit(
+        {
+            "run_id": run_id,
+            "sequence": event.sequence,
+            "event_id": event.event_id,
+            **payload,
+        },
+        f"Observed {payload.get('tool')} -> {run_id} (seq {event.sequence})",
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
+    )
+    return ExitCode.OK
+
+
+def cmd_hooks_install(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Wire file-mutating tool completions of a coding CLI into observe."""
+    settings_path = Path(args.settings)
+    command = observe_command(db=args.db)
+    status = install_claude_code_hook(settings_path, command)
+    verb = {"installed": "Installed", "updated": "Updated", "present": "Already present"}[status]
+    _emit(
+        {
+            "client": args.client,
+            "settings": str(settings_path),
+            "matcher": DEFAULT_MATCHER,
+            "command": command,
+            "status": status,
+        },
+        f"{verb} observation hook in {settings_path}\n"
+        f"  matcher: {DEFAULT_MATCHER}\n"
+        f"  command: {command}",
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
+    )
+    return ExitCode.OK
+
+
+def cmd_hooks_remove(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Remove the observation hook previously installed for a coding CLI."""
+    settings_path = Path(args.settings)
+    removed = remove_claude_code_hook(settings_path)
+    text = (
+        f"Removed observation hook from {settings_path}"
+        if removed
+        else f"No observation hook found in {settings_path}"
+    )
+    _emit(
+        {"client": args.client, "settings": str(settings_path), "removed": removed},
+        text,
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
+    )
+    return ExitCode.OK
+
+
 def cmd_verify(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
     """Re-audit the event chain for tampering."""
     # A run that does not exist has an empty, trivially valid chain. Reporting
@@ -993,6 +1102,43 @@ def build_parser() -> argparse.ArgumentParser:
     checkpoint.add_argument("--trigger", default="manual")
     checkpoint.add_argument("--reason", default="")
 
+    observe = add("observe", cmd_observe, "Record one observed tool completion. Mutates storage.")
+    observe.add_argument(
+        "--run-id",
+        default=None,
+        help="target run (default: the most recently active non-terminal run)",
+    )
+    observe.add_argument(
+        "--payload-file",
+        default=None,
+        help="read the hook payload from this file instead of stdin",
+    )
+
+    hooks = add("hooks", cmd_hooks_install, "Manage host-side observation hooks.")
+    hooks_sub = hooks.add_subparsers(dest="hooks_command", metavar="ACTION CLIENT", required=True)
+
+    def hooks_client(p: argparse.ArgumentParser, func: Any) -> None:
+        p.add_argument("client", choices=("claude-code",), help="which client to configure")
+        p.add_argument(
+            "--settings",
+            default=".claude/settings.json",
+            help="path to the client's settings file (default: .claude/settings.json)",
+        )
+        p.set_defaults(func=func)
+
+    install = hooks_sub.add_parser(
+        "install", help="Install the observation hook. Mutates settings."
+    )
+    install.add_argument(
+        "--db",
+        default=None,
+        help="bake a specific database path into the hook command",
+    )
+    hooks_client(install, cmd_hooks_install)
+
+    remove = hooks_sub.add_parser("remove", help="Remove the observation hook.")
+    hooks_client(remove, cmd_hooks_remove)
+
     with_run(add("verify", cmd_verify, "Re-audit the event chain."))
     with_run(add("actions", cmd_actions, "List external side effects."))
     with_env(with_run(add("show-contract", cmd_contract, "Print the recovery contract.")))
@@ -1073,7 +1219,9 @@ def main(
         parser.print_help(file=out)
         return ExitCode.OK
 
-    if args.command in ("benchmark", "attest-keygen", "serve"):
+    # hooks never touches a run, so it must not create an empty database as a
+    # side effect of editing a settings file.
+    if args.command in ("benchmark", "attest-keygen", "serve", "hooks"):
         return int(args.func(args, None, out, err))
 
     try:

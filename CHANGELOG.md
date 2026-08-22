@@ -8,6 +8,29 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Host-side observation hooks close part of the durability gap (#207).**
+  Recovery depends on the agent voluntarily calling the recording tools, so a
+  kill between performing work and reporting it left the next session a
+  contract that understated what had landed on disk (observed live with Claude
+  Code on 2026-08-22: an artifact fully written, progress still 0/1, zero
+  checkpoints). Two new CLI commands convert that voluntary recording into
+  mandatory interception for Claude Code: `continuum observe` reads one
+  PostToolUse hook payload from stdin (or `--payload-file`) and appends a
+  `TOOL_COMPLETED` event carrying the tool name, mutated path, byte count and
+  SHA-256 of the file as it exists right now; `continuum hooks install
+  claude-code` wires file-mutating tool completions to it by editing
+  `.claude/settings.json` in place (preserving unrelated settings,
+  self-healing a stale baked-in binary path, refusing to touch a settings file
+  that is not valid JSON), with `continuum hooks remove claude-code` to undo.
+  Observations target the explicit `--run-id`, else the most recently active
+  non-terminal run; with no run active they are dropped with exit 0 so hooks
+  never disturb unrelated sessions. Events are sourced `EXTERNAL_AGENT`: they
+  are evidence a resumed session can weigh, not a laundering path to trusted
+  state. Tests in `tests/test_cli_observe.py` include driving the exact
+  command string baked into settings.json through a real shell.
+
+### Added
+
 - **`scoped_to_run=False` now enforces global uniqueness (#34).** An unscoped
   idempotency key claims store-global identity but the ledger only replayed its
   own run's log, so two runs could each open a fresh slot for the same
