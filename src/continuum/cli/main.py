@@ -721,6 +721,10 @@ def cmd_verify(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
     # A run that does not exist has an empty, trivially valid chain. Reporting
     # that as "verified" would let `continuum verify $TYPO && deploy` succeed on
     # a name nobody has ever written to.
+    if args.repair_index and not args.index:
+        print("error: --repair-index requires --index", file=err)
+        return ExitCode.ERROR
+
     storage.get_run(args.run_id)
     report = storage.verify_events(args.run_id)
     payload = report.model_dump(mode="json")
@@ -738,22 +742,35 @@ def cmd_verify(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
     # corruption of the truth, and repair is always safe.
     index_lines: list[str] = []
     if getattr(args, "index", False):
-        drift = 0
+        drift: int | None = None
+        has_index = hasattr(storage, "action_index_drift")
         rebuild = getattr(storage, "rebuild_action_index", None)
-        if hasattr(storage, "action_index_drift"):
-            drift = storage.action_index_drift(args.run_id)
-        if drift and args.repair_index and rebuild is not None:
-            fixed = int(rebuild(args.run_id))
-            index_lines.append(
-                f"[ok] action index repaired from the log ({fixed} row(s) corrected)"
-            )
-        elif drift:
-            index_lines.append(
-                f"[!!] action index drifted from the log ({drift} row(s)); "
-                f"run with --repair-index to rebuild it"
-            )
+        if has_index:
+            # Repair only a projection whose source of truth verified: a
+            # tampered log must never be folded into the index (review 221).
+            if args.repair_index and not report.ok:
+                index_lines.append(
+                    "[!!] action index repair refused: the event chain failed "
+                    "verification; repair would launder tampered events"
+                )
+                payload["action_index_repair"] = "refused_chain_failed"
+            else:
+                drift = storage.action_index_drift()
+                if drift and args.repair_index and rebuild is not None:
+                    fixed = int(rebuild())
+                    index_lines.append(
+                        f"[ok] action index repaired from the log ({fixed} row(s) corrected)"
+                    )
+                    drift = storage.action_index_drift()
+                elif drift:
+                    index_lines.append(
+                        f"[!!] action index drifted from the log ({drift} row(s)); "
+                        f"run with --repair-index to rebuild it"
+                    )
+                else:
+                    index_lines.append("[ok] action index matches the log")
         else:
-            index_lines.append("[ok] action index matches the log")
+            index_lines.append("[auto] this engine maintains no action index")
         text = text + "\n" + "\n".join(index_lines)
         payload["action_index_drift"] = drift
 

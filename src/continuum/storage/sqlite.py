@@ -379,47 +379,40 @@ class SQLiteStorage(Storage):
                 f"action index row for key {key[:12]}... failed to load: {exc}"
             ) from exc
 
-    def action_index_drift(self, run_id: str | None = None) -> int:
-        """Count index rows that disagree with the event log. Read-only."""
-        canonical = self._canonical_index_rows(run_id)
-        expected = {key: (seq, entry[3]) for key, (entry, seq) in canonical.items()}
+    def action_index_drift(self) -> int:
+        """Count index rows that disagree with the event log. Read-only.
+
+        The projection is keyed globally, so drift is a store-wide property:
+        a run-scoped comparison would falsely flag rows owned by another
+        run's later write of the same key.
+        """
+        expected = {
+            key: (seq, entry[3]) for key, (entry, seq) in self._canonical_index_rows().items()
+        }
         with self._read() as conn:
-            if run_id is None:
-                stored = {
-                    r["key"]: (r["updated_seq"], r["status"])
-                    for r in conn.execute("SELECT key, updated_seq, status FROM action_index")
-                }
-            else:
-                stored = {
-                    r["key"]: (r["updated_seq"], r["status"])
-                    for r in conn.execute(
-                        "SELECT key, updated_seq, status FROM action_index WHERE run_id = ?",
-                        (run_id,),
-                    )
-                }
+            stored = {
+                r["key"]: (r["updated_seq"], r["status"])
+                for r in conn.execute("SELECT key, updated_seq, status FROM action_index")
+            }
         extra = set(stored) - set(expected)
         changed = sum(1 for k, val in expected.items() if stored.get(k) != val)
         return len(extra) + changed
 
-    def rebuild_action_index(self, run_id: str | None = None) -> int:
-        """Recompute the index from the log; returns corrected row count.
+    def rebuild_action_index(self) -> int:
+        """Recompute the whole index from the log; returns corrected rows.
 
-        The index is a projection, so repairing it from the log is always
-        safe. With ``run_id`` only that run's rows are recomputed. A
-        correction is any key whose stored row was missing, stale or spurious.
+        Always global by design: keys live in one store-wide namespace, so a
+        per-run rewrite could collide with another run's legitimate row of
+        the same key. A correction is any key whose stored row was missing,
+        stale or spurious.
         """
-        canonical = self._canonical_index_rows(run_id)
-        scope_clause = "" if run_id is None else " WHERE run_id = ?"
-        params = () if run_id is None else (run_id,)
+        canonical = self._canonical_index_rows()
         with self._write() as conn:
             before = {
                 r["key"]: (r["updated_seq"], r["status"])
-                for r in conn.execute(
-                    "SELECT key, updated_seq, status FROM action_index" + scope_clause,
-                    params,
-                )
+                for r in conn.execute("SELECT key, updated_seq, status FROM action_index")
             }
-            conn.execute("DELETE FROM action_index" + scope_clause, params)
+            conn.execute("DELETE FROM action_index")
             conn.executemany(
                 "INSERT OR REPLACE INTO action_index(key, run_id, action_id, status, "
                 "updated_seq, action_json) VALUES (?, ?, ?, ?, ?, ?)",
@@ -436,21 +429,12 @@ class SQLiteStorage(Storage):
         corrections += len(set(before) - set(canonical))
         return corrections
 
-    def _canonical_index_rows(
-        self, run_id: str | None
-    ) -> dict[str, tuple[tuple[str, str, str, str, str], int]]:
+    def _canonical_index_rows(self) -> dict[str, tuple[tuple[str, str, str, str, str], int]]:
         """Fold the log into ``{key: ((entry...), order_seq)}``, last write wins."""
         with self._read() as conn:
-            if run_id is None:
-                rows = conn.execute(
-                    "SELECT rowid AS rid, type, payload FROM events ORDER BY rowid"
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT rowid AS rid, type, payload FROM events WHERE run_id = ? "
-                    "ORDER BY rowid",
-                    (run_id,),
-                ).fetchall()
+            rows = conn.execute(
+                "SELECT rowid AS rid, type, payload FROM events ORDER BY rowid"
+            ).fetchall()
         canonical: dict[str, tuple[tuple[str, str, str, str, str], int]] = {}
         for row in rows:
             try:

@@ -117,6 +117,21 @@ class Storage(ABC):
         del key, exclude_run
         return None
 
+    def action_index_drift(self) -> int:
+        """Count index rows disagreeing with the log. Index engines only.
+
+        Callers must check :attr:`supports_action_index` first; engines
+        without an index deliberately have no meaningful answer.
+        """
+        raise NotImplementedError
+
+    def rebuild_action_index(self) -> int:
+        """Recompute the index from the log; returns corrected rows.
+
+        Same capability contract as :meth:`action_index_drift`.
+        """
+        raise NotImplementedError
+
     # -- lifecycle -------------------------------------------------------- #
 
     @abstractmethod

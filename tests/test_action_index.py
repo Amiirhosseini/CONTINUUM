@@ -8,6 +8,8 @@ tests pin its correctness against the historical scan semantics.
 
 from __future__ import annotations
 
+import io
+import json
 import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
@@ -15,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from continuum.actions import ActionLedger
+from continuum.cli import ExitCode
 from continuum.events import EventType
 from continuum.models import Action, ActionStatus, Run, UnknownSideEffect
 from continuum.storage import SQLiteStorage
@@ -143,15 +146,15 @@ def test_scoped_keys_never_match_other_runs(store: SQLiteStorage) -> None:
 def test_drift_is_detected_and_rebuild_repairs_it(store: SQLiteStorage) -> None:
     ledger = make_run(store, "run_1")
     ledger.claim("send_invoice", {}, key="invoice:2")
-    assert store.action_index_drift("run_1") == 0
+    assert store.action_index_drift() == 0
 
     # Simulate corruption of the projection (not the truth).
     store._connection.execute("UPDATE action_index SET status = 'completed'")
-    assert store.action_index_drift("run_1") > 0
+    assert store.action_index_drift() > 0
 
-    corrections = store.rebuild_action_index("run_1")
+    corrections = store.rebuild_action_index()
     assert corrections >= 1
-    assert store.action_index_drift("run_1") == 0
+    assert store.action_index_drift() == 0
     # The rebuilt row reflects the truth: still STARTED, not 'completed'.
     from continuum.actions.idempotency import idempotency_key
 
@@ -167,10 +170,9 @@ def test_spurious_rows_count_as_drift_and_are_removed(store: SQLiteStorage) -> N
         "INSERT INTO action_index(key, run_id, action_id, status, updated_seq, action_json) "
         "VALUES ('ghost', 'run_1', 'a', 'started', 999, '{}')"
     )
-    drift = store.action_index_drift("run_1")
-    assert drift >= 1
-    store.rebuild_action_index("run_1")
-    assert store.action_index_drift("run_1") == 0
+    assert store.action_index_drift() >= 1
+    store.rebuild_action_index()
+    assert store.action_index_drift() == 0
 
 
 # --- engines without an index ---------------------------------------------------- #
@@ -243,8 +245,6 @@ def test_v2_database_backfills_on_open(tmp_path: Path) -> None:
     raw = sqlite3.connect(db)
     raw.executescript(legacy)
     # A pre-index action event, shaped exactly like the writers produce it.
-    import json as _json
-
     from continuum.actions.idempotency import idempotency_key
 
     key = idempotency_key("send_invoice", None, scope="old", key="invoice:11")
@@ -253,12 +253,12 @@ def test_v2_database_backfills_on_open(tmp_path: Path) -> None:
     raw.execute(
         "INSERT INTO events VALUES ('old', 1, 'e1', 'RUN_STARTED', '2026-01-01', ?, "
         "NULL, 'deterministic', NULL, NULL)",
-        (_json.dumps({"goal": "g"}),),
+        (json.dumps({"goal": "g"}),),
     )
     raw.execute(
         "INSERT INTO events VALUES ('old', 2, 'e2', 'ACTION_RECORDED', '2026-01-02', ?, "
         "NULL, 'deterministic', NULL, NULL)",
-        (_json.dumps({"key": key, "action": action.model_dump(mode="json")}),),
+        (json.dumps({"key": key, "action": action.model_dump(mode="json")}),),
     )
     raw.commit()
     raw.close()
@@ -267,3 +267,59 @@ def test_v2_database_backfills_on_open(tmp_path: Path) -> None:
         found = store.foreign_action(key, exclude_run="other")
         assert found is not None
         assert found.status is ActionStatus.COMPLETED
+
+
+def test_a_key_rewritten_by_another_run_is_global_last_write_wins(
+    store: SQLiteStorage,
+) -> None:
+    """The key namespace is store-global: if run B later records the same key
+    run A recorded, the index row belongs to B, drift stays zero, and lookups
+    return B's record. A run-scoped fold would falsely flag A's row."""
+
+    a = make_run(store, "run_1")
+    make_run(store, "run_2")
+    first = a.claim("send_invoice", {}, key="shared:1", scoped_to_run=False)
+    a.complete(first.key, external_id="INV-A")
+
+    # Run B records the identical key directly (as an interrupted attempt).
+    from continuum.actions.idempotency import idempotency_key
+
+    b_key = idempotency_key("send_invoice", None, scope=None, key="shared:1")
+    action_b = Action(run_id="run_2", action_type="send_invoice", status=ActionStatus.STARTED)
+    store.append_event(
+        "run_2",
+        EventType.ACTION_RECORDED,
+        {"key": str(b_key), "action": action_b.model_dump(mode="json")},
+    )
+
+    assert store.action_index_drift() == 0
+    found = store.foreign_action(str(b_key), exclude_run="nobody")
+    assert found is not None
+    assert found.run_id == "run_2"
+    assert found.status is ActionStatus.STARTED
+
+
+def test_repair_refuses_when_the_chain_fails(tmp_path: Path) -> None:
+    """A tampered log must never be folded into the projection (review 221)."""
+    db = str(tmp_path / "tamper.db")
+    with SQLiteStorage(db) as store:
+        make_run(store, "run_1")
+        ActionLedger(store, "run_1").claim("send_invoice", {}, key="k-repair")
+        # Tamper with the committed event in place.
+        store._connection.execute(
+            "UPDATE events SET payload = replace(payload, '\"started\"', '\"completed\"') "
+            "WHERE type = 'ACTION_RECORDED'"
+        )
+    out_buf, err_buf = io.StringIO(), io.StringIO()
+    from continuum.cli import main as cli_main
+
+    code = cli_main(
+        ["--db", db, "--json", "verify", "run_1", "--index", "--repair-index"],
+        out=out_buf,
+        err=err_buf,
+    )
+    assert code == ExitCode.CORRUPTED
+    body = json.loads(out_buf.getvalue())
+    assert body.get("action_index_repair") == "refused_chain_failed"
+    # And the drift is reported as unknown rather than silently repaired.
+    assert body["action_index_drift"] is None

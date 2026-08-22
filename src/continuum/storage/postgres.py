@@ -107,12 +107,14 @@ CREATE TABLE IF NOT EXISTS checkpoints (
 
 CREATE INDEX IF NOT EXISTS checkpoints_by_run ON checkpoints(run_id, version);
 
+CREATE SEQUENCE IF NOT EXISTS action_index_ord_seq AS BIGINT;
+
 CREATE TABLE IF NOT EXISTS action_index (
     key TEXT PRIMARY KEY,
     run_id TEXT NOT NULL,
     action_id TEXT NOT NULL,
     status TEXT NOT NULL,
-    updated_seq BIGINT NOT NULL,
+    updated_seq BIGINT NOT NULL DEFAULT nextval('action_index_ord_seq'),
     action_json TEXT NOT NULL
 );
 
@@ -165,6 +167,41 @@ class PostgresStorage(Storage):
     def _create_schema(self) -> None:
         with self._lock:
             self._connection.execute(_SCHEMA)
+            self._backfill_action_index()
+
+    def _backfill_action_index(self) -> None:
+        """Seed the projection from the log when it is empty (issue #216).
+
+        The table is a derived projection: an empty index over existing
+        ACTION_* events means the database predates the index or lost its
+        rows, and rebuilding from events is always safe. Payload is stored as
+        TEXT, so JSON functions apply directly.
+        """
+        has_events = self._connection.execute(
+            "SELECT 1 FROM events WHERE type IN "
+            "('ACTION_RECORDED', 'ACTION_RECONCILED', 'ACTION_COMPENSATED') LIMIT 1"
+        ).fetchone()
+        if has_events is None:
+            return
+        empty = self._connection.execute("SELECT 1 FROM action_index LIMIT 1").fetchone()
+        if empty is not None:
+            return
+        self._connection.execute(
+            """
+            INSERT INTO action_index(key, run_id, action_id, status, updated_seq, action_json)
+            SELECT json_extract(e.payload, '$.key'),
+                   json_extract(e.payload, '$.action.run_id'),
+                   json_extract(e.payload, '$.action.action_id'),
+                   json_extract(e.payload, '$.action.status'),
+                   nextval('action_index_ord_seq'),
+                   json(json_extract(e.payload, '$.action'))
+            FROM events e
+            WHERE e.type IN ('ACTION_RECORDED', 'ACTION_RECONCILED', 'ACTION_COMPENSATED')
+              AND json_extract(e.payload, '$.key') IS NOT NULL
+              AND json_extract(e.payload, '$.action') IS NOT NULL
+            ORDER BY ctid
+            """
+        )
 
     # -- transactions ----------------------------------------------------- #
 
@@ -394,6 +431,35 @@ class PostgresStorage(Storage):
             raise ConcurrentWriteError(
                 f"run {event.run_id!r} sequence {event.sequence} was taken by another writer"
             ) from exc
+        self._maintain_action_index(event)
+
+    def _maintain_action_index(self, event: Event) -> None:
+        """Upsert the projection row for an ACTION_* event, same txn (#216).
+
+        updated_seq comes from a sequence so recency is global insertion
+        order, matching the global last-write-per-key fold.
+        """
+        entry = index_entry_from_payload(event.type, dict(event.payload))
+        if entry is None:
+            return
+        key, run_id, action_id, status, action_json = entry
+        try:
+            self._connection.execute(
+                "INSERT INTO action_index(key, run_id, action_id, status, "
+                "updated_seq, action_json) VALUES (%s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (key) DO UPDATE SET run_id = EXCLUDED.run_id, "
+                "action_id = EXCLUDED.action_id, status = EXCLUDED.status, "
+                "updated_seq = EXCLUDED.updated_seq, action_json = EXCLUDED.action_json",
+                (key, run_id, action_id, status, self._next_index_ord(), action_json),
+            )
+        except self._psycopg.IntegrityError as exc:
+            raise CorruptedRecord(
+                f"action index maintenance failed for key {key[:12]}...: {exc}"
+            ) from exc
+
+    def _next_index_ord(self) -> int:
+        row = self._connection.execute("SELECT nextval('action_index_ord_seq') AS v").fetchone()
+        return int(row["v"])
 
     def foreign_action(self, key: str, *, exclude_run: str) -> Action | None:
         """Indexed cross-run ledger lookup (issue #216)."""
@@ -412,13 +478,11 @@ class PostgresStorage(Storage):
                 f"action index row for key {key[:12]}... failed to load: {exc}"
             ) from exc
 
-    def rebuild_action_index(self, run_id: str | None = None) -> int:
-        """Recompute the index from the log; returns corrected rows."""
-        canonical = self._canonical_index_rows(run_id)
+    def rebuild_action_index(self) -> int:
+        """Recompute the whole index from the log (global key space)."""
+        canonical = self._canonical_index_rows()
         with self._write():
-            scope = "" if run_id is None else " WHERE run_id = %s"
-            params = () if run_id is None else (run_id,)
-            self._connection.execute("DELETE FROM action_index" + scope, params)
+            self._connection.execute("DELETE FROM action_index")
             self._connection.executemany(
                 "INSERT INTO action_index(key, run_id, action_id, status, "
                 "updated_seq, action_json) VALUES (%s, %s, %s, %s, %s, %s)",
@@ -429,16 +493,12 @@ class PostgresStorage(Storage):
             )
         return 0
 
-    def _canonical_index_rows(
-        self, run_id: str | None
-    ) -> dict[str, tuple[tuple[str, str, str, str, str], int]]:
+    def _canonical_index_rows(self) -> dict[str, tuple[tuple[str, str, str, str, str], int]]:
+        """Fold every run's action events; global last-write-per-key wins."""
         with self._read():
-            query = (
-                "SELECT ctid AS rid, type, payload FROM events"
-                + (" WHERE run_id = %s" if run_id is not None else "")
-                + " ORDER BY ctid"
-            )
-            rows = self._connection.execute(query, () if run_id is None else (run_id,)).fetchall()
+            rows = self._connection.execute(
+                "SELECT ctid AS rid, type, payload FROM events ORDER BY ctid"
+            ).fetchall()
         canonical: dict[str, tuple[tuple[str, str, str, str, str], int]] = {}
         for i, row in enumerate(rows):
             payload = (
