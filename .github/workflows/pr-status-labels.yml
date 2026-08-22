@@ -50,7 +50,8 @@ jobs:
 
             const { owner, repo } = context.repo;
             const isReview = context.eventName === "pull_request_review";
-            const pr = isReview ? context.payload.review.pull_request : context.payload.pull_request;
+            // Both event payloads carry the PR at payload.pull_request
+            const pr = context.payload.pull_request;
             const prNumber = pr.number;
 
             let addLabel;
