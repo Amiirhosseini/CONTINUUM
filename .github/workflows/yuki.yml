@@ -9,8 +9,9 @@ on:
 jobs:
   yuki:
     if: |
-      contains(github.event.comment.body, ' /yuki') ||
-      startsWith(github.event.comment.body, '/yuki')
+      (contains(github.event.comment.body, ' /yuki') ||
+      startsWith(github.event.comment.body, '/yuki')) &&
+      !contains(github.event.comment.body, '/yuki review')
     runs-on: ubuntu-latest
     permissions:
       id-token: write
