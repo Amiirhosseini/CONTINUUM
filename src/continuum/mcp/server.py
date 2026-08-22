@@ -475,20 +475,20 @@ def build_server(
         failed: int = 0,
     ) -> str:
         """Record progress for a run."""
+        # Reject impossible counters before anything is written, including the
+        # run itself: a rejected call must not leave behind a runs row and a
+        # RUN_STARTED event (issue #203). The `Progress` model enforces the
+        # arithmetic at projection time; checking here keeps the bad value out
+        # of the event log in the first place.
+        if completed < 0 or failed < 0:
+            raise ValueError("progress counters must be non-negative")
+        if total is not None and completed + failed > total:
+            raise ValueError(f"completed ({completed}) + failed ({failed}) exceeds total ({total})")
         ctx.ensure_run(run_id, goal)
         payload: dict[str, Any] = {"completed": completed, "failed": failed}
         if total is not None:
             payload["total"] = total
             payload["pending"] = max(total - completed - failed, 0)
-        # Reject impossible counters before anything is written. An over-total
-        # update passes `verify_events` but fails to project, so a run whose log
-        # is intact yet unprojectable would be poisoned permanently. The
-        # `Progress` model enforces this at projection time; checking here keeps
-        # the bad value out of the event log in the first place.
-        if completed < 0 or failed < 0:
-            raise ValueError("progress counters must be non-negative")
-        if total is not None and completed + failed > total:
-            raise ValueError(f"completed ({completed}) + failed ({failed}) exceeds total ({total})")
         ctx.storage.append_event(run_id, EventType.TASK_UPDATED, payload, source=AGENT_SOURCE)
 
         state = project(run_id, ctx.storage.read_events(run_id))

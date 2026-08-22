@@ -216,8 +216,9 @@ async def test_over_total_progress_is_rejected_before_being_written(
             {"run_id": "run_1", "completed": 15, "total": 10, "goal": "g"},
             context=_ctx(TEST_CLIENT),
         )
-    # Nothing beyond the start event was written: the log is not poisoned.
-    assert [e.type.value for e in ctx.storage.read_events("run_1")] == ["RUN_STARTED"]
+    # Nothing was written: no TASK_UPDATED (issue #15), and since issue #203
+    # not even the RUN_STARTED backfill happens for a rejected call.
+    assert [e.type.value for e in ctx.storage.read_events("run_1")] == []
 
 
 @pytest.mark.asyncio
@@ -246,8 +247,41 @@ async def test_negative_progress_is_rejected_before_being_written_without_total(
             arguments,
             context=_ctx(TEST_CLIENT),
         )
-    # Nothing beyond the start event was written: the log is not poisoned.
-    assert [e.type.value for e in ctx.storage.read_events("run_1")] == ["RUN_STARTED"]
+    # Nothing was written: no TASK_UPDATED (issue #38), and since issue #203
+    # not even the RUN_STARTED backfill happens for a rejected call.
+    assert [e.type.value for e in ctx.storage.read_events("run_1")] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "rejected_update",
+    [
+        {"completed": -5, "goal": "g"},
+        {"completed": 15, "total": 10, "goal": "g"},
+    ],
+)
+async def test_a_rejected_progress_call_writes_nothing_at_all(
+    server_ctx: tuple[Any, Any],
+    rejected_update: dict[str, Any],
+) -> None:
+    """A rejected call must not even create the run (issue #203).
+
+    The counter checks used to run after `ensure_run`, so a typo'd or hostile
+    call left a goal-bearing run row and a RUN_STARTED event behind — facts no
+    tool can delete. Validation now precedes creation, matching the guard's
+    own rule that a refusal writes nothing.
+    """
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    server, ctx = server_ctx
+    with pytest.raises(ToolError, match="non-negative|exceeds total"):
+        await server.call_tool(
+            "continuum_record_progress",
+            {"run_id": "run_1", **rejected_update},
+            context=_ctx(TEST_CLIENT),
+        )
+    with pytest.raises(RunNotFound):
+        ctx.storage.get_run("run_1")
 
 
 @pytest.mark.asyncio
