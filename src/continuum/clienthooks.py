@@ -253,9 +253,7 @@ def remove_claude_code_hook(settings_path: Path, *, matcher: str = DEFAULT_MATCH
         # the whole group would delete configuration this command never
         # installed.
         kept_hooks = [
-            h
-            for h in group["hooks"]
-            if not (isinstance(h, dict) and _is_observe_hook(h))
+            h for h in group["hooks"] if not (isinstance(h, dict) and _is_observe_hook(h))
         ]
         if len(kept_hooks) != len(group["hooks"]):
             removed = True
