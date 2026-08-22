@@ -73,9 +73,15 @@ def test_unknown_attribute_raises_attribute_error() -> None:
         continuum.adapters.definitely_not_an_adapter  # noqa: B018
 
 
-def test_repeated_access_is_cached_not_reimported() -> None:
-    import continuum.adapters
-
-    first = continuum.adapters.langgraph_available
-    second = continuum.adapters.langgraph_available
-    assert first is second
+def test_repeated_access_is_cached_in_the_module_dict() -> None:
+    """Caching means __getattr__ runs once: the name must be absent from the
+    module dict before first access and present afterwards. Identity alone
+    cannot prove this, because Python's import cache returns the same object
+    even when __getattr__ fires every time."""
+    result = _run(
+        "import continuum.adapters\n"
+        "assert 'langgraph_available' not in vars(continuum.adapters)\n"
+        "_ = continuum.adapters.langgraph_available\n"
+        "assert 'langgraph_available' in vars(continuum.adapters)\n"
+    )
+    assert result.returncode == 0, result.stderr
