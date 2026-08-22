@@ -48,6 +48,26 @@ def test_run_lifecycle(storage: PostgresStorage) -> None:
     assert storage.get_active_run() is not None
 
 
+def test_create_run_started_writes_row_and_first_event_together(
+    storage: PostgresStorage,
+) -> None:
+    """Same atomicity contract as the SQLite backend (PR #206 review)."""
+    storage.create_run_started(Run(run_id="run_pg_s", goal="Ship it"))
+
+    assert storage.get_run("run_pg_s").goal == "Ship it"
+    events = storage.read_events("run_pg_s")
+    assert [e.type.value if hasattr(e.type, "value") else e.type for e in events] == ["RUN_STARTED"]
+    assert storage.verify_events("run_pg_s").ok
+
+
+def test_create_run_started_refuses_a_duplicate(storage: PostgresStorage) -> None:
+    from continuum.models import Origin
+
+    storage.create_run_started(Run(run_id="run_pg_d", goal="first"), source=Origin.HUMAN)
+    with pytest.raises(ConcurrentWriteError, match="already exists"):
+        storage.create_run_started(Run(run_id="run_pg_d", goal="second"), source=Origin.HUMAN)
+
+
 def test_run_not_found(storage: PostgresStorage) -> None:
     with pytest.raises(RunNotFound):
         storage.get_run("ghost")

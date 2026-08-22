@@ -68,6 +68,35 @@ def test_duplicate_run_ids_are_refused(storage: SQLiteStorage, run: Run) -> None
         storage.create_run(Run(run_id="run_1", goal="other"))
 
 
+def test_create_run_started_writes_row_and_first_event_together(
+    storage: SQLiteStorage,
+) -> None:
+    """The run row and its RUN_STARTED event are one fact (CodeRabbit review,
+    PR #206): a crash between two separate writes would strand a run that can
+    be neither projected nor resumed, so the store commits both or neither."""
+    storage.create_run_started(Run(run_id="run_s", goal="Ship it"), source=Origin.HUMAN)
+
+    loaded = storage.get_run("run_s")
+    assert loaded.goal == "Ship it"
+    events = storage.read_events("run_s")
+    assert [e.type for e in events] == [EventType.RUN_STARTED]
+    assert events[0].sequence == 1
+    assert events[0].payload["goal"] == "Ship it"
+    assert events[0].source is Origin.HUMAN
+    # The event is a real chain head, verifiable like any other.
+    assert storage.verify_events("run_s").ok
+
+
+def test_create_run_started_refuses_a_duplicate_without_partial_writes(
+    storage: SQLiteStorage, run: Run
+) -> None:
+    storage.append_event("run_1", EventType.RUN_STARTED, {"goal": "Analyze 100 documents"})
+    with pytest.raises(ConcurrentWriteError, match="already exists"):
+        storage.create_run_started(Run(run_id="run_1", goal="hijack"))
+    # The existing run's history is untouched.
+    assert storage.last_sequence("run_1") == 1
+
+
 def test_updating_a_run_advances_its_timestamp(storage: SQLiteStorage, run: Run) -> None:
     updated = storage.update_run(run.model_copy(update={"status": RunStatus.COMPLETED}))
     assert updated.updated_at >= run.updated_at

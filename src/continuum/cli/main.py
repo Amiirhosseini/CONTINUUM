@@ -9,8 +9,8 @@ Two principles shape the surface:
 
 **Read-only by default.** ``inspect``, ``history``, ``validate``, ``diff`` and
 ``show-contract`` never write. They are safe against a live database while an
-agent is mid-run. Only ``init``, ``checkpoint`` and ``resume --repair`` mutate,
-and they say so.
+agent is mid-run. Only ``init``, ``start``, ``checkpoint``, ``confirm`` and
+``resume --repair`` mutate, and they say so.
 
 **Exit codes carry the verdict.** ``continuum resume $RUN && ./start-agent.sh``
 must not launch an agent onto stale state, so only a verified-safe run exits 0.
@@ -35,7 +35,14 @@ from continuum.cli.colour import Palette
 from continuum.cli.exitcodes import ExitCode, exit_code_for
 from continuum.environment import StaticProvider, capture
 from continuum.events import EventType
-from continuum.models import ActionStatus, EnvironmentSnapshot, EnvResource, Origin, RecoveryMode
+from continuum.models import (
+    ActionStatus,
+    EnvironmentSnapshot,
+    EnvResource,
+    Origin,
+    RecoveryMode,
+    Run,
+)
 from continuum.observability import render_dashboard
 from continuum.provenance_map import summarize
 from continuum.recovery import RecoveryEngine, render_contract
@@ -50,6 +57,7 @@ from continuum.state.semantic import ProjectionError, project
 from continuum.state.versioning import state_fingerprint
 from continuum.storage import (
     CheckpointNotFound,
+    ConcurrentWriteError,
     CorruptedRecord,
     RunNotFound,
     Storage,
@@ -183,6 +191,34 @@ def cmd_init(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> 
         f"Initialised CONTINUUM storage at {args.db}",
         as_json=args.json,
         stream=out,
+    )
+    return ExitCode.OK
+
+
+def cmd_start(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Create a run with a goal, so the CLI can originate work.
+
+    Until now a run could only be created through the Python API or an MCP
+    client, which left the CLI's own "start one with ..." hint pointing at
+    nothing (issue #204). The run row and its RUN_STARTED event are one fact,
+    so they are written in a single transaction (a crash between two separate
+    writes would strand a run that can be neither projected nor resumed); the
+    goal is asserted by a human at the keyboard, so it is sourced Origin.HUMAN
+    rather than self-certified.
+    """
+    try:
+        run = storage.create_run_started(
+            Run(run_id=args.run_id, goal=args.goal), source=Origin.HUMAN
+        )
+    except ConcurrentWriteError as exc:
+        print(f"error: {exc}", file=err)
+        return ExitCode.ERROR
+    _emit(
+        {"run_id": run.run_id, "goal": run.goal},
+        f"Started run {run.run_id}: {args.goal}",
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
     )
     return ExitCode.OK
 
@@ -442,7 +478,7 @@ def cmd_resume(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
         active = storage.get_active_run()
         if active is None:
             print(
-                "No active run to resume. Start one with: continuum checkpoint <run_id>",
+                'No active run to resume. Start one with: continuum start <run_id> --goal "..."',
                 file=err,
             )
             return 2
@@ -542,6 +578,11 @@ def cmd_confirm(args: argparse.Namespace, storage: Storage, out: Any, err: Any) 
 
 def cmd_checkpoint(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
     """Force a checkpoint. Mutates the run."""
+    # Check existence before projecting: otherwise a typo'd run name surfaces
+    # as a ProjectionError about a missing RUN_STARTED event (exit 1) instead
+    # of the truth (exit 2), which is the same misdiagnosis issue #18 fixed
+    # for `events`. Every other mutating command checks first; this one does too.
+    storage.get_run(args.run_id)  # raises RunNotFound -> NOT_FOUND by the dispatcher
     manager = CheckpointManager(storage)
     checkpoint = manager.checkpoint(
         args.run_id,
@@ -900,6 +941,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     add("init", cmd_init, "Create storage.")
     add("runs", cmd_runs, "List runs.").add_argument("--limit", type=int, default=20)
+
+    start = with_run(add("start", cmd_start, "Create a run with a goal. Mutates storage."))
+    start.add_argument("--goal", required=True, help="what the run is trying to achieve")
 
     inspect = with_run(add("inspect", cmd_inspect, "Show semantic state."))
     inspect.add_argument("--version", type=int, dest="version", help="inspect a past version")
