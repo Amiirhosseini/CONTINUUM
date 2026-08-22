@@ -716,6 +716,57 @@ def cmd_hooks_remove(args: argparse.Namespace, storage: Storage, out: Any, err: 
     return ExitCode.OK
 
 
+def cmd_reconcile_auto(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Settle uncertain actions with registered probes (issue #218).
+
+    Mutating by design (it appends ACTION_RECONCILED events through the
+    ledger), which is why it is its own command rather than something
+    `validate`/`resume` do implicitly: those stay read-only so the exit-code
+    safety contract holds. With no registered probe for an action's type,
+    that action is left exactly as the ledger holds it.
+    """
+    from continuum.actions.ledger import ActionLedger
+    from continuum.reconcilers import (
+        DEFAULT_RECONCILERS_PATH,
+        ReconcilerConfigError,
+        load_reconcilers,
+        settle_run,
+    )
+
+    storage.get_run(args.run_id)
+    try:
+        probes = load_reconcilers(
+            Path(args.config) if args.config else Path(DEFAULT_RECONCILERS_PATH)
+        )
+    except ReconcilerConfigError as exc:
+        print(f"error: {exc}", file=err)
+        return ExitCode.ERROR
+
+    pending = ActionLedger(storage, args.run_id).pending()
+    report = settle_run(storage, args.run_id, probes, dry_run=args.dry_run)
+    payload = {"run_id": args.run_id, "dry_run": args.dry_run, **report.as_dict()}
+    lines = [
+        f"pending actions: {len(pending)}, "
+        f"settled: {report.settled} "
+        f"(occurred {len(report.settled_true)}, not-occurred {len(report.settled_false)}), "
+        f"unresolved: {len(report.unresolved)}, "
+        f"no probe registered: {len(report.skipped_no_probe)}"
+    ]
+    for action_type, detail in report.unresolved:
+        lines.append(f"  [!!] {action_type}: {detail}")
+    if args.dry_run:
+        lines.append("dry run: nothing was written")
+    _emit(
+        payload,
+        "\n".join(lines),
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
+    )
+    remaining = len(pending) - report.settled
+    return ExitCode.OK if remaining <= 0 else ExitCode.REQUIRES_HUMAN
+
+
 def cmd_verify(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
     """Re-audit the event chain for tampering."""
     # A run that does not exist has an empty, trivially valid chain. Reporting
@@ -1140,6 +1191,22 @@ def build_parser() -> argparse.ArgumentParser:
     hooks_client(remove, cmd_hooks_remove)
 
     with_run(add("verify", cmd_verify, "Re-audit the event chain."))
+
+    reconcile_auto = with_run(
+        add(
+            "reconcile",
+            cmd_reconcile_auto,
+            "Settle uncertain actions with registered probes. Mutates storage.",
+        )
+    )
+    reconcile_auto.add_argument(
+        "--dry-run", action="store_true", help="report what probes would settle, write nothing"
+    )
+    reconcile_auto.add_argument(
+        "--config",
+        default=None,
+        help="probe registry path (default: .continuum/reconcilers.json)",
+    )
     with_run(add("actions", cmd_actions, "List external side effects."))
     with_env(with_run(add("show-contract", cmd_contract, "Print the recovery contract.")))
 
