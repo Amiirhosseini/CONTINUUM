@@ -8,6 +8,21 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Lazy adapter imports (#214).** `continuum.adapters` sits on the critical
+  path of every entry point, but eagerly imported the optional SDK adapters,
+  so opening the MCP server cost roughly 3s before answering its first
+  request, and every `continuum observe` hook subprocess paid it again. The
+  dependency-free adapters stay eager; browser/container/kubernetes and the
+  langchain/langgraph/openai names now resolve through module
+  `__getattr__` (PEP 562) on first access, in both `continuum.adapters` and
+  the top-level `continuum` package. The public import surface is unchanged.
+  Measured on this machine: MCP server spawn-to-first-response drops from
+  about 3s to about 0.1s, and importing either package leaves none of
+  langgraph, langchain or openai in `sys.modules`. The full test suite also
+  gets faster for the same reason. Tests in `tests/test_adapters_lazy.py`
+  run their key assertions in subprocesses so earlier imports cannot mask a
+  regression.
+
 - **Host-side observation hooks close part of the durability gap (#207).**
   Recovery depends on the agent voluntarily calling the recording tools, so a
   kill between performing work and reporting it left the next session a
