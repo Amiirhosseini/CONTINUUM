@@ -30,6 +30,7 @@ jobs:
               if (state === "approved") {
                 addLabel = "ready to merge";
                 removeLabels = ["awaiting review", "changes requested"];
+                await maybeThankFirstTimeContributor(pr);
               } else if (state === "changes_requested") {
                 addLabel = "changes requested";
                 removeLabels = ["awaiting review", "ready to merge"];
@@ -75,5 +76,47 @@ jobs:
                 repo,
                 issue_number: prNumber,
                 labels: [addLabel],
+              });
+            }
+
+            async function maybeThankFirstTimeContributor(pr) {
+              const author = pr.user.login;
+              if (author.endsWith("[bot]")) {
+                return;
+              }
+              const merged = await github.paginate(github.rest.pulls.list, {
+                owner,
+                repo,
+                state: "closed",
+                per_page: 100,
+              });
+              const hasEarlierMergedPR = merged.some(
+                (p) => p.user.login === author && p.merged_at && p.number !== pr.number
+              );
+              if (hasEarlierMergedPR) {
+                return;
+              }
+
+              const { data: comments } = await github.rest.issues.listComments({
+                owner,
+                repo,
+                issue_number: prNumber,
+              });
+              if (comments.some((c) => c.body && c.body.includes("<!-- first-contribution-thanks -->"))) {
+                return;
+              }
+
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: prNumber,
+                body: [
+                  "<!-- first-contribution-thanks -->",
+                  "This PR has been approved and is now labeled `ready to merge`. Thank you for your first contribution to CONTINUUM.",
+                  "",
+                  "Working through review feedback is exactly how good open source contributions happen, and you saw it through. We hope this is the first of many.",
+                  "",
+                  "If you want ideas for a next change, issues labeled `good first issue` are a good place to start. Welcome aboard.",
+                ].join("\n"),
               });
             }
