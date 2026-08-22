@@ -8,6 +8,22 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Post-checkpoint observations surfaced in the recovery contract (#208).**
+  The observation hooks (#210) recorded what landed on disk, but a resuming
+  session had to know to inspect the raw event log to see it; the contract
+  reported self-reported progress alone. `RecoveryContract` now carries
+  `post_checkpoint_observations`: every file observation recorded after the
+  latest state version's source sequence, newest first and capped at 50 with
+  an explicit truncation marker, each disk-checked at assess time as
+  `verified`, `changed`, `missing` or `recorded`. The rows appear in
+  `continuum resume`/`validate` output and every rendered contract.
+  Deliberately informational: provenance stays conservative per #207, so
+  observations never move `mode`, `safe` or any required action; they tell
+  the resuming agent what is true about the workspace without certifying
+  anything. Verified live: an intact artifact shows `verified`, one modified
+  after its observation shows `changed`, and the decision fields are
+  byte-identical to a run without observations.
+
 - **Host-side observation hooks close part of the durability gap (#207).**
   Recovery depends on the agent voluntarily calling the recording tools, so a
   kill between performing work and reporting it left the next session a

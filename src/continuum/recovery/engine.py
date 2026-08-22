@@ -53,6 +53,7 @@ from continuum.models import (
     StateStatus,
 )
 from continuum.recovery.contract import build_contract
+from continuum.recovery.observations import collect_observations
 from continuum.recovery.planner import RepairPlan, plan_repairs
 from continuum.state.validator import StateValidator, ValidationOutcome
 from continuum.storage.base import Storage
@@ -255,6 +256,15 @@ class RecoveryEngine:
         mode, rationale = self._decide(validation, uncertain, plan, restored, self.strict_unknown)
 
         reason = "; ".join(rationale) if rationale else validation.report.reason
+
+        # Post-checkpoint file observations (#208): informational evidence for
+        # the resuming agent, never a factor in the decision itself.
+        after_sequence = 0
+        latest_version = self.storage.latest_version(run_id)
+        if latest_version is not None:
+            after_sequence = latest_version.source_sequence
+        observations = collect_observations(self.storage, run_id, after_sequence=after_sequence)
+
         contract = build_contract(
             run_id=run_id,
             checkpoint_version=checkpoint_version,
@@ -263,6 +273,7 @@ class RecoveryEngine:
             plan=plan,
             reason=reason,
             scope=scope,
+            post_checkpoint_observations=observations,
         )
 
         tail_evidence: str | None = None
