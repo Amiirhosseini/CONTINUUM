@@ -69,6 +69,53 @@ def interrupt_a_side_effect(db: str) -> None:
         ActionLedger(store, "run_1").claim("github.create_issue", {"title": "Anomaly"})
 
 
+# --- creating a run from the CLI (issue #204) -------------------------------- #
+
+
+def test_start_creates_a_run_the_whole_toolchain_can_use(tmp_path: Path) -> None:
+    """The CLI could not originate work before `start`: the resume hint pointed
+    at `continuum checkpoint <run_id>`, which fails on a run that does not
+    exist yet."""
+    path = str(tmp_path / "fresh.db")
+    code, out, err = run("--db", path, "start", "myrun", "--goal", "Ship the thing")
+    assert code == ExitCode.OK, err
+
+    with SQLiteStorage(path) as store:
+        assert store.get_run("myrun").goal == "Ship the thing"
+        events = store.read_events("myrun")
+    assert [e.type.value for e in events] == ["RUN_STARTED"]
+    assert events[0].payload["goal"] == "Ship the thing"
+
+    # The run is now visible everywhere a run must be.
+    code, out, _ = run("--db", path, "runs")
+    assert "myrun" in out
+    # A human-asserted goal with no self-reported progress is genuinely safe
+    # to resume: the verdict must be OK, not merely "found".
+    code, out, _ = run("--db", path, "resume", "myrun")
+    assert code == ExitCode.OK
+    assert "RESUME" in out
+
+
+def test_start_without_a_goal_is_a_usage_error(tmp_path: Path) -> None:
+    path = str(tmp_path / "fresh.db")
+    with pytest.raises(SystemExit):
+        run("--db", path, "start", "myrun")
+
+
+def test_starting_an_existing_run_fails_without_touching_history(db: str) -> None:
+    before_events: int
+    with SQLiteStorage(db) as store:
+        before_events = store.last_sequence("run_1")
+
+    code, _, err = run("--db", db, "start", "run_1", "--goal", "hijack")
+    assert code == ExitCode.ERROR
+    assert "already exists" in err
+
+    with SQLiteStorage(db) as store:
+        assert store.get_run("run_1").goal == "Analyze 100 documents"
+        assert store.last_sequence("run_1") == before_events
+
+
 # --- the exit-code contract ------------------------------------------------ #
 
 
