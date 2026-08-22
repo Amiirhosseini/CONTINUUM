@@ -1,4 +1,4 @@
-name: opencode
+name: yuki
 
 on:
   issue_comment:
@@ -7,13 +7,13 @@ on:
     types: [created]
 
 jobs:
-  opencode:
+  yuki:
     if: |
       github.event.comment.user.login != 'anya-research' &&
       github.event.comment.user.login != 'yuki-fuyutsuki' &&
-      (startsWith(github.event.comment.body, '/anya') ||
-      contains(github.event.comment.body, ' /anya')) &&
-      !contains(github.event.comment.body, '/anya review')
+      (contains(github.event.comment.body, ' /yuki') ||
+      startsWith(github.event.comment.body, '/yuki')) &&
+      !contains(github.event.comment.body, '/yuki review')
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -26,13 +26,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Run opencode
+      - name: Run Yuki
         uses: anomalyco/opencode/github@latest
         env:
-          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.ANYA_TOKEN }}
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY_YUKI }}
+          GITHUB_TOKEN: ${{ secrets.YUKI_TOKEN }}
         with:
           model: opencode/muse-spark-1.2-contributor-free
           use_github_token: true
-          mentions: "/anya"
+          mentions: "/yuki"
           share: false

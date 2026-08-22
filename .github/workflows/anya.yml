@@ -1,4 +1,4 @@
-name: opencode
+name: anya
 
 on:
   issue_comment:
@@ -7,7 +7,7 @@ on:
     types: [created]
 
 jobs:
-  opencode:
+  anya:
     if: |
       github.event.comment.user.login != 'anya-research' &&
       github.event.comment.user.login != 'yuki-fuyutsuki' &&
@@ -26,7 +26,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Run opencode
+      - name: Run Anya
         uses: anomalyco/opencode/github@latest
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
