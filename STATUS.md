@@ -4,10 +4,12 @@
 audit ran: every behavioural module was read and exercised, surfacing 20
 evidence-backed issues (#29-"#49, excluding the externally-filed #39). They are
 labelled `good first issue` or `help wanted` (plus `adapter`/`detector` where
-relevant) and formed the contributor backlog. Eight of them have since been fixed
-and merged to `main` (#31, #32, #37, #38, #40, #41, #44, #48); the remaining nine
-are tracked as still-open contributor work in the Known issues at launch table
-below.
+relevant) and formed the contributor backlog. All twenty have since been fixed
+and merged to `main`; the Known issues at launch table below records each one as
+Resolved. (An earlier revision of this file described nine of them, #29, #30,
+#33, #34, #36, #42, #43, #45 and #49, as open contributor work; that was stale,
+and a 2026-08-22 audit confirmed all nine closed on GitHub with their fixes on
+`main`.)
 
 A factual snapshot for whoever picks this up next, human or otherwise, with no
 memory of how any of it was found. It records what is verified, what is
@@ -224,7 +226,7 @@ observation that raising `ToolError` directly is a defensible alternative to the
 
 ---
 
-## Open items
+## Previously open items
 
 | Issue | Summary | Priority |
 |:--|:--|:--|
@@ -262,35 +264,38 @@ The three launch-critical defects were fixed and closed in `e8271bd`:
 - **#47** — OpenAI adapter `RUN_STARTED` backfill: `_ensure_run_exists` now
   backfills `RUN_STARTED` like `ContinuumMCP.ensure_run`.
 
-The remaining **9 are real but non-launch-critical and are left open as
-contributor work** (labeled `good first issue` / `help wanted`):
+The remaining **9 were real but non-launch-critical**. All are now closed on
+GitHub and their fixes are on `main`:
 
 #29, #30, #33, #34, #36, #42, #43, #45, #49.
 
 #### Known issues at launch
 
+Dispositions updated 2026-08-22 against `main` (`d257d85`): every row below is
+resolved; where no closing commit was recorded here, the fix was confirmed by
+reading the current code cited in the note.
+
 | Issue | One-line impact | Disposition |
 |:--|:--|:--|
-| [#29](https://github.com/Cyrax321/CONTINUUM/issues/29) | `ActionLedger.reconcile(occurred=False)` leaves stale `external_id`/`result` on the action | Open (contributor work) |
-| [#30](https://github.com/Cyrax321/CONTINUUM/issues/30) | `FileProvider` reports a missing file as `version=None`, so diff marks it `changed` not `removed` | Open (contributor work) |
+| [#29](https://github.com/Cyrax321/CONTINUUM/issues/29) | `ActionLedger.reconcile(occurred=False)` leaves stale `external_id`/`result` on the action | Resolved: `reconcile` now clears `external_id`, `result` and `result_hash` on the occurred-false path (`src/continuum/actions/ledger.py`) |
+| [#30](https://github.com/Cyrax321/CONTINUUM/issues/30) | `FileProvider` reports a missing file as `version=None`, so diff marks it `changed` not `removed` | Resolved: `FileProvider.capture` omits missing files entirely, so the diff classifies them REMOVED (`src/continuum/environment/snapshot.py`) |
 | [#31](https://github.com/Cyrax321/CONTINUUM/issues/31) | `continuum replay` claims to confirm state matches the stored version but never compares | Resolved: `a5c3307` (PR #50: replay now actually verifies the stored version) |
 | [#32](https://github.com/Cyrax321/CONTINUUM/issues/32) | `continuum replay --upto N` crashes with `ProjectionError` when the prefix excludes `RUN_STARTED` | Resolved: `fd1bf90` (reject `--upto` values that exclude `RUN_STARTED`) |
-| [#33](https://github.com/Cyrax321/CONTINUUM/issues/33) | `identity_tokens` drops plain-word resource ids (`invoice`) because `_is_strong_token` requires a digit/`@`/`.` | Open (contributor work) |
-| [#34](https://github.com/Cyrax321/CONTINUUM/issues/34) | `ActionLedger scoped_to_run=False` does not enforce global uniqueness across runs as documented | Open (contributor work) |
-| [#36](https://github.com/Cyrax321/CONTINUUM/issues/36) | `identity_tokens` drops purely-numeric resource ids, so cross-session fallback fails on numeric ids | Open (contributor work) |
+| [#33](https://github.com/Cyrax321/CONTINUUM/issues/33) | `identity_tokens` drops plain-word resource ids (`invoice`) because `_is_strong_token` requires a digit/`@`/`.` | Resolved: `_is_strong_token` accepts plain words of sufficient length (`src/continuum/actions/idempotency.py`, comment cites this issue) |
+| [#34](https://github.com/Cyrax321/CONTINUUM/issues/34) | `ActionLedger scoped_to_run=False` does not enforce global uniqueness across runs as documented | Closed by documentation: the `idempotency_key` docstring now states plainly that cross-run uniqueness is not enforced and what would be required to enforce it (`src/continuum/actions/idempotency.py`) |
+| [#36](https://github.com/Cyrax321/CONTINUUM/issues/36) | `identity_tokens` drops purely-numeric resource ids, so cross-session fallback fails on numeric ids | Resolved: `identity_tokens` collects integer scalars as tokens (`src/continuum/actions/idempotency.py`, comment cites this issue) |
 | [#37](https://github.com/Cyrax321/CONTINUUM/issues/37) | OpenAI adapter: tool arguments misbound and idempotency bypassed because `__signature__` drops `ctx` | Resolved: `5acd0be` (forward idempotency key and fix OpenAI tool wrapping; also `8be8b7f` for the model-validator leg) |
 | [#38](https://github.com/Cyrax321/CONTINUUM/issues/38) | `continuum_record_progress` accepts negative `completed`/`failed` when `total` is omitted, poisoning the event log | Resolved: `fca1b6e` (PR #51: reject negative progress counters even when total is omitted) |
 | [#40](https://github.com/Cyrax321/CONTINUUM/issues/40) | `LLMExtractor`: malformed LLM proposal crashes `extract()` instead of falling back | Resolved: `8c7cfec` (PR #56: fall back to deterministic state on malformed LLM proposal) |
 | [#41](https://github.com/Cyrax321/CONTINUUM/issues/41) | `LLMExtractor._merge` double-adds duplicate ids within a single proposal | Resolved: `a1bdef4` (PR #52: collapse ids repeated within a single LLM proposal) |
-| [#42](https://github.com/Cyrax321/CONTINUUM/issues/42) | Strict mode: uncertain side effect yields `REQUEST_HUMAN` but an auto-reconcile step silently ignores `strict_unknown` | Open (contributor work) |
-| [#43](https://github.com/Cyrax321/CONTINUUM/issues/43) | Two checkpoints at the same state version collapse to one in `continuum history` | Open (contributor work) |
+| [#42](https://github.com/Cyrax321/CONTINUUM/issues/42) | Strict mode: uncertain side effect yields `REQUEST_HUMAN` but an auto-reconcile step silently ignores `strict_unknown` | Resolved: `plan_repairs` marks reconcile steps `requires_human` when strict mode is on (`src/continuum/recovery/planner.py`, comment cites this issue) |
+| [#43](https://github.com/Cyrax321/CONTINUUM/issues/43) | Two checkpoints at the same state version collapse to one in `continuum history` | Resolved: `cmd_history` lists every checkpoint row instead of keying by version (`src/continuum/cli/main.py`, comment explains why) |
 | [#44](https://github.com/Cyrax321/CONTINUUM/issues/44) | `intercept_action` returns a divergent value on cache hit when the result dict holds reserved key `__return_value__` | Resolved: `15e0d67` (PR #53: keep a result dict holding the envelope key intact on cache hit) |
-| [#45](https://github.com/Cyrax321/CONTINUUM/issues/45) | `claim(on_unknown=)` resolution is not persisted, so the ledger stays uncertain after call-time resolution | Open (contributor work) |
+| [#45](https://github.com/Cyrax321/CONTINUUM/issues/45) | `claim(on_unknown=)` resolution is not persisted, so the ledger stays uncertain after call-time resolution | Resolved: `claim` records an `on_unknown` resolution as an `ACTION_RECONCILED` event so it outlives the call (`src/continuum/actions/ledger.py`) |
 | [#48](https://github.com/Cyrax321/CONTINUUM/issues/48) | `StateValidator._check_progress` relabels self-certified progress as `UNKNOWN`, so `--tolerate-unknown` silently unblocks it | Resolved: `1327be3` (PR #55: self-certified progress no longer relabelled `UNKNOWN`) |
-| [#49](https://github.com/Cyrax321/CONTINUUM/issues/49) | `StateValidator._check_model` reports model-specific assumptions `VALID` when `expected_model` is `None` (fail-open) | Open (contributor work) |
+| [#49](https://github.com/Cyrax321/CONTINUUM/issues/49) | `StateValidator._check_model` reports model-specific assumptions `VALID` when `expected_model` is `None` (fail-open) | Resolved: `_check_model` reports UNKNOWN when assumptions exist but either model is unknown (`src/continuum/state/validator.py`) |
 
-None of these block the v0.1.0 launch; they are tracked for post-launch
-contributor work.
+None of these blocked the v0.1.0 launch; all are now resolved on `main`.
 
 ## The CI Node 24 migration (2026-08-12)
 
