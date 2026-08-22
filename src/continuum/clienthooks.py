@@ -123,15 +123,15 @@ def observe_command(*, db: str | None = None) -> str:
     return " ".join(shlex.quote(part) for part in parts)
 
 
-def _is_observe_hook(hook: Mapping[str, Any]) -> bool:
+def _is_continuum_hook(hook: Mapping[str, Any], kind: str) -> bool:
     """True when a hook entry is one this module would have installed.
 
-    Deliberately narrow: a command that merely ends in ``observe`` could
+    Deliberately narrow: a command that merely ends in the kind word could
     belong to an unrelated tool, and treating it as ours would let install
     repoint or remove delete someone else's configuration. Two shapes are
     recognised, matching :func:`observe_command` exactly: a resolved
     ``continuum`` executable path (its stem is ``continuum``), and the
-    interpreter fallback form ``<python> -m continuum.cli ... observe``.
+    interpreter fallback form ``<python> -m continuum.cli ... <kind>``.
     """
     command = hook.get("command")
     if not isinstance(command, str):
@@ -140,31 +140,40 @@ def _is_observe_hook(hook: Mapping[str, Any]) -> bool:
         tokens = shlex.split(command)
     except ValueError:
         return False
-    if len(tokens) < 2 or tokens[-1] != "observe":
+    if len(tokens) < 2 or tokens[-1] != kind:
         return False
     if Path(tokens[0]).stem == "continuum":
         return True
     return tokens[1] == "-m" and len(tokens) >= 4 and tokens[2] == "continuum.cli"
 
 
+def _is_observe_hook(hook: Mapping[str, Any]) -> bool:
+    return _is_continuum_hook(hook, "observe")
+
+
 def install_claude_code_hook(
     settings_path: Path,
     command: str,
     *,
-    matcher: str = DEFAULT_MATCHER,
+    kind: str = "observe",
+    matcher: str | None = None,
 ) -> str:
-    """Add the observe hook to a Claude Code settings file.
+    """Add a continuum hook entry to a Claude Code settings file.
 
-    Existing settings are preserved; only the ``hooks.PostToolUse`` list gains
-    (or updates) our single entry. Returns ``"installed"`` when the entry was
-    added, ``"updated"`` when an existing observe entry pointed somewhere else
-    (a moved virtualenv, say) and was repointed, ``"present"`` when nothing
-    needed to change.
+    ``kind`` selects which hook this is ("observe" or "gate"); it must equal
+    the final word of ``command``. Existing settings are preserved; only the
+    matching list under ``hooks`` gains (or updates) our single entry.
+    Returns ``"installed"`` when the entry was added, ``"updated"`` when an
+    existing entry of the same kind pointed somewhere else (a moved
+    virtualenv, say) and was repointed, ``"present"`` when nothing needed to
+    change.
 
     A settings file that exists but is unreadable raises rather than being
     overwritten: a file someone edited by hand is a statement of intent, and
     silently replacing it would destroy work to save a typo.
     """
+    if matcher is None:
+        matcher = DEFAULT_MATCHER if kind == "observe" else "*"
     if settings_path.exists():
         try:
             settings: dict[str, Any] = json.loads(settings_path.read_text(encoding="utf-8"))
@@ -181,20 +190,21 @@ def install_claude_code_hook(
     if not isinstance(hooks, dict):
         raise ValueError(f"{settings_path}: 'hooks' is not an object")
 
-    post_tool_use: list[Any] = hooks.setdefault("PostToolUse", [])
-    if not isinstance(post_tool_use, list):
-        raise ValueError(f"{settings_path}: 'hooks.PostToolUse' is not a list")
+    event_name = "PostToolUse" if kind == "observe" else "PreToolUse"
+    hook_list: list[Any] = hooks.setdefault(event_name, [])
+    if not isinstance(hook_list, list):
+        raise ValueError(f"{settings_path}: 'hooks.{event_name}' is not a list")
 
     status = "installed"
     entry_found = False
-    for group in post_tool_use:
+    for group in hook_list:
         if not isinstance(group, dict) or group.get("matcher") != matcher:
             continue
         entries = group.get("hooks")
         if not isinstance(entries, list):
             continue
         for hook in entries:
-            if isinstance(hook, dict) and _is_observe_hook(hook):
+            if isinstance(hook, dict) and _is_continuum_hook(hook, kind):
                 entry_found = True
                 if hook.get("command") != command:
                     hook["command"] = command
@@ -203,7 +213,7 @@ def install_claude_code_hook(
                     status = "present"
 
     if not entry_found:
-        post_tool_use.append(
+        hook_list.append(
             {
                 "matcher": matcher,
                 "hooks": [{"type": "command", "command": command}],
@@ -215,12 +225,14 @@ def install_claude_code_hook(
     return status
 
 
-def remove_claude_code_hook(settings_path: Path, *, matcher: str = DEFAULT_MATCHER) -> bool:
-    """Remove the observe hook. Returns True when anything was removed.
+def remove_claude_code_hook(settings_path: Path) -> bool:
+    """Remove every continuum hook this module installed. True when anything
+    was removed.
 
-    Only entries this module's shape recognises are touched: a hand-written
-    PostToolUse entry pointing elsewhere survives untouched, as does every
-    other key in the file.
+    Only entries this module's shape recognises are touched (observe and gate,
+    any matcher): a hand-written entry pointing elsewhere survives untouched,
+    as does every other key in the file. A group holding unrelated hooks keeps
+    them.
     """
     if not settings_path.exists():
         return False
@@ -234,43 +246,50 @@ def remove_claude_code_hook(settings_path: Path, *, matcher: str = DEFAULT_MATCH
     hooks = settings.get("hooks")
     if not isinstance(hooks, dict):
         return False
-    post_tool_use = hooks.get("PostToolUse")
-    if not isinstance(post_tool_use, list):
-        return False
 
     removed = False
-    kept_groups: list[Any] = []
-    for group in post_tool_use:
-        if not (
-            isinstance(group, dict)
-            and group.get("matcher") == matcher
-            and isinstance(group.get("hooks"), list)
-        ):
+    for event_name in ("PostToolUse", "PreToolUse"):
+        hook_list = hooks.get(event_name)
+        if not isinstance(hook_list, list):
+            continue
+
+        kept_groups: list[Any] = []
+        for group in hook_list:
+            if not (isinstance(group, dict) and isinstance(group.get("hooks"), list)):
+                kept_groups.append(group)
+                continue
+            # Drop only the hook entries this module recognises as its own. A
+            # matcher group can hold unrelated user hooks alongside ours;
+            # removing the whole group would delete configuration this command
+            # never installed.
+            kept_hooks = [
+                h
+                for h in group["hooks"]
+                if not (
+                    isinstance(h, dict)
+                    and (_is_continuum_hook(h, "observe") or _is_continuum_hook(h, "gate"))
+                )
+            ]
+            if len(kept_hooks) != len(group["hooks"]):
+                removed = True
+            if not kept_hooks:
+                continue
+            group["hooks"] = kept_hooks
             kept_groups.append(group)
-            continue
-        # Drop only the hook entries this module recognises as its own. A
-        # matcher group can hold unrelated user hooks alongside ours; removing
-        # the whole group would delete configuration this command never
-        # installed.
-        kept_hooks = [
-            h for h in group["hooks"] if not (isinstance(h, dict) and _is_observe_hook(h))
-        ]
-        if len(kept_hooks) != len(group["hooks"]):
-            removed = True
-        if not kept_hooks:
-            continue
-        group["hooks"] = kept_hooks
-        kept_groups.append(group)
+
+        # Rewrite each list unconditionally: keeping only recognised-ours
+        # entries and surviving groups is idempotent whether or not this run
+        # removed anything.
+        if kept_groups:
+            hooks[event_name] = kept_groups
+        elif event_name in hooks:
+            del hooks[event_name]
 
     if not removed:
         return False
 
-    if kept_groups:
-        hooks["PostToolUse"] = kept_groups
-    else:
-        del hooks["PostToolUse"]
-        if not hooks:
-            del settings["hooks"]
+    if not hooks:
+        del settings["hooks"]
 
     settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
     return True
