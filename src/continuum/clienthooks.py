@@ -112,7 +112,15 @@ def observe_command(*, db: str | None = None) -> str:
 
 
 def _is_observe_hook(hook: Mapping[str, Any]) -> bool:
-    """True when a hook entry routes to ``continuum observe``."""
+    """True when a hook entry is one this module would have installed.
+
+    Deliberately narrow: a command that merely ends in ``observe`` could
+    belong to an unrelated tool, and treating it as ours would let install
+    repoint or remove delete someone else's configuration. Two shapes are
+    recognised, matching :func:`observe_command` exactly: a resolved
+    ``continuum`` executable path (its stem is ``continuum``), and the
+    interpreter fallback form ``<python> -m continuum.cli ... observe``.
+    """
     command = hook.get("command")
     if not isinstance(command, str):
         return False
@@ -120,7 +128,11 @@ def _is_observe_hook(hook: Mapping[str, Any]) -> bool:
         tokens = shlex.split(command)
     except ValueError:
         return False
-    return len(tokens) >= 1 and tokens[-1] == "observe"
+    if len(tokens) < 2 or tokens[-1] != "observe":
+        return False
+    if Path(tokens[0]).stem == "continuum":
+        return True
+    return tokens[1] == "-m" and len(tokens) >= 4 and tokens[2] == "continuum.cli"
 
 
 def install_claude_code_hook(
@@ -217,14 +229,27 @@ def remove_claude_code_hook(settings_path: Path, *, matcher: str = DEFAULT_MATCH
     removed = False
     kept_groups: list[Any] = []
     for group in post_tool_use:
-        if (
+        if not (
             isinstance(group, dict)
             and group.get("matcher") == matcher
             and isinstance(group.get("hooks"), list)
-            and any(isinstance(h, dict) and _is_observe_hook(h) for h in group["hooks"])
         ):
-            removed = True
+            kept_groups.append(group)
             continue
+        # Drop only the hook entries this module recognises as its own. A
+        # matcher group can hold unrelated user hooks alongside ours; removing
+        # the whole group would delete configuration this command never
+        # installed.
+        kept_hooks = [
+            h
+            for h in group["hooks"]
+            if not (isinstance(h, dict) and _is_observe_hook(h))
+        ]
+        if len(kept_hooks) != len(group["hooks"]):
+            removed = True
+        if not kept_hooks:
+            continue
+        group["hooks"] = kept_hooks
         kept_groups.append(group)
 
     if not removed:
