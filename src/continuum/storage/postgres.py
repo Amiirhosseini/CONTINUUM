@@ -33,9 +33,18 @@ from contextlib import suppress
 from typing import Any
 
 from continuum.events import Event, EventType, IntegrityReport, IntegrityViolation
-from continuum.models import Origin, Run, RunStatus, SemanticState, StateCheckpoint, utcnow
+from continuum.models import (
+    Action,
+    Origin,
+    Run,
+    RunStatus,
+    SemanticState,
+    StateCheckpoint,
+    utcnow,
+)
 from continuum.security.hashing import make_id
 from continuum.state.versioning import state_fingerprint
+from continuum.storage.actionindex import index_entry_from_payload
 from continuum.storage.base import (
     CheckpointNotFound,
     ConcurrentWriteError,
@@ -97,6 +106,17 @@ CREATE TABLE IF NOT EXISTS checkpoints (
 );
 
 CREATE INDEX IF NOT EXISTS checkpoints_by_run ON checkpoints(run_id, version);
+
+CREATE TABLE IF NOT EXISTS action_index (
+    key TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    action_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    updated_seq BIGINT NOT NULL,
+    action_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS action_index_run ON action_index(run_id);
 """
 
 
@@ -112,6 +132,7 @@ def _require_psycopg() -> Any:
 
 
 class PostgresStorage(Storage):
+    supports_action_index = True
     """Multi-process durable storage backed by PostgreSQL."""
 
     def __init__(self, url: str | Any, *, timeout: float = 30.0) -> None:
@@ -373,6 +394,60 @@ class PostgresStorage(Storage):
             raise ConcurrentWriteError(
                 f"run {event.run_id!r} sequence {event.sequence} was taken by another writer"
             ) from exc
+
+    def foreign_action(self, key: str, *, exclude_run: str) -> Action | None:
+        """Indexed cross-run ledger lookup (issue #216)."""
+        with self._read():
+            row = self._connection.execute(
+                "SELECT action_json FROM action_index WHERE key = %s AND run_id != %s "
+                "ORDER BY updated_seq DESC LIMIT 1",
+                (key, exclude_run),
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            return Action.model_validate(json.loads(row["action_json"]))
+        except (ValueError, TypeError) as exc:
+            raise CorruptedRecord(
+                f"action index row for key {key[:12]}... failed to load: {exc}"
+            ) from exc
+
+    def rebuild_action_index(self, run_id: str | None = None) -> int:
+        """Recompute the index from the log; returns corrected rows."""
+        canonical = self._canonical_index_rows(run_id)
+        with self._write():
+            scope = "" if run_id is None else " WHERE run_id = %s"
+            params = () if run_id is None else (run_id,)
+            self._connection.execute("DELETE FROM action_index" + scope, params)
+            self._connection.executemany(
+                "INSERT INTO action_index(key, run_id, action_id, status, "
+                "updated_seq, action_json) VALUES (%s, %s, %s, %s, %s, %s)",
+                [
+                    (key, entry[1], entry[2], entry[3], seq, entry[4])
+                    for key, (entry, seq) in canonical.items()
+                ],
+            )
+        return 0
+
+    def _canonical_index_rows(
+        self, run_id: str | None
+    ) -> dict[str, tuple[tuple[str, str, str, str, str], int]]:
+        with self._read():
+            query = (
+                "SELECT ctid AS rid, type, payload FROM events"
+                + (" WHERE run_id = %s" if run_id is not None else "")
+                + " ORDER BY ctid"
+            )
+            rows = self._connection.execute(query, () if run_id is None else (run_id,)).fetchall()
+        canonical: dict[str, tuple[tuple[str, str, str, str, str], int]] = {}
+        for i, row in enumerate(rows):
+            payload = (
+                row["payload"] if isinstance(row["payload"], dict) else json.loads(row["payload"])
+            )
+            entry = index_entry_from_payload(EventType(row["type"]), payload)
+            if entry is not None:
+                canonical[entry[0]] = (entry, i)
+        return canonical
 
     @staticmethod
     def _require_run(conn: Any, run_id: str) -> None:

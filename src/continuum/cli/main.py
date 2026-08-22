@@ -732,6 +732,31 @@ def cmd_verify(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
         trusted = report.trusted_through.get(args.run_id, 0)
         lines.append(f"  trusted through sequence {trusted}")
         text = "\n".join(lines)
+
+    # Action index consistency (issue #216). The index is a projection of the
+    # ACTION_* events, so any disagreement is drift in the projection, never
+    # corruption of the truth, and repair is always safe.
+    index_lines: list[str] = []
+    if getattr(args, "index", False):
+        drift = 0
+        rebuild = getattr(storage, "rebuild_action_index", None)
+        if hasattr(storage, "action_index_drift"):
+            drift = storage.action_index_drift(args.run_id)
+        if drift and args.repair_index and rebuild is not None:
+            fixed = int(rebuild(args.run_id))
+            index_lines.append(
+                f"[ok] action index repaired from the log ({fixed} row(s) corrected)"
+            )
+        elif drift:
+            index_lines.append(
+                f"[!!] action index drifted from the log ({drift} row(s)); "
+                f"run with --repair-index to rebuild it"
+            )
+        else:
+            index_lines.append("[ok] action index matches the log")
+        text = text + "\n" + "\n".join(index_lines)
+        payload["action_index_drift"] = drift
+
     _emit(payload, text, as_json=args.json, stream=out, palette=getattr(args, "_palette", None))
     return ExitCode.OK if report.ok else ExitCode.CORRUPTED
 
@@ -1139,7 +1164,17 @@ def build_parser() -> argparse.ArgumentParser:
     remove = hooks_sub.add_parser("remove", help="Remove the observation hook.")
     hooks_client(remove, cmd_hooks_remove)
 
-    with_run(add("verify", cmd_verify, "Re-audit the event chain."))
+    verify = with_run(add("verify", cmd_verify, "Re-audit the event chain."))
+    verify.add_argument(
+        "--index",
+        action="store_true",
+        help="also compare the derived action index against the log (issue #216)",
+    )
+    verify.add_argument(
+        "--repair-index",
+        action="store_true",
+        help="rebuild drifted index rows from the log (requires --index)",
+    )
     with_run(add("actions", cmd_actions, "List external side effects."))
     with_env(with_run(add("show-contract", cmd_contract, "Print the recovery contract.")))
 

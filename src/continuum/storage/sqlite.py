@@ -32,9 +32,10 @@ from typing import Any
 from pydantic import ValidationError
 
 from continuum.events import Event, EventType, IntegrityReport, IntegrityViolation
-from continuum.models import Origin, Run, RunStatus, SemanticState, StateCheckpoint, utcnow
+from continuum.models import Action, Origin, Run, RunStatus, SemanticState, StateCheckpoint, utcnow
 from continuum.security.hashing import make_id
 from continuum.state.versioning import state_fingerprint
+from continuum.storage.actionindex import index_entry_from_payload
 from continuum.storage.base import (
     CheckpointNotFound,
     ConcurrentWriteError,
@@ -45,6 +46,24 @@ from continuum.storage.base import (
 from continuum.storage.migrations import SCHEMA_VERSION, migrate_schema
 
 __all__ = ["SQLiteStorage", "SCHEMA_VERSION"]
+
+
+def _maintain_action_index(conn: sqlite3.Connection, event: Event, order_seq: int) -> None:
+    """Upsert the index row for an action event, inside the caller's txn.
+
+    Runs in the same IMMEDIATE transaction as the event insert, so the index
+    can never commit ahead of or behind the log. Malformed payloads are
+    skipped: the fold ignores them too, so rebuild agrees.
+    """
+    entry = index_entry_from_payload(event.type, dict(event.payload))
+    if entry is None:
+        return
+    key, run_id, action_id, status, action_json = entry
+    conn.execute(
+        "INSERT OR REPLACE INTO action_index(key, run_id, action_id, status, "
+        "updated_seq, action_json) VALUES (?, ?, ?, ?, ?, ?)",
+        (key, run_id, action_id, status, order_seq, action_json),
+    )
 
 
 def _resolve_path(url_or_path: str | Path) -> str:
@@ -66,6 +85,7 @@ def _resolve_path(url_or_path: str | Path) -> str:
 
 
 class SQLiteStorage(Storage):
+    supports_action_index = True
     """Single-host durable storage. Safe for threads and for separate processes."""
 
     def __init__(self, url: str | Path = ":memory:", *, timeout: float = 30.0) -> None:
@@ -315,7 +335,7 @@ class SQLiteStorage(Storage):
     @staticmethod
     def _insert_event(conn: sqlite3.Connection, event: Event) -> None:
         try:
-            conn.execute(
+            cursor = conn.execute(
                 "INSERT INTO events(run_id, sequence, event_id, type, timestamp, payload, "
                 "causer_event_id, source, prev_hash, hash) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -336,6 +356,111 @@ class SQLiteStorage(Storage):
             raise ConcurrentWriteError(
                 f"run {event.run_id!r} sequence {event.sequence} was taken by another writer"
             ) from exc
+        _maintain_action_index(conn, event, int(cursor.lastrowid or 0))
+
+    def foreign_action(self, key: str, *, exclude_run: str) -> Action | None:
+        """Indexed cross-run ledger lookup (issue #216).
+
+        O(log n) via the primary key instead of folding every run's events.
+        The newest row wins, matching the fold's last-write-per-key rule.
+        """
+        with self._read() as conn:
+            row = conn.execute(
+                "SELECT action_json FROM action_index WHERE key = ? AND run_id != ? "
+                "ORDER BY updated_seq DESC LIMIT 1",
+                (key, exclude_run),
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            return Action.model_validate(json.loads(row["action_json"]))
+        except (ValueError, TypeError) as exc:
+            raise CorruptedRecord(
+                f"action index row for key {key[:12]}... failed to load: {exc}"
+            ) from exc
+
+    def action_index_drift(self, run_id: str | None = None) -> int:
+        """Count index rows that disagree with the event log. Read-only."""
+        canonical = self._canonical_index_rows(run_id)
+        expected = {key: (seq, entry[3]) for key, (entry, seq) in canonical.items()}
+        with self._read() as conn:
+            if run_id is None:
+                stored = {
+                    r["key"]: (r["updated_seq"], r["status"])
+                    for r in conn.execute("SELECT key, updated_seq, status FROM action_index")
+                }
+            else:
+                stored = {
+                    r["key"]: (r["updated_seq"], r["status"])
+                    for r in conn.execute(
+                        "SELECT key, updated_seq, status FROM action_index WHERE run_id = ?",
+                        (run_id,),
+                    )
+                }
+        extra = set(stored) - set(expected)
+        changed = sum(1 for k, val in expected.items() if stored.get(k) != val)
+        return len(extra) + changed
+
+    def rebuild_action_index(self, run_id: str | None = None) -> int:
+        """Recompute the index from the log; returns corrected row count.
+
+        The index is a projection, so repairing it from the log is always
+        safe. With ``run_id`` only that run's rows are recomputed. A
+        correction is any key whose stored row was missing, stale or spurious.
+        """
+        canonical = self._canonical_index_rows(run_id)
+        scope_clause = "" if run_id is None else " WHERE run_id = ?"
+        params = () if run_id is None else (run_id,)
+        with self._write() as conn:
+            before = {
+                r["key"]: (r["updated_seq"], r["status"])
+                for r in conn.execute(
+                    "SELECT key, updated_seq, status FROM action_index" + scope_clause,
+                    params,
+                )
+            }
+            conn.execute("DELETE FROM action_index" + scope_clause, params)
+            conn.executemany(
+                "INSERT OR REPLACE INTO action_index(key, run_id, action_id, status, "
+                "updated_seq, action_json) VALUES (?, ?, ?, ?, ?, ?)",
+                [
+                    (key, entry[1], entry[2], entry[3], seq, entry[4])
+                    for key, (entry, seq) in canonical.items()
+                ],
+            )
+        corrections = sum(
+            1
+            for k, val in ((k, (seq, entry[3])) for k, (entry, seq) in canonical.items())
+            if before.get(k) != val
+        )
+        corrections += len(set(before) - set(canonical))
+        return corrections
+
+    def _canonical_index_rows(
+        self, run_id: str | None
+    ) -> dict[str, tuple[tuple[str, str, str, str, str], int]]:
+        """Fold the log into ``{key: ((entry...), order_seq)}``, last write wins."""
+        with self._read() as conn:
+            if run_id is None:
+                rows = conn.execute(
+                    "SELECT rowid AS rid, type, payload FROM events ORDER BY rowid"
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT rowid AS rid, type, payload FROM events WHERE run_id = ? "
+                    "ORDER BY rowid",
+                    (run_id,),
+                ).fetchall()
+        canonical: dict[str, tuple[tuple[str, str, str, str, str], int]] = {}
+        for row in rows:
+            try:
+                payload = json.loads(row["payload"])
+            except json.JSONDecodeError:
+                continue
+            entry = index_entry_from_payload(EventType(row["type"]), payload)
+            if entry is not None:
+                canonical[entry[0]] = (entry, int(row["rid"]))
+        return canonical
 
     @staticmethod
     def _require_run(conn: sqlite3.Connection, run_id: str) -> None:
