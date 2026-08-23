@@ -8,6 +8,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Distribution without PyPI: Docker image, Codespaces, and git installs.**
+  A `Dockerfile` publishes a slim image whose default command runs the
+  crash-recovery demo end to end (`docker run --rm ghcr.io/cyrax321/continuum`)
+  and whose entrypoint override exposes the CLI; CI builds and pushes it to
+  GHCR on pushes to main and release tags (`.github/workflows/docker-publish.yml`,
+  with a `continuum --version` smoke test). A `.devcontainer/devcontainer.json`
+  gives one-click GitHub Codespaces with the dev toolchain preinstalled
+  (port 8765 forwarded for the dashboard). The README Quick Start gains a
+  zero-setup table: docker run, `uvx`/`pipx run` straight off the git URL,
+  and pip/uv installs from git or a release-attached wheel. The PyPI publish
+  job in the release workflow is now opt-in via the `PUBLISH_PYPI`
+  repository variable, so tagging no longer fails while trusted publishing
+  is unconfigured; wheels still land on the GitHub Release.
+
 - **Multi-agent hierarchies: parent/child runs, aggregated contracts,
   A2A identity (#243).** `continuum start --parent <run_id>` attaches a
   child run to its supervisor (validated: parent must exist and not be
