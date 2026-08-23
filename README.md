@@ -194,7 +194,7 @@ uv pip install -e ".[mcp]"
 CONTINUUM_MCP_MUTATING_CLIENTS=your-client-name continuum-mcp
 ```
 
-Ten tools over stdio. Three are read-only (`continuum_validate`, `continuum_resume`, `continuum_list_actions`); seven mutate. Side effects are two-phase (claim, perform, complete), and mutating tools deny by default behind an allowlist. Agent-reported state is recorded with `Origin.EXTERNAL_AGENT` provenance and marked `REQUIRES_REVIEW`. Verification details, including crash recovery at startup and the end to end Claude Code test, are in [references/mcp.md](references/mcp.md). The authentication limitation is covered in [references/architecture.md](references/architecture.md) (MCP server and Security sections), and the MCP narrative is in [references/quickstart.md](references/quickstart.md).
+Eleven tools over stdio. Three are read-only (`continuum_validate`, `continuum_resume`, `continuum_list_actions`); eight mutate. Side effects are two-phase (claim, perform, complete), and mutating tools deny by default behind an allowlist. Agent-reported state is recorded with `Origin.EXTERNAL_AGENT` provenance and marked `REQUIRES_REVIEW`. Verification details, including crash recovery at startup and the end to end Claude Code test, are in [references/mcp.md](references/mcp.md). The authentication limitation is covered in [references/architecture.md](references/architecture.md) (MCP server and Security sections), and the MCP narrative is in [references/quickstart.md](references/quickstart.md). If a registered server reports `CONNECTION_CLOSED`, the cause is almost always `PATH` resolution rather than the server itself: [docs/api/mcp.md](docs/api/mcp.md#troubleshooting) has the diagnosis and two remedies.
 
 ## Framework Integration
 
