@@ -8,6 +8,24 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Citation audit for external-report references (#261).** An external
+  Gemini-generated survey pitching a "CONTINUUM paradigm" cited works absent
+  from our verified related-work list. Each candidate ID was resolved against
+  the arXiv API on 2026-08-24 and the verdicts recorded in
+  `references/citation-audit-2026-08-24.md`: Belayer (arXiv:2608.14635) is real
+  but RL-training-scoped, so out of scope here; the transactional sandboxing
+  paper (arXiv:2512.12806) is real with its 14.5% overhead figure confirmed;
+  ReliabilityBench (arXiv:2601.06112) is real and accurately described, and is
+  the model for the #258 stress surface; DAPH exists only as a self-published
+  Medium post and its "(ICLR Workshop)" attribution has no supporting record,
+  so it stays uncited. A full-text pass additionally proved the report's
+  "10.6% task completion" figure for the sandboxing paper appears nowhere in
+  that paper, and quoted ACRFence's own conclusion ("does not yet include an
+  implementation of ACRFence itself") against the report's inverted claim of
+  a 10/10 defence success rate. The report's unsourced statistics are documented as
+  corrections. Two verified-relevant papers joined the README related-work
+  list with abstract-backed descriptions.
+
 - **Human-in-the-loop surface on the dashboard (#242).** request_human
   walls finally have a door with an audit row: the run page renders buttons
   for confirm (REVIEW_CONFIRMED, Origin.HUMAN), reconcile
