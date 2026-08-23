@@ -8,6 +8,21 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Enforcing HTTP gateway (seam 4 of the universality roadmap, #213).**
+  The last blind spot no harness hook can see: outbound HTTP calls made from
+  agent code in any language. `continuum gateway` runs a local enforcing
+  proxy; routes are registered in `.continuum/gateway.json` (host, methods,
+  path prefix, action type, key template over JSON body fields). Decision
+  semantics mirror the gate exactly: a matching request forwards to the real
+  upstream only when a live STARTED ledger claim exists for its derived key;
+  duplicates are refused because the effect already happened; unknown
+  outcomes demand reconciliation. After forwarding, the gateway settles the
+  claim itself - COMPLETED on 2xx/3xx with TOOL_COMPLETED evidence, FAILED-
+  certain on upstream 4xx, FAILED-uncertain on 5xx and network errors (the
+  effect may still have landed) - all inside the run's hash chain. Unknown
+  hosts are refused fail-closed: a proxy that silently forwards anywhere
+  would be an open relay wearing CONTINUUM's name.
+
 - **Thin adapters for CrewAI, AutoGen and Pydantic AI (seam 1 extension,
   #213).** Three more production frameworks get the durability seam with
   their own verified interception surfaces, all routed through one shared

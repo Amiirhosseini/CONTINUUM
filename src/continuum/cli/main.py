@@ -795,6 +795,46 @@ def cmd_briefing(args: argparse.Namespace, storage: Storage, out: Any, err: Any)
     return ExitCode.OK
 
 
+def cmd_gateway(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Run the enforcing HTTP gateway (issue #213 seam 4). Long-running."""
+    from continuum.gateway import (
+        DEFAULT_GATEWAY_CONFIG_PATH,
+        GatewayConfigError,
+        GatewayServer,
+        load_gateway_config,
+    )
+
+    config_path = Path(args.config) if args.config else Path(DEFAULT_GATEWAY_CONFIG_PATH)
+    try:
+        routes = load_gateway_config(config_path)
+    except GatewayConfigError as exc:
+        print(f"error: {exc}", file=err)
+        return ExitCode.ERROR
+    if not routes:
+        print(
+            f"error: no upstreams registered in {config_path}; "
+            "the gateway refuses to start as an open relay",
+            file=err,
+        )
+        return ExitCode.ERROR
+
+    active = storage.get_active_run()
+    run_id = args.run_id or (active.run_id if active else None)
+    server = GatewayServer(lambda: open_storage(args.db), run_id, routes, port=args.port)
+    print(
+        f"CONTINUUM gateway listening on 127.0.0.1:{server.port} "
+        f"({len(routes)} upstream route(s), run={run_id or 'dynamic'})",
+        file=err,
+    )
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.shutdown()
+    return ExitCode.OK
+
+
 def cmd_hooks_install(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
     """Wire a coding CLI's tool events into observe (and optionally gate).
 
@@ -1500,6 +1540,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--payload-file",
         default=None,
         help="read the hook payload from this file instead of stdin",
+    )
+
+    gateway_cmd = add(
+        "gateway",
+        cmd_gateway,
+        "Run the enforcing HTTP proxy for registered upstreams. Mutates storage.",
+    )
+    gateway_cmd.add_argument("--port", type=int, default=8765)
+    gateway_cmd.add_argument("--run-id", default=None)
+    gateway_cmd.add_argument(
+        "--config",
+        default=None,
+        help="route registry path (default: .continuum/gateway.json)",
     )
 
     briefing = add(
