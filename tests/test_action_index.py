@@ -213,9 +213,9 @@ def test_baseline_and_migration_both_produce_the_table(db_path: str) -> None:
     assert "action_index" in names
 
 
-def test_schema_version_is_three() -> None:
-    """Pinned so a future bump consciously revisits the index backfill."""
-    assert SCHEMA_VERSION == 3
+def test_schema_version_is_four() -> None:
+    """Pinned so a future bump consciously revisits prior migrations."""
+    assert SCHEMA_VERSION == 4
 
 
 def test_v2_database_backfills_on_open(tmp_path: Path) -> None:

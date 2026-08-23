@@ -38,7 +38,7 @@ __all__ = [
 ]
 
 #: The schema version this build produces and understands.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 #: The full, current schema applied to a brand-new database.
 BASELINE_SCHEMA = """
@@ -102,6 +102,32 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
     name      TEXT NOT NULL,
     applied_at TEXT NOT NULL,
     PRIMARY KEY (version, name)
+);
+
+CREATE TABLE IF NOT EXISTS lg_checkpoints (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    thread_id     TEXT NOT NULL,
+    checkpoint_id TEXT NOT NULL,
+    parent_id     TEXT,
+    type          TEXT NOT NULL,
+    checkpoint    BLOB NOT NULL,
+    meta_type     TEXT NOT NULL DEFAULT 'json',
+    metadata      BLOB,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (thread_id, checkpoint_id)
+);
+
+CREATE INDEX IF NOT EXISTS lg_checkpoints_thread ON lg_checkpoints(thread_id, id DESC);
+
+CREATE TABLE IF NOT EXISTS lg_writes (
+    thread_id     TEXT NOT NULL,
+    checkpoint_id TEXT NOT NULL,
+    task_id       TEXT NOT NULL,
+    idx           INTEGER NOT NULL,
+    channel       TEXT NOT NULL,
+    type          TEXT NOT NULL,
+    blob          BLOB NOT NULL,
+    UNIQUE (thread_id, checkpoint_id, task_id, idx)
 );
 
 CREATE TABLE IF NOT EXISTS action_index (
@@ -195,10 +221,49 @@ def _up_v3() -> str:
     """
 
 
+def _up_v4() -> str:
+    """Add LangGraph checkpointer tables (issue #236).
+
+    CONTINUUM implements LangGraph's BaseCheckpointSaver over this store, so
+    production LangGraph apps keep their native persistence API while gaining
+    provenance-tagged events. Two tables: snapshot rows per checkpoint and
+    pending-write rows per task. Additive and empty on upgrade.
+    """
+    return """
+    CREATE TABLE IF NOT EXISTS lg_checkpoints (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        thread_id     TEXT NOT NULL,
+        checkpoint_id TEXT NOT NULL,
+        parent_id     TEXT,
+        type          TEXT NOT NULL,
+        checkpoint    BLOB NOT NULL,
+        meta_type     TEXT NOT NULL DEFAULT 'json',
+        metadata      BLOB,
+        created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE (thread_id, checkpoint_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS lg_checkpoints_thread ON lg_checkpoints(thread_id, id DESC);
+
+    CREATE TABLE IF NOT EXISTS lg_writes (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        thread_id     TEXT NOT NULL,
+        checkpoint_id TEXT NOT NULL,
+        task_id       TEXT NOT NULL,
+        idx           INTEGER NOT NULL,
+        channel       TEXT NOT NULL,
+        type          TEXT NOT NULL,
+        blob          BLOB NOT NULL,
+        UNIQUE (thread_id, checkpoint_id, task_id, idx)
+    );
+"""
+
+
 #: Forward migrations, keyed by the version they *produce*.
 MIGRATIONS: dict[int, Migration] = {
     2: Migration(version=2, name="add_versions_table_and_event_provenance", up=_up_v2()),
     3: Migration(version=3, name="add_action_index_projection", up=_up_v3()),
+    4: Migration(version=4, name="add_langgraph_checkpoint_tables", up=_up_v4()),
 }
 
 
