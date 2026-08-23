@@ -160,8 +160,8 @@ class SQLiteStorage(Storage):
         with self._write() as conn:
             try:
                 conn.execute(
-                    "INSERT INTO runs(run_id, goal, status, created_at, updated_at, metadata) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO runs(run_id, goal, status, created_at, updated_at, metadata, parent_run_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (
                         run.run_id,
                         run.goal,
@@ -169,6 +169,7 @@ class SQLiteStorage(Storage):
                         run.created_at.isoformat(),
                         run.updated_at.isoformat(),
                         json.dumps(dict(run.metadata), sort_keys=True),
+                        run.parent_run_id,
                     ),
                 )
             except sqlite3.IntegrityError as exc:
@@ -180,8 +181,8 @@ class SQLiteStorage(Storage):
         with self._write() as conn:
             try:
                 conn.execute(
-                    "INSERT INTO runs(run_id, goal, status, created_at, updated_at, metadata) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO runs(run_id, goal, status, created_at, updated_at, metadata, parent_run_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (
                         run.run_id,
                         run.goal,
@@ -189,6 +190,7 @@ class SQLiteStorage(Storage):
                         run.created_at.isoformat(),
                         run.updated_at.isoformat(),
                         json.dumps(dict(run.metadata), sort_keys=True),
+                        run.parent_run_id,
                     ),
                 )
             except sqlite3.IntegrityError as exc:
@@ -266,6 +268,7 @@ class SQLiteStorage(Storage):
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
                 metadata=json.loads(row["metadata"]),
+                parent_run_id=row["parent_run_id"],
             )
         except (ValidationError, json.JSONDecodeError) as exc:
             raise CorruptedRecord(f"run {row['run_id']!r} failed to load: {exc}") from exc

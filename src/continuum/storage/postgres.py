@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS continuum_meta (
 
 CREATE TABLE IF NOT EXISTS runs (
     run_id     TEXT PRIMARY KEY,
+    parent_run_id TEXT REFERENCES runs(run_id),
     goal       TEXT NOT NULL,
     status     TEXT NOT NULL,
     created_at TEXT NOT NULL,
