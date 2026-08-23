@@ -8,6 +8,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Multi-agent hierarchies: parent/child runs, aggregated contracts,
+  A2A identity (#243).** `continuum start --parent <run_id>` attaches a
+  child run to its supervisor (validated: parent must exist and not be
+  completed; recorded in a new runs.parent_run_id column, schema v6 with
+  index). The parent's resume composes the family's worst state: no RESUME
+  while any non-terminal child holds uncertainty or requires review - the
+  most cautious signal wins, house-style. Resume JSON gains family_rationale
+  and children arrays naming exactly which child blocks and why.
+  `continuum tree <parent>` renders the hierarchy with per-child recovery
+  states. A2A task ids ride on run metadata via `start --a2a-task`, giving
+  external agent-to-agent handoffs durable identity without claiming full
+  protocol support. Siblings share nothing mutable: coordination stays in
+  the ledger and contracts.
+
 - **Citation audit for external-report references (#261).** An external
   Gemini-generated survey pitching a "CONTINUUM paradigm" cited works absent
   from our verified related-work list. Each candidate ID was resolved against
