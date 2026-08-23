@@ -545,6 +545,24 @@ def cmd_resume(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
     if steps:
         text += "\n\nNext steps:\n" + "\n".join(f"  {i}. {t}" for i, t in enumerate(steps, 1))
 
+    # Version pinning drift (issue #241): informational only.
+    drift_lines: list[str] = []
+    if args.pinning:
+        from continuum.pinning import latest_pinning, normalize_pinning
+        from continuum.pinning import pinning_drift as compute_drift
+
+        try:
+            current = normalize_pinning(json.loads(args.pinning))
+            recorded = latest_pinning(storage.read_events(run_id))
+            drift_lines = compute_drift(recorded, current)
+            if drift_lines:
+                text += "\n\nPinning drift (informational):\n" + "\n".join(
+                    f"  - {line}" for line in drift_lines
+                )
+        except ValueError as exc:
+            print(f"error: --pinning: {exc}", file=err)
+            return ExitCode.ERROR
+
     payload = {
         "run_id": decision.run_id,
         "goal": storage.get_run(run_id).goal,
@@ -552,6 +570,7 @@ def cmd_resume(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
         "safe": decision.safe,
         "next_allowed_action": decision.next_allowed_action,
         "human_steps": steps,
+        "pinning_drift": drift_lines,
         "contract": decision.contract.model_dump(mode="json"),
         "repairs": [s.action_name for s in decision.plan.steps],
         "progress": {
@@ -630,6 +649,61 @@ def cmd_confirm(args: argparse.Namespace, storage: Storage, out: Any, err: Any) 
     )
     print("\nRun `continuum resume` to continue.", file=err)
     return exit_code_for(decision.mode)
+
+
+def cmd_budget(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Report retry-budget usage per action type (issue #240). Read-only."""
+    from continuum.budgets import (
+        DEFAULT_BUDGETS_PATH,
+        attempts_for_type,
+        evaluate_budget,
+        load_budgets,
+    )
+
+    storage.get_run(args.run_id)
+    try:
+        raw = load_budgets(Path(args.config) if args.config else Path(DEFAULT_BUDGETS_PATH))
+    except Exception as exc:
+        print(f"error: budget registry invalid: {exc}", file=err)
+        return ExitCode.ERROR
+
+    events = storage.read_events(args.run_id)
+    types_seen = sorted(
+        {
+            e.payload.get("action", {}).get("action_type")
+            for e in events
+            if e.type is EventType.ACTION_RECORDED and isinstance(e.payload.get("action"), dict)
+        }
+        | set((raw.get("action_types") or {}).keys())
+    )
+    rows: list[dict[str, Any]] = []
+    for action_type in types_seen:
+        used = attempts_for_type(events, action_type)
+        allowed, _, maximum = evaluate_budget(raw, action_type, 0)
+        remaining = max(0, maximum - used)
+        rows.append(
+            {
+                "action_type": action_type,
+                "attempts": used,
+                "max_attempts": maximum,
+                "remaining": remaining,
+                "exhausted": remaining == 0,
+            }
+        )
+    payload = {"run_id": args.run_id, "budgets": rows}
+    lines = [f"{'ACTION TYPE':<28} {'ATTEMPTS':>8} {'MAX':>4} {'REMAINING':>10}"]
+    for r in rows:
+        lines.append(
+            f"{r['action_type']:<28} {r['attempts']:>8} {r['max_attempts']:>4} {r['remaining']:>10}"
+        )
+    _emit(
+        payload,
+        "\n".join(lines) or "No budgets configured.",
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
+    )
+    return ExitCode.OK
 
 
 def cmd_compact(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
@@ -1639,6 +1713,11 @@ def build_parser() -> argparse.ArgumentParser:
     resume.add_argument("--model", help="model that will run the resumed agent")
     resume.add_argument("--tolerate-unknown", action="store_true")
     resume.add_argument("--repair", action="store_true", help="record the repair plan")
+    resume.add_argument(
+        "--pinning",
+        default=None,
+        help="JSON object of environment pins to diff against the run (issue #241)",
+    )
 
     confirm = with_env(
         with_run(add("confirm", cmd_confirm, "Confirm self-reported state so the run may resume."))
@@ -1648,6 +1727,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     complete = with_run(add("complete", cmd_complete, "Close a run as done. Mutates storage."))
     complete.add_argument("--summary", default=None, help="one-line closing note")
+
+    budget_cmd = with_run(add("budget", cmd_budget, "Retry-budget usage per action type."))
+    budget_cmd.add_argument(
+        "--config",
+        default=None,
+        help="budget registry path (default: .continuum/budgets.json)",
+    )
 
     compact = with_run(
         add("compact", cmd_compact, "Archive the pre-anchor log prefix. Mutates storage.")
