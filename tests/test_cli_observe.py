@@ -234,12 +234,12 @@ def test_cli_hooks_commands_round_trip(tmp_path: Path) -> None:
     code, out, err = run("--json", "hooks", "install", "claude-code", "--settings", str(settings))
     assert code == ExitCode.OK, err
     installed = json.loads(out)
-    assert installed["status"] == "installed"
+    assert installed["hooks"][0]["status"] == "installed"
     assert json.loads(settings.read_text())["hooks"]["PostToolUse"]
 
     code, out, _ = run("--json", "hooks", "install", "claude-code", "--settings", str(settings))
     assert code == ExitCode.OK
-    assert json.loads(out)["status"] == "present"
+    assert json.loads(out)["hooks"][0]["status"] == "present"
 
     code, out, _ = run("--json", "hooks", "remove", "claude-code", "--settings", str(settings))
     assert code == ExitCode.OK

@@ -42,6 +42,14 @@ from continuum.clienthooks import (
 )
 from continuum.environment import StaticProvider, capture
 from continuum.events import EventType
+from continuum.gate import (
+    DEFAULT_GATE_CONFIG_PATH,
+    GateConfigError,
+    load_gate_config,
+)
+from continuum.gate import (
+    decide as gate_decide,
+)
 from continuum.models import (
     ActionStatus,
     EnvironmentSnapshot,
@@ -678,18 +686,33 @@ def cmd_hooks_install(args: argparse.Namespace, storage: Storage, out: Any, err:
     settings_path = Path(args.settings)
     command = observe_command(db=args.db)
     status = install_claude_code_hook(settings_path, command)
-    verb = {"installed": "Installed", "updated": "Updated", "present": "Already present"}[status]
+    entries = [(DEFAULT_MATCHER, "observe", status)]
+    if getattr(args, "with_gate", False):
+        gate_command = observe_command(db=args.db)[: -len("observe")] + "gate"
+        gate_status = install_claude_code_hook(settings_path, gate_command, kind="gate")
+        entries.append(("*", "gate", gate_status))
+    lines = [f"Hook configuration written to {settings_path}"]
+    for matcher, kind, st in entries:
+        lines.append(f"  [{st}] {kind} (matcher {matcher})")
+        if kind == "observe":
+            lines.append(f"    command: {command}")
+        else:
+            lines.append(f"    command: {gate_command}")
     _emit(
         {
             "client": args.client,
             "settings": str(settings_path),
-            "matcher": DEFAULT_MATCHER,
-            "command": command,
-            "status": status,
+            "hooks": [
+                {
+                    "matcher": m,
+                    "kind": k,
+                    "status": s,
+                    "command": command if k == "observe" else gate_command,
+                }
+                for m, k, s in entries
+            ],
         },
-        f"{verb} observation hook in {settings_path}\n"
-        f"  matcher: {DEFAULT_MATCHER}\n"
-        f"  command: {command}",
+        "\n".join(lines),
         as_json=args.json,
         stream=out,
         palette=getattr(args, "_palette", None),
@@ -714,6 +737,100 @@ def cmd_hooks_remove(args: argparse.Namespace, storage: Storage, out: Any, err: 
         palette=getattr(args, "_palette", None),
     )
     return ExitCode.OK
+
+
+def cmd_gate(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Decide whether one tool call may proceed (issue #217).
+
+    Designed as a pre-tool-use hook: exit 0 allows the call, exit 2 denies it
+    with an actionable reason on stderr that the harness feeds back to the
+    model. The decision is pure (:func:`continuum.gate.decide`); this command
+    only resolves the run, loads the ledger projection and renders the
+    verdict.
+
+    Exit codes deliberately reuse the CLI contract where they agree: OK
+    allows. Denial is reported as 2, which the CLI defines as NOT_FOUND but a
+    hook transport defines as "block this tool call"; in both readings the
+    caller must not proceed.
+    """
+    from continuum.actions.ledger import fold_action_events
+
+    if args.payload_file:
+        raw_text = Path(args.payload_file).read_text(encoding="utf-8")
+    else:
+        raw_text = sys.stdin.read()
+    try:
+        raw = json.loads(raw_text) if raw_text.strip() else None
+    except json.JSONDecodeError as exc:
+        # The payload cannot be matched against any pattern; there is nothing
+        # to enforce, and blocking every call over a protocol hiccup would
+        # make the harness unusable.
+        print(f"gate: payload is not valid JSON ({exc}); allowing", file=err)
+        return ExitCode.OK
+
+    run_id = args.run_id
+    if not run_id:
+        active = storage.get_active_run()
+        run_id = active.run_id if active else None
+
+    config_path = Path(args.config) if args.config else Path(DEFAULT_GATE_CONFIG_PATH)
+    try:
+        config = load_gate_config(config_path)
+    except GateConfigError as exc:
+        print(f"gate: {exc}; denying until it is fixed", file=err)
+        return 2
+
+    if not isinstance(raw, dict):
+        _emit(
+            {"allow": True, "reason": "no payload"},
+            "gate: no payload; allowing",
+            as_json=args.json,
+            stream=out,
+            palette=getattr(args, "_palette", None),
+        )
+        return ExitCode.OK
+
+    tool_name = str(raw.get("tool_name") or "")
+    tool_input_raw = raw.get("tool_input")
+    tool_input: dict[str, Any] = dict(tool_input_raw) if isinstance(tool_input_raw, dict) else {}
+
+    if config is not None and tool_name in config and run_id is None:
+        print(
+            f"gate: {tool_name} is gated but there is no active CONTINUUM run. "
+            f"Start or resume one (continuum start / continuum_record_progress) first.",
+            file=err,
+        )
+        return 2
+
+    actions_by_key = fold_action_events(storage.read_events(run_id)) if run_id is not None else {}
+    decision = gate_decide(
+        config,
+        tool_name,
+        tool_input,
+        run_id=run_id or "",
+        actions_by_key=actions_by_key,
+    )
+    if decision.allow:
+        _emit(
+            {"allow": True, "reason": decision.reason, "tool": tool_name},
+            f"[ok] allow: {decision.reason}",
+            as_json=args.json,
+            stream=out,
+            palette=getattr(args, "_palette", None),
+        )
+        return ExitCode.OK
+    # A hook transport feeds stderr back to the model on a blocking exit, so
+    # the actionable reason must live there; stdout keeps the machine view.
+    print(f"[!!] deny: {decision.reason}", file=err)
+    _emit(
+        {"allow": False, "reason": decision.reason, "tool": tool_name},
+        "",
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
+    )
+
+    return 2
 
 
 def cmd_reconcile_auto(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
@@ -772,6 +889,10 @@ def cmd_verify(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
     # A run that does not exist has an empty, trivially valid chain. Reporting
     # that as "verified" would let `continuum verify $TYPO && deploy` succeed on
     # a name nobody has ever written to.
+    if args.repair_index and not args.index:
+        print("error: --repair-index requires --index", file=err)
+        return ExitCode.ERROR
+
     storage.get_run(args.run_id)
     report = storage.verify_events(args.run_id)
     payload = report.model_dump(mode="json")
@@ -783,6 +904,44 @@ def cmd_verify(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
         trusted = report.trusted_through.get(args.run_id, 0)
         lines.append(f"  trusted through sequence {trusted}")
         text = "\n".join(lines)
+
+    # Action index consistency (issue #216). The index is a projection of the
+    # ACTION_* events, so any disagreement is drift in the projection, never
+    # corruption of the truth, and repair is always safe.
+    index_lines: list[str] = []
+    if getattr(args, "index", False):
+        drift: int | None = None
+        has_index = hasattr(storage, "action_index_drift")
+        rebuild = getattr(storage, "rebuild_action_index", None)
+        if has_index:
+            # Repair only a projection whose source of truth verified: a
+            # tampered log must never be folded into the index (review 221).
+            if args.repair_index and not report.ok:
+                index_lines.append(
+                    "[!!] action index repair refused: the event chain failed "
+                    "verification; repair would launder tampered events"
+                )
+                payload["action_index_repair"] = "refused_chain_failed"
+            else:
+                drift = storage.action_index_drift()
+                if drift and args.repair_index and rebuild is not None:
+                    fixed = int(rebuild())
+                    index_lines.append(
+                        f"[ok] action index repaired from the log ({fixed} row(s) corrected)"
+                    )
+                    drift = storage.action_index_drift()
+                elif drift:
+                    index_lines.append(
+                        f"[!!] action index drifted from the log ({drift} row(s)); "
+                        f"run with --repair-index to rebuild it"
+                    )
+                else:
+                    index_lines.append("[ok] action index matches the log")
+        else:
+            index_lines.append("[auto] this engine maintains no action index")
+        text = text + "\n" + "\n".join(index_lines)
+        payload["action_index_drift"] = drift
+
     _emit(payload, text, as_json=args.json, stream=out, palette=getattr(args, "_palette", None))
     return ExitCode.OK if report.ok else ExitCode.CORRUPTED
 
@@ -1165,6 +1324,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="read the hook payload from this file instead of stdin",
     )
 
+    gate = add(
+        "gate",
+        cmd_gate,
+        "Decide whether a tool call may proceed (pre-tool-use hook). Read-only.",
+    )
+    gate.add_argument(
+        "--run-id",
+        default=None,
+        help="target run (default: the most recently active non-terminal run)",
+    )
+    gate.add_argument(
+        "--payload-file",
+        default=None,
+        help="read the hook payload from this file instead of stdin",
+    )
+    gate.add_argument(
+        "--config",
+        default=None,
+        help=f"gate registry path (default: {DEFAULT_GATE_CONFIG_PATH})",
+    )
+
     hooks = add("hooks", cmd_hooks_install, "Manage host-side observation hooks.")
     hooks_sub = hooks.add_subparsers(dest="hooks_command", metavar="ACTION CLIENT", required=True)
 
@@ -1185,12 +1365,27 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="bake a specific database path into the hook command",
     )
+    install.add_argument(
+        "--with-gate",
+        action="store_true",
+        help="also install a PreToolUse gate that denies unclaimed side-effect calls",
+    )
     hooks_client(install, cmd_hooks_install)
 
     remove = hooks_sub.add_parser("remove", help="Remove the observation hook.")
     hooks_client(remove, cmd_hooks_remove)
 
-    with_run(add("verify", cmd_verify, "Re-audit the event chain."))
+    verify = with_run(add("verify", cmd_verify, "Re-audit the event chain."))
+    verify.add_argument(
+        "--index",
+        action="store_true",
+        help="also compare the derived action index against the log (issue #216)",
+    )
+    verify.add_argument(
+        "--repair-index",
+        action="store_true",
+        help="rebuild drifted index rows from the log (requires --index)",
+    )
 
     reconcile_auto = with_run(
         add(
