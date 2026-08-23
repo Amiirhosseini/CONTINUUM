@@ -8,6 +8,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Production server mode (#238).** Three pieces: (1) CI now runs a real
+  Postgres 16 service container against the Postgres contract tests
+  (`tests/test_storage_postgres.py` plus the action-index suite), and the
+  gateway backfill SQL was fixed to Postgres jsonb operators (it previously
+  used SQLite-only `json_extract`). (2) `continuum serve --transport http`
+  exposes the full sidecar dispatch over POST /<method> JSON for non-Python
+  agents: same handlers, same token auth (`CONTINUUM_SERVE_TOKEN`), errors
+  mapped to status codes (404 unknown method, 403 unauthorized, 400 bad
+  params, 500 storage failures) without killing the server. (3) Honest
+  scoping note: duplicate reconciliation between concurrent workers is
+  already impossible by construction (ledger claims commit inside IMMEDIATE
+  transactions); run-level exclusivity leases remain available to adapters
+  via LeaseCoordinator rather than being forced onto every surface.
+
 - **Replay-safety guard as a portable primitive (#237).** The gate's
   decision table is extracted into `continuum.replayguard.evaluate`, a pure
   core over the folded ledger that the gate now delegates to (single source

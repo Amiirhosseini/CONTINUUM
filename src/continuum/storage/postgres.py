@@ -189,12 +189,12 @@ class PostgresStorage(Storage):
         self._connection.execute(
             """
             INSERT INTO action_index(key, run_id, action_id, status, updated_seq, action_json)
-            SELECT json_extract(e.payload, '$.key'),
-                   json_extract(e.payload, '$.action.run_id'),
-                   json_extract(e.payload, '$.action.action_id'),
-                   json_extract(e.payload, '$.action.status'),
+            SELECT e.payload::jsonb->>'key',
+                   e.payload::jsonb->'action'->>'run_id',
+                   e.payload::jsonb->'action'->>'action_id',
+                   e.payload::jsonb->'action'->>'status',
                    nextval('action_index_ord_seq'),
-                   json(json_extract(e.payload, '$.action'))
+                   (e.payload::jsonb->'action')::text
             FROM events e
             WHERE e.type IN ('ACTION_RECORDED', 'ACTION_RECONCILED', 'ACTION_COMPENSATED')
               AND json_extract(e.payload, '$.key') IS NOT NULL

@@ -1749,9 +1749,10 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument(
         "--transport",
         default="stdio",
-        choices=("stdio",),
-        help="wire transport (default: stdio)",
+        choices=("stdio", "http"),
+        help="wire transport (default: stdio; http serves POST /<method> JSON)",
     )
+    serve.add_argument("--port", type=int, default=8765, help="port for --transport http")
 
     def cmd_dashboard(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
         from continuum.dashboard import serve_dashboard as _serve
