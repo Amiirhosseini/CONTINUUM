@@ -597,6 +597,32 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **MCP docs: the `CONNECTION_CLOSED` failure mode, and the eleventh tool.**
+  `docs/api/mcp.md` promised that with `.mcp.json` present "Claude Code registers
+  the server automatically". That holds only when the environment CONTINUUM was
+  installed into is on the `PATH` the client inherited. When it is not, the client
+  cannot spawn `continuum-mcp` at all and reports the failed spawn as
+  `CONNECTION_CLOSED` - a message that reads like a server that crashed but
+  describes an executable that was never found. No CONTINUUM code runs in that
+  state, so the server cannot detect, report, or recover from it, and the whole
+  diagnosis has to happen client-side. The registration section now states what a
+  bare command name actually requires, and a new Troubleshooting section carries
+  the diagnosis (`which` / `where.exe`, then `--help` through the full path) and
+  two remedies: launch the client from the activated environment, or pin the
+  absolute path with `claude mcp add --scope local`. The second also documents the
+  conflicting-scopes diagnostic it produces and warns against
+  `claude mcp remove continuum-mcp -s project`, which edits the committed
+  `.mcp.json` and unregisters the server for every other clone. Registration is no
+  longer described as instrumenting anything on its own: state is recorded when
+  the agent calls the tools, or when the `PostToolUse` hook records a write
+  outside the model's control.
+- **MCP tool count corrected to eleven.** `continuum_record_summary` (#235)
+  shipped with a CHANGELOG entry but never reached the reference docs. It is now
+  in the `docs/api/mcp.md` tool table, and the count is corrected from ten to
+  eleven - three read-only, eight mutating - in `README.md`, `docs/api/README.md`,
+  `docs/research/token_floor.md`, `references/mcp.md`,
+  `references/auto-resume-integration.md`, and `references/testing.md`.
+
 
 - **README.** `Contents` laid out as a horizontal wrapping nav; Security
   Extension added to the Features table and table of contents; website link
