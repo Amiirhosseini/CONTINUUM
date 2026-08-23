@@ -629,6 +629,27 @@ class PostgresStorage(Storage):
             )
         return 0
 
+    def action_index_drift(self) -> int:
+        """Count index rows that disagree with the log. Read-only.
+
+        Store-wide by design, mirroring the SQLite engine: keys live in one
+        namespace, so a run-scoped comparison would falsely flag rows owned
+        by another run's later write of the same key.
+        """
+        expected = {
+            key: (seq, entry[3]) for key, (entry, seq) in self._canonical_index_rows().items()
+        }
+        with self._read():
+            stored = {
+                r["key"]: (int(r["updated_seq"]), r["status"])
+                for r in self._connection.execute(
+                    "SELECT key, updated_seq, status FROM action_index"
+                ).fetchall()
+            }
+        extra = set(stored) - set(expected)
+        changed = sum(1 for k, val in expected.items() if stored.get(k) != val)
+        return len(extra) + changed
+
     def _canonical_index_rows(self) -> dict[str, tuple[tuple[str, str, str, str, str], int]]:
         """Fold every run's action events; global last-write-per-key wins.
 
