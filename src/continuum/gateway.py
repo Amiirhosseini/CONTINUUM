@@ -54,6 +54,19 @@ __all__ = [
 DEFAULT_GATEWAY_CONFIG_PATH = ".continuum/gateway.json"
 
 
+class _BodyTooLarge(Exception):
+    """Internal signal: the request body exceeded the configured cap."""
+
+
+#: Requests larger than this are refused with 413 before the body is read.
+#: A proxy that reads unbounded bodies into memory is a denial-of-service
+#: surface against the very agent it protects.
+MAX_BODY_BYTES = 10 * 1024 * 1024
+
+#: Upper bound on how much we will drain-and-discard before giving up.
+DRAIN_LIMIT_BYTES = 256 * 1024 * 1024
+
+
 class GatewayConfigError(ValueError):
     """The gateway registry exists but cannot be honoured."""
 
@@ -196,8 +209,30 @@ class GatewayServer:
             def log_message(self, *args: Any) -> None:  # silence test noise
                 pass
 
-            def _body(self) -> dict[str, Any]:
+            def _body(self, max_bytes: int = MAX_BODY_BYTES) -> dict[str, Any]:
                 length = int(self.headers.get("Content-Length") or 0)
+                if length > max_bytes:
+                    # Drain (without buffering) so the client can finish
+                    # writing and read our 413, instead of dying on a broken
+                    # pipe mid-send. Refuse to drain beyond a sanity bound.
+                    drained = 0
+                    while drained < length:
+                        chunk = self.rfile.read(min(1024 * 1024, length - drained))
+                        if not chunk:
+                            break
+                        drained += len(chunk)
+                        if drained > DRAIN_LIMIT_BYTES:
+                            self.close_connection = True
+                            self._respond(
+                                413,
+                                {"error": "request body too large to drain"},
+                            )
+                            raise _BodyTooLarge
+                    self._respond(
+                        413,
+                        {"error": f"request body exceeds {max_bytes} bytes"},
+                    )
+                    raise _BodyTooLarge
                 raw = self.rfile.read(length) if length else b""
                 try:
                     parsed = json.loads(raw) if raw else {}
@@ -208,6 +243,8 @@ class GatewayServer:
             def _respond(self, code: int, payload: dict[str, Any]) -> None:
                 body = json.dumps(payload).encode()
                 self.send_response(code)
+                if getattr(self, "close_connection", False):
+                    self.send_header("Connection", "close")
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
@@ -215,7 +252,10 @@ class GatewayServer:
 
             def _handle(self, method: str) -> None:
                 host = self.headers.get("Host", "")
-                body = self._body()
+                try:
+                    body = self._body()
+                except _BodyTooLarge:
+                    return
 
                 # Resolve the run lazily so hooks can precede any explicit start.
                 run_id = server._run_id
