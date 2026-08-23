@@ -301,3 +301,32 @@ OPENROUTER_API_KEY=sk-or-... python examples/langchain_real_llm_crash.py crash
 OPENROUTER_API_KEY=sk-or-... python examples/langchain_real_llm_crash.py resume
 ```
 
+
+## Live LLM validation results (real model via OpenRouter)
+
+All three framework adapters were driven against a live `gpt-4o-mini` through
+OpenRouter (key from `OPENROUTER_API_KEY`, never written to disk). Each was proven
+two ways: a soft resume (exactly-once side effect across a second clean invocation)
+and a hard crash (`os._exit(137)` mid-side-effect, then a fresh process asserts the
+run is blocked as uncertain). A richer `examples/multitool_real_llm.py` demo has one
+prompt orchestrate `lookup_order` + `notify_customer` + `create_ticket` through the
+LangGraph adapter.
+
+| Adapter    | Soft resume (exactly-once)             | Hard crash (resume blocked)       |
+|------------|----------------------------------------|-----------------------------------|
+| LangChain  | PASS, 1 side effect, `resume` safe     | PASS, `request_human`, 1 uncertain |
+| OpenAI SDK | PASS, 1 side effect, `request_human`*  | PASS, `request_human`, 1 uncertain |
+| LangGraph  | PASS, 1 side effect, `resume` safe     | PASS, `request_human`, 1 uncertain |
+
+\* The OpenAI adapter yields `request_human` even on a clean soft resume because it
+records `Origin.EXTERNAL_AGENT`: an agent must not self-certify its own unverified
+work. That is expected and safe. LangChain and LangGraph use `Origin.DETERMINISTIC`
+and resume cleanly.
+
+Two OpenAI-adapter bugs that only surface with a real model were found and fixed:
+the tool JSON schema was emitted with no `type` key (OpenRouter rejected it), and the
+context parameter was dropped from the inspectable signature, which bypassed
+interception and let the side effect fire twice. The live runs also confirmed the
+idempotency lesson: a stable business key (for example `ticket:O-9`) is required,
+because a key derived from the model's rendered arguments does not dedupe the model's
+argument drift and produced a duplicate ticket. Full run logs are in STATUS.md.
