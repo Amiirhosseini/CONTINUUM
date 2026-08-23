@@ -32,10 +32,10 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Mapping, Sequence
 from types import TracebackType
-from typing import Any
+from typing import Any, ClassVar
 
 from continuum.events import Event, EventType, IntegrityReport
-from continuum.models import Origin, Run, SemanticState, StateCheckpoint
+from continuum.models import Action, Origin, Run, SemanticState, StateCheckpoint
 
 __all__ = [
     "Storage",
@@ -100,6 +100,37 @@ class SchemaVersionError(StorageError):
 
 class Storage(ABC):
     """Durable backing store for runs, events, versions and checkpoints."""
+
+    #: True when the engine maintains the derived action index (issue #216)
+    #: and implements :meth:`foreign_action`. Callers fall back to event-scan
+    #: lookups when False, so the flag must reflect real capability.
+    supports_action_index: ClassVar[bool] = False
+
+    def foreign_action(self, key: str, *, exclude_run: str) -> Action | None:
+        """Newest action recorded under ``key`` outside ``exclude_run``.
+
+        Only meaningful when ``supports_action_index`` is True; engines
+        without an index leave the default, and callers scan event logs
+        instead. Returns None both for "not found" and "no index", which is
+        why callers must check the flag first.
+        """
+        del key, exclude_run
+        return None
+
+    def action_index_drift(self) -> int:
+        """Count index rows disagreeing with the log. Index engines only.
+
+        Callers must check :attr:`supports_action_index` first; engines
+        without an index deliberately have no meaningful answer.
+        """
+        raise NotImplementedError
+
+    def rebuild_action_index(self) -> int:
+        """Recompute the index from the log; returns corrected rows.
+
+        Same capability contract as :meth:`action_index_drift`.
+        """
+        raise NotImplementedError
 
     # -- lifecycle -------------------------------------------------------- #
 

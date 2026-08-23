@@ -8,6 +8,99 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Client installers for Gemini CLI and Codex CLI (#209).** The observe and
+  gate commands were already client-agnostic; wiring them into new clients is
+  now data, not code. `CLIENT_PROFILES` describes each client's settings
+  path, hook event names and tool matchers, and `continuum hooks
+  install|remove` accepts all three clients: claude-code (PostToolUse/
+  PreToolUse on Write|Edit), gemini (AfterTool/BeforeTool on
+  write_file|replace, per the official hooks reference) and codex
+  (PostToolUse/PreToolUse, Bash-only today because Codex's documented hook
+  surface does not traverse apply_patch or MCP tools). Removal scans every
+  event list rather than hardcoded names, so it works across clients while
+  still touching only entries this tool installed. The installer surfaces
+  Codex's `[features].codex_hooks = true` requirement as an explicit hint
+  instead of hand-editing TOML. A regression test pins that each client's
+  default settings path comes from its profile, closing a gap found live:
+  every earlier test passed explicit paths, so a hardcoded CLI default was
+  silently writing all clients' hooks into Claude Code's settings file.
+
+- **Pre-action gate: host-enforced side-effect claims (#217).** The two-phase
+  action protocol was a convention the model was asked to follow; nothing
+  stopped an unclaimed side effect from firing, which degrades exactly-once
+  to at-least-once-with-nothing. `continuum gate` is a pre-tool-use hook that
+  makes the protocol physical: a call whose tool is registered in
+  `.continuum/gate.json` may proceed only when a live ledger claim already
+  exists for its derived key. Keys come from configuration templates
+  (`{"tools": {"send_invoice": {"key_template": "invoice:{customer}:{id}"}}}`
+  applied to the call's structured arguments), never from LLM-authored
+  strings. The decision table mirrors the ledger exactly: no claim denies
+  with instructions to route through `continuum_intercept_action`; a
+  COMPLETED record denies as a duplicate (the dedup verdict made physical);
+  UNKNOWN denies with reconcile instructions; closed attempts must be
+  reclaimed; only STARTED passes. Exit 2 feeds the reason back through the
+  harness so the model can comply on retry. `hooks install claude-code
+  --with-gate` wires PreToolUse alongside PostToolUse observe: claim before,
+  evidence after, both outside model control. Stated limitation: v1 gates
+  structured tool surfaces only, not shell commands run inside Bash.
+  Verified live over the real stdio MCP boundary: deny, claim via MCP,
+  allow, complete, duplicate denied, observation recorded in one hash chain.
+
+- **Lazy adapter imports (#214).** `continuum.adapters` sits on the critical
+  path of every entry point, but eagerly imported the optional SDK adapters,
+  so opening the MCP server cost roughly 3s before answering its first
+  request, and every `continuum observe` hook subprocess paid it again. The
+  dependency-free adapters stay eager; browser/container/kubernetes and the
+  langchain/langgraph/openai names now resolve through module
+  `__getattr__` (PEP 562) on first access, in both `continuum.adapters` and
+  the top-level `continuum` package. The public import surface is unchanged.
+  Measured on this machine: MCP server spawn-to-first-response drops from
+  about 3s to about 0.1s, and importing either package leaves none of
+  langgraph, langchain or openai in `sys.modules`. The full test suite also
+  gets faster for the same reason. Tests in `tests/test_adapters_lazy.py`
+  run their key assertions in subprocesses so earlier imports cannot mask a
+  regression.
+
+- **Action index: indexed cross-run idempotency lookups (#216).** Unscoped
+  claims folded every other run's complete event log on a local miss,
+  O(total logged events) per lookup. Schema v3 adds `action_index`, a derived
+  projection of the `ACTION_*` events (one row per ledger key), maintained
+  inside the same transaction as each event insert and backfilled from
+  existing events by the migration, so v2 databases gain correct lookups on
+  open. `ActionLedger` uses it whenever the engine provides one
+  (`Storage.supports_action_index`) and keeps the historical scan as the
+  fallback for engines without it; verdicts are identical because both read
+  the same log semantics. The log remains the source of truth:
+  `continuum verify --index` compares the projection against the fold and
+  reports drift, `--repair-index` rebuilds rows from events. Measured at 300
+  runs: foreign lookup ~19 ms scanning vs ~0.015 ms indexed, and the scan
+  cost grows linearly with store size while the index does not. Tests in
+  `tests/test_action_index.py` pin incremental maintenance across claims,
+  completions and reopens, equivalence with the scan for completed,
+  duplicate and uncertain-elsewhere cases, scoped-key isolation, drift
+  detection and repair, the engineless fallback path, and v2 backfill.
+
+- **Reconciler registry: probes settle uncertain side effects (#218).** An
+  uncertain action blocked resume until a person checked the external
+  system by hand, which does not scale past the first high-volume run.
+  Projects can now register one probe per action type in
+  `.continuum/reconcilers.json`; the probe receives the Action record as
+  JSON on stdin and prints a verdict (`occurred=true|false|unknown` or a
+  JSON object). `continuum reconcile <run>` runs the registered probes over
+  every pending action: definitive verdicts are applied through the ledger
+  and land as `ACTION_RECONCILED` events sourced `DETERMINISTIC` (local,
+  registered, auditable); probe errors, timeouts, unparseable output and
+  explicit unknowns leave actions untouched; types without a probe are
+  skipped. Auto-settlement therefore only shrinks the human queue, never
+  widens what an agent may certify itself. `--dry-run` reports without
+  writing. The command is deliberately separate from validate/resume so
+  those stay read-only under the exit-code safety contract. Verified live:
+  a claim committed then the MCP server killed leaves `REQUEST_HUMAN`;
+  after registering an outbox-checking probe, `reconcile` settles the
+  action and resume returns `RESUME`. Tests in `tests/test_reconcilers.py`
+  cover verdict parsing, the settle table, failure isolation, dry-run,
+  provenance and exit codes.
+
 - **Post-checkpoint observations surfaced in the recovery contract (#208).**
   The observation hooks (#210) recorded what landed on disk, but a resuming
   session had to know to inspect the raw event log to see it; the contract
@@ -59,8 +152,6 @@ All notable changes to this project are documented here. The format follows
   lookup missed. Regression tests cover cross-run dedup, the uncertain-elsewhere
   refusal, and the certain-failure pass-through.
 
-### Added
-
 - **Automatic durability for every harness (#191).** The file-derived progress
   hook and the policy-gated background checkpoint are now wired into
   `GenericAgentAdapter` itself instead of living only in examples. With the
@@ -81,8 +172,6 @@ All notable changes to this project are documented here. The format follows
   adapter path, no log bloat over unchanged files, non-blocking auto progress
   after an intercepted action, and subclass forwarding.
 
-### Added
-
 - **Localized recovery is now dep_scope-aware and file-aware (#184).**
   `RecoveryEngine.assess` respects `Action.dep_scope` when a scope is given: an
   uncertain side effect tagged to a dependency outside the scope no longer
@@ -90,8 +179,6 @@ All notable changes to this project are documented here. The format follows
   source-level `DependencyGraph` to `assess`/`assess_scoped` surfaces every file
   importing a scoped dependency as `RecoveryDecision.impacted_files`. Phase 6
   gains an `out_of_scope_side_effect` scenario covering both paths.
-
-### Added
 
 - **Leftover issue sweep (Phases 2, 3, and provenance).** Closed the remaining
   open issues from the master plan with working, tested code:
@@ -118,8 +205,6 @@ All notable changes to this project are documented here. The format follows
     external-world claims.
   - CLI scoped-recovery smoke test and recovery-policy regression tests
     (#110, #104).
-
-### Added
 
 - **Recovery benchmarking and correctness scenarios (Phase 6).** The existing
   CONTINUUM-Bench (`src/continuum/benchmark/__init__.py`) already provides the
@@ -735,8 +820,6 @@ All notable changes to this project are documented here. The format follows
    result dict holding the envelope key intact on cache hit. Closed by `15e0d67`
    (PR #53).
 
-
-### Added
 
 - **Regression test for the checkpoint environment round-trip.** `tests/test_storage.py`
   exercises the checkpoint/reload path end to end: a checkpoint is written with a

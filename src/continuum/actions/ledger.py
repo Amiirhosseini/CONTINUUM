@@ -260,10 +260,14 @@ class ActionLedger:
         run-global (``scoped_to_run=False``), honouring that promise requires
         looking at every other run in the store before opening a fresh slot,
         not just this run's log. Returns the most recent action recorded under
-        ``key`` outside this run, or None. The scan reads each run's events
-        once, so it costs O(total logged events) and is only paid on the
-        unscoped path after the local lookup missed.
+        ``key`` outside this run, or None.
+
+        Engines that maintain the action index (issue #216) answer this as an
+        indexed read; the rest pay the historical scan, O(total logged
+        events), only on the unscoped path after the local lookup missed.
         """
+        if getattr(self.storage, "supports_action_index", False):
+            return self.storage.foreign_action(key, exclude_run=self.run_id)
         found: Action | None = None
         for run in self.storage.list_runs():
             if run.run_id == self.run_id:
