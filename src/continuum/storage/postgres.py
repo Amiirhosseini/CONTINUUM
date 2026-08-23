@@ -109,6 +109,32 @@ CREATE INDEX IF NOT EXISTS checkpoints_by_run ON checkpoints(run_id, version);
 
 CREATE SEQUENCE IF NOT EXISTS action_index_ord_seq AS BIGINT;
 
+CREATE TABLE IF NOT EXISTS lg_checkpoints (
+    id            BIGSERIAL PRIMARY KEY,
+    thread_id     TEXT NOT NULL,
+    checkpoint_id TEXT NOT NULL,
+    parent_id     TEXT,
+    type          TEXT NOT NULL,
+    checkpoint    BYTEA NOT NULL,
+    meta_type     TEXT NOT NULL DEFAULT 'json',
+    metadata      BYTEA,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS lg_checkpoints_thread ON lg_checkpoints(thread_id, id DESC);
+
+CREATE TABLE IF NOT EXISTS lg_writes (
+    id            BIGSERIAL PRIMARY KEY,
+    thread_id     TEXT NOT NULL,
+    checkpoint_id TEXT NOT NULL,
+    task_id       TEXT NOT NULL,
+    idx           INTEGER NOT NULL,
+    channel       TEXT NOT NULL,
+    type          TEXT NOT NULL,
+    blob          BYTEA NOT NULL,
+    UNIQUE (thread_id, checkpoint_id, task_id, idx)
+);
+
 CREATE TABLE IF NOT EXISTS action_index (
     key TEXT PRIMARY KEY,
     run_id TEXT NOT NULL,
@@ -189,12 +215,12 @@ class PostgresStorage(Storage):
         self._connection.execute(
             """
             INSERT INTO action_index(key, run_id, action_id, status, updated_seq, action_json)
-            SELECT json_extract(e.payload, '$.key'),
-                   json_extract(e.payload, '$.action.run_id'),
-                   json_extract(e.payload, '$.action.action_id'),
-                   json_extract(e.payload, '$.action.status'),
+            SELECT e.payload::jsonb->>'key',
+                   e.payload::jsonb->'action'->>'run_id',
+                   e.payload::jsonb->'action'->>'action_id',
+                   e.payload::jsonb->'action'->>'status',
                    nextval('action_index_ord_seq'),
-                   json(json_extract(e.payload, '$.action'))
+                   (e.payload::jsonb->'action')::text
             FROM events e
             WHERE e.type IN ('ACTION_RECORDED', 'ACTION_RECONCILED', 'ACTION_COMPENSATED')
               AND json_extract(e.payload, '$.key') IS NOT NULL
