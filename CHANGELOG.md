@@ -63,6 +63,27 @@ All notable changes to this project are documented here. The format follows
   duplicate and uncertain-elsewhere cases, scoped-key isolation, drift
   detection and repair, the engineless fallback path, and v2 backfill.
 
+- **Reconciler registry: probes settle uncertain side effects (#218).** An
+  uncertain action blocked resume until a person checked the external
+  system by hand, which does not scale past the first high-volume run.
+  Projects can now register one probe per action type in
+  `.continuum/reconcilers.json`; the probe receives the Action record as
+  JSON on stdin and prints a verdict (`occurred=true|false|unknown` or a
+  JSON object). `continuum reconcile <run>` runs the registered probes over
+  every pending action: definitive verdicts are applied through the ledger
+  and land as `ACTION_RECONCILED` events sourced `DETERMINISTIC` (local,
+  registered, auditable); probe errors, timeouts, unparseable output and
+  explicit unknowns leave actions untouched; types without a probe are
+  skipped. Auto-settlement therefore only shrinks the human queue, never
+  widens what an agent may certify itself. `--dry-run` reports without
+  writing. The command is deliberately separate from validate/resume so
+  those stay read-only under the exit-code safety contract. Verified live:
+  a claim committed then the MCP server killed leaves `REQUEST_HUMAN`;
+  after registering an outbox-checking probe, `reconcile` settles the
+  action and resume returns `RESUME`. Tests in `tests/test_reconcilers.py`
+  cover verdict parsing, the settle table, failure isolation, dry-run,
+  provenance and exit codes.
+
 - **Host-side observation hooks close part of the durability gap (#207).**
   Recovery depends on the agent voluntarily calling the recording tools, so a
   kill between performing work and reporting it left the next session a
