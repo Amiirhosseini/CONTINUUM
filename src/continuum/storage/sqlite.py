@@ -639,9 +639,12 @@ class SQLiteStorage(Storage):
             # Gate on either signal: a surviving anchor marks a compacted run,
             # but if that row itself was deleted the archive must still be
             # audited rather than silently escaping the walk.
-            has_archive = conn.execute(
-                "SELECT 1 FROM events_archive WHERE run_id = ? LIMIT 1", (run_id,)
-            ).fetchone() is not None
+            has_archive = (
+                conn.execute(
+                    "SELECT 1 FROM events_archive WHERE run_id = ? LIMIT 1", (run_id,)
+                ).fetchone()
+                is not None
+            )
             if has_archive or any(r["type"] == "EVENT_LOG_ANCHORED" for r in rows):
                 archive_violations, archive_edge = self._audit_archive(conn, run_id)
                 violations.extend(archive_violations)
