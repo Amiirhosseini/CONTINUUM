@@ -83,8 +83,10 @@ jobs:
             });
             const names = new Set(current.map((l) => l.name));
 
+            let removedAny = false;
             for (const label of intent.remove_labels) {
               if (names.has(label)) {
+                removedAny = true;
                 await github.rest.issues.removeLabel({
                   owner,
                   repo,
@@ -100,6 +102,22 @@ jobs:
                 repo,
                 issue_number: prNumber,
                 labels: [intent.add_label],
+              });
+            }
+
+            // Only speak up when a push actually invalidated an approval.
+            // Routine pushes on an unapproved PR stay silent.
+            if (intent.notify_on_reset && removedAny) {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: prNumber,
+                body: [
+                  "<!-- sync-notice -->",
+                  "New commits were pushed to this branch, so the earlier approval no longer applies to HEAD and the `ready to merge` label has been removed.",
+                  "",
+                  "A fresh approving review will restore it.",
+                ].join("\n"),
               });
             }
 
