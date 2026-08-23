@@ -8,6 +8,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Human-in-the-loop surface on the dashboard (#242).** request_human
+  walls finally have a door with an audit row: the run page renders buttons
+  for confirm (REVIEW_CONFIRMED, Origin.HUMAN), reconcile
+  occurred=true/false through ActionLedger.reconcile, and complete (run row
+  flipped to COMPLETED) whenever a run is blocked or has uncertain actions.
+  Mutating POST endpoints are fail-closed - refused until
+  CONTINUUM_DASHBOARD_TOKEN is set - and every action maps 1:1 onto the
+  human CLI verb, landing identical event types and provenance. Reads stay
+  open; unknown routes 404.
+
 - **Version pinning on claims and summaries (#241).** Replay correctness
   needs environment identity: which prompt version, tool schema and model
   produced a decision (prompt-migration hazard, arXiv:2507.05573; Zylos
