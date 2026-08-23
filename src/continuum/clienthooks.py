@@ -34,8 +34,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shlex
 import shutil
+import subprocess
 import sys
 from collections.abc import Mapping
 from pathlib import Path
@@ -140,6 +142,38 @@ def observe_event_payload(raw: Mapping[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _join_command(parts: list[str]) -> str:
+    """Join an argv list into a string the host's shell will parse back.
+
+    The two shell families disagree on quoting, and the hook command is handed
+    to whichever one the client uses. POSIX shells read shlex's single quotes;
+    ``cmd.exe`` has no single-quote syntax at all and wants double quotes.
+    Windows paths routinely contain spaces, so quoting one the POSIX way
+    leaves ``cmd.exe`` trying to run a program called ``'D:\\pROJ`` and every
+    installed hook dies silently. ``subprocess.list2cmdline`` is the quoting
+    convention the Windows C runtime itself parses.
+    """
+    if os.name == "nt":
+        return subprocess.list2cmdline(parts)
+    return " ".join(shlex.quote(part) for part in parts)
+
+
+def _split_command(command: str) -> list[str]:
+    """Split a hook command back into argv: the inverse of :func:`_join_command`.
+
+    On Windows shlex's POSIX mode treats the backslashes in a path as escape
+    characters, so an unquoted ``C:\\Py\\Scripts\\continuum.exe`` comes back as
+    ``C:PyScriptscontinuum.exe`` and the recogniser stops seeing its own
+    commands. ``posix=False`` keeps them, at the cost of leaving the quotes
+    attached to the token. Both quote characters are stripped so a command
+    written by an older version -- POSIX-quoted even on Windows -- is still
+    recognised, which is what lets ``hooks remove`` clean up after an upgrade.
+    """
+    if os.name == "nt":
+        return [token.strip("\"'") for token in shlex.split(command, posix=False)]
+    return shlex.split(command)
+
+
 def observe_command(*, db: str | None = None) -> str:
     """Build the shell command the hook will run.
 
@@ -156,7 +190,7 @@ def observe_command(*, db: str | None = None) -> str:
     if db:
         parts += ["--db", db]
     parts.append("observe")
-    return " ".join(shlex.quote(part) for part in parts)
+    return _join_command(parts)
 
 
 def _is_continuum_hook(hook: Mapping[str, Any], kind: str) -> bool:
@@ -173,7 +207,7 @@ def _is_continuum_hook(hook: Mapping[str, Any], kind: str) -> bool:
     if not isinstance(command, str):
         return False
     try:
-        tokens = shlex.split(command)
+        tokens = _split_command(command)
     except ValueError:
         return False
     if len(tokens) < 2 or tokens[-1] != kind:

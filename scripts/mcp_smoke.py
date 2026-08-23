@@ -13,21 +13,36 @@ the first result. That is the difference between an agent that retries a side
 effect after a restart and one that does not.
 
 Standalone and read-only with respect to the repository: it writes to a
-throwaway database under /tmp and touches nothing else.
+throwaway database in the platform temporary directory and touches nothing
+else.
 """
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 from pathlib import Path
 from typing import Any
 
-DB_PATH = "/tmp/mcp-smoke-demo.db"
+# The transcript below is drawn with box-drawing characters and em dashes, so
+# stdout has to be able to encode them. Python picks the locale encoding for a
+# redirected stream -- cp1252 on Windows, ascii under LANG=C -- and the script
+# died with a UnicodeEncodeError at the first banner as soon as its output was
+# piped anywhere, which is what CI and any log capture do. Interactive consoles
+# already speak UTF-8, so this only changes the redirected case.
+if isinstance(sys.stdout, io.TextIOWrapper):
+    sys.stdout.reconfigure(encoding="utf-8")
+
+# tempfile rather than a literal /tmp: the latter does not exist on Windows,
+# where it left the script unable to open its own database and dying at the
+# initialize handshake.
+DB_PATH = str(Path(tempfile.gettempdir()) / "mcp-smoke-demo.db")
 PROTOCOL_VERSION = "2024-11-05"
 
 RESET = "\033[0m"
@@ -306,7 +321,7 @@ def main() -> int:
             print(paint("  server stderr:", DIM))
             for line in client._errors[-10:]:
                 print(paint(f"    {line}", DIM))
-        shutil.rmtree("/tmp/mcp-smoke-demo.db-journal", ignore_errors=True)
+        shutil.rmtree(DB_PATH + "-journal", ignore_errors=True)
 
 
 if __name__ == "__main__":
