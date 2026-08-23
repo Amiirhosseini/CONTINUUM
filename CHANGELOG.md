@@ -8,6 +8,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Replay-safety guard as a portable primitive (#237).** The gate's
+  decision table is extracted into `continuum.replayguard.evaluate`, a pure
+  core over the folded ledger that the gate now delegates to (single source
+  of truth). On top of it: `protected_call` executes a side effect at most
+  once per stable key and returns the journalled result on replay, raising
+  `ReplayBlocked` for uncertain or unclaimed states; and
+  `langgraph_protected_node` wraps LangGraph nodes so interrupt/crash
+  replays become cache hits instead of double-fired side effects - closing
+  the re-execution window LangGraph documents (issue #6208; ACRFence
+  arXiv:2603.20625). A chaos-matrix test encodes the crash points from the
+  durable-execution survey as executable assertions.
+
 - **Native LangGraph checkpointer (#236).** CONTINUUM now implements
   LangGraph's BaseCheckpointSaver over its own storage
   (`make_continuum_checkpointer(storage)`), so production LangGraph apps keep
