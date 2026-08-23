@@ -36,8 +36,7 @@ def db(tmp_path: Path) -> str:
     path = str(tmp_path / "c.db")
     with SQLiteStorage(path) as store:
         store.create_run(Run(run_id="run_1", goal="long task"))
-        store.append_event("run_1", EventType.RUN_STARTED,
-                           {"goal": "long task", "total": 10})
+        store.append_event("run_1", EventType.RUN_STARTED, {"goal": "long task", "total": 10})
         CheckpointManager(store).checkpoint("run_1")
     yield path
 
@@ -45,8 +44,10 @@ def db(tmp_path: Path) -> str:
 def work(db: str, i: int) -> None:
     with SQLiteStorage(db) as store:
         kind, _ = protected_call(
-            store, "run_1",
-            action_type="process_doc", key=f"doc:{i}",
+            store,
+            "run_1",
+            action_type="process_doc",
+            key=f"doc:{i}",
             fn=lambda doc=i: {"doc": doc},
         )
         assert kind is GuardKind.ALLOW
@@ -64,7 +65,8 @@ def test_compact_archives_prefix_and_keeps_tail_intact(db: str) -> None:
     with SQLiteStorage(db) as store:
         live = store.read_events("run_1")
         archived = [
-            dict(r) for r in store._connection.execute(
+            dict(r)
+            for r in store._connection.execute(
                 "SELECT * FROM events_archive WHERE run_id = 'run_1' ORDER BY sequence"
             )
         ]
@@ -88,12 +90,11 @@ def test_verify_flags_tampered_archive_rows_deep(db: str) -> None:
     work(db, 1)
     run("--db", db, "--json", "compact", "run_1", "--force")
     with SQLiteStorage(db) as store:
-        store._connection.execute(
-            "UPDATE events_archive SET payload = '{\"tampered\": true}'"
-        )
-        rows = [dict(r) for r in store._connection.execute(
-            "SELECT * FROM events_archive WHERE run_id='run_1'"
-        )]
+        store._connection.execute("UPDATE events_archive SET payload = '{\"tampered\": true}'")
+        rows = [
+            dict(r)
+            for r in store._connection.execute("SELECT * FROM events_archive WHERE run_id='run_1'")
+        ]
     tampered = any(
         SQLiteStorage._row_to_event(row).hash != SQLiteStorage._row_to_event(row).digest()
         for row in rows
@@ -134,8 +135,10 @@ def test_compact_requires_an_existing_version(tmp_path: Path) -> None:
     path = str(tmp_path / "empty.db")
     with SQLiteStorage(path) as store:
         store.create_run(Run(run_id="bare", goal="g"))
-    code, _, err = run("--db", path, "--force", "compact", "bare") if False else run(
-        "--db", path, "compact", "bare", "--force"
+    code, _, err = (
+        run("--db", path, "--force", "compact", "bare")
+        if False
+        else run("--db", path, "compact", "bare", "--force")
     )
     assert code == ExitCode.ERROR
     assert "anchored" in err or "no stored version" in err
@@ -172,8 +175,10 @@ def test_protected_call_cache_survives_compaction_of_unrelated_prefix(
     work(db, 1)
     run("--db", db, "compact", "run_1", "--force")
     kind, value = protected_call(
-        SQLiteStorage(db), "run_1",
-        action_type="process_doc", key="doc:99",
+        SQLiteStorage(db),
+        "run_1",
+        action_type="process_doc",
+        key="doc:99",
         fn=lambda: {"doc": 99},
     )
     assert kind is GuardKind.ALLOW and value == {"doc": 99}
