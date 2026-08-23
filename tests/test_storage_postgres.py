@@ -90,7 +90,8 @@ def test_event_ordering_reads_and_windowing(storage: PostgresStorage) -> None:
     for i in range(1, 5):
         storage.append_event("pg_ev", EventType.TASK_UPDATED, {"i": i})
     events = storage.read_events("pg_ev")
-    assert [e.sequence for e in events] == [1, 2, 3, 4]
+    # RUN_STARTED + four TASK_UPDATED appends.
+    assert [e.sequence for e in events] == [1, 2, 3, 4, 5]
 
     window = storage.read_events("pg_ev", after_sequence=1, upto=3)
     assert [e.sequence for e in window] == [2, 3]
