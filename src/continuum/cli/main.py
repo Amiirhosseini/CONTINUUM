@@ -580,8 +580,16 @@ def cmd_resume(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
         )
     if steps:
         text += "\n\nNext steps:\n" + "\n".join(f"  {i}. {t}" for i, t in enumerate(steps, 1))
-    if steps:
-        text += "\n\nNext steps:\n" + "\n".join(f"  {i}. {t}" for i, t in enumerate(steps, 1))
+
+    # Informed retry (#265): prior-attempt account, derived from recovery-path
+    # events already in the chain. Absent history means no section at all.
+    if decision.informed_retry:
+        from continuum.recovery.summary import render_informed_retry
+
+        text += (
+            "\n\nWhat previous attempts changed (informed retry):\n"
+            + "\n".join(f"  {line}" for line in render_informed_retry(decision.informed_retry))
+        )
 
     # Version pinning drift (issue #241): informational only.
     drift_lines: list[str] = []
@@ -617,6 +625,7 @@ def cmd_resume(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
         "family_rationale": family_rationale,
         "children": [c.__dict__ for c in child_statuses],
         "pinning_drift": drift_lines,
+        "informed_retry": decision.informed_retry,
         "contract": decision.contract.model_dump(mode="json"),
         "repairs": [s.action_name for s in decision.plan.steps],
         "progress": {
@@ -1020,6 +1029,13 @@ def cmd_briefing(args: argparse.Namespace, storage: Storage, out: Any, err: Any)
         lines += [
             f"  [{o.get('status', '?')}] {o.get('path', '')}" for o in obs if not o.get("truncated")
         ]
+    # Informed retry (#265): the engine's account of prior attempts, next to
+    # the agent's own summary above. Absent history means no section.
+    if decision.informed_retry:
+        from continuum.recovery.summary import render_informed_retry
+
+        lines.append("what previous attempts changed (engine-recorded):")
+        lines += [f"  {line}" for line in render_informed_retry(decision.informed_retry)]
     if steps:
         lines.append("next steps:")
         lines += [f"  {i}. {t}" for i, t in enumerate(steps, 1)]
@@ -2012,13 +2028,18 @@ def build_parser() -> argparse.ArgumentParser:
     def cmd_dashboard(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
         from continuum.dashboard import serve_dashboard as _serve
 
-        print(f"Serving dashboard at http://localhost:{args.port}", file=out)
-        _serve(storage, port=args.port)
+        print(f"Serving dashboard at http://{args.host}:{args.port}", file=err)
+        _serve(storage, port=args.port, host=args.host)
         return 0
 
     dashboard = add("dashboard", cmd_dashboard, "Serve the dashboard (presentation over run data).")
     dashboard.add_argument(
         "--port", type=int, default=8000, help="port to listen on (default: 8000)"
+    )
+    dashboard.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="bind address (default: 127.0.0.1; 0.0.0.0 exposes recovery data)",
     )
 
     return parser

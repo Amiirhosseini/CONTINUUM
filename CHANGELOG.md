@@ -8,6 +8,19 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Dashboard bind hardening (#270).** `continuum dashboard` now binds
+  127.0.0.1 by default like every other CONTINUUM server; the previous
+  all-interfaces bind exposed recovery contracts (goals, side-effect
+  arguments and results, event payloads) unauthenticated to the local
+  network. Construction is split into `make_dashboard_server` so the bind
+  address is testable; three new tests pin the default, honour explicit
+  hosts, and smoke GET / over a real socket.
+
+### Changed
+
+- **`continuum dashboard` binds 127.0.0.1 by default** (#270); pass
+  `--host 0.0.0.0` to opt into network exposure.
+
 - **Multi-agent hierarchies: parent/child runs, aggregated contracts,
   A2A identity (#243).** `continuum start --parent <run_id>` attaches a
   child run to its supervisor (validated: parent must exist and not be

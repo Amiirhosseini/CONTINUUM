@@ -129,7 +129,16 @@ def render_run_detail_html(storage: Storage, run_id: str) -> str:
 <p><a href=\"/\">Back to dashboard</a></p></body></html>"""
 
 
-def serve_dashboard(storage: Storage, port: int = 8000) -> None:
+def make_dashboard_server(
+    storage: Storage, port: int = 8000, host: str = "127.0.0.1"
+) -> socketserver.ThreadingTCPServer:
+    """Construct the dashboard HTTP server bound to ``host``.
+
+    Defaults to loopback (#270): the dashboard renders recovery contracts
+    with goals and side-effect details, which must not be reachable from
+    off-host by default. Operators who understand the exposure can pass
+    ``--host 0.0.0.0`` explicitly.
+    """
     import urllib.parse
 
     from continuum.dashboard.hitl import (
@@ -215,6 +224,14 @@ def serve_dashboard(storage: Storage, port: int = 8000) -> None:
 
     server_class = socketserver.ThreadingTCPServer
     server_class.allow_reuse_address = True
-    with server_class(("", port), Handler) as httpd:
-        print(f"Serving dashboard at http://localhost:{port}")
+    server = server_class((host, port), Handler)
+    return server
+
+
+def serve_dashboard(storage: Storage, port: int = 8000, host: str = "127.0.0.1") -> None:
+    httpd = make_dashboard_server(storage, port=port, host=host)
+    print(f"Serving dashboard at http://{host}:{port}")
+    try:
         httpd.serve_forever()
+    finally:
+        httpd.server_close()
