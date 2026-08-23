@@ -8,6 +8,21 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Native LangGraph checkpointer (#236).** CONTINUUM now implements
+  LangGraph's BaseCheckpointSaver over its own storage
+  (`make_continuum_checkpointer(storage)`), so production LangGraph apps keep
+  their native persistence API while gaining the hash-chained event log,
+  provenance tagging, and everything else CONTINUUM provides. thread_id maps
+  deterministically to a run (`lg-<thread>`); every put lands a
+  STATE_CHECKPOINTED event with EXTERNAL_AGENT provenance; channel values
+  round-trip through LangGraph's JsonPlusSerializer (pydantic models,
+  datetimes). Schema v4 adds the two lg_* tables (additive migration plus
+  baseline DDL). Seven tests cover put/get round trips with typed values,
+  newest-first listing with limit/before/metadata-filter, parent chains and
+  point-in-time gets, pending writes, total thread deletion, per-put
+  provenance events, and a real StateGraph resuming across separately built
+  graph instances.
+
 - **Reasoning-context rehydration (#235).** Task-state recovery without
   cognitive-state recovery produces sessions that are safe yet amnesiac.
   New mutating MCP tool `continuum_record_summary` stores a bounded,
