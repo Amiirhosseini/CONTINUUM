@@ -53,6 +53,7 @@ import os
 import sqlite3
 import sys
 from collections.abc import Callable, Mapping
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from continuum.actions.ledger import ActionLedger
@@ -638,6 +639,23 @@ def build_server(
         # for "what was this task?" across interruptions.
         goal = ctx.storage.get_run(run_id).goal
         tail_evidence = decision.tail_evidence
+        # Executable next steps (issue: actionable guidance). Derived from
+        # the plan plus whatever automation this project has registered, so
+        # the resuming agent never translates statuses into commands itself.
+        from continuum.gate import DEFAULT_GATE_CONFIG_PATH
+        from continuum.reconcilers import DEFAULT_RECONCILERS_PATH, load_reconcilers
+        from continuum.recovery.guidance import human_steps_for
+
+        try:
+            probed = list(load_reconcilers(Path(DEFAULT_RECONCILERS_PATH)))
+        except Exception:
+            probed = []
+        human_steps = human_steps_for(
+            decision,
+            run_id=run_id,
+            probed_types=probed,
+            gate_configured=Path(DEFAULT_GATE_CONFIG_PATH).exists(),
+        )
         return _json(
             {
                 "run_id": run_id,
@@ -645,6 +663,7 @@ def build_server(
                 "mode": decision.mode.value,
                 "safe": decision.safe,
                 "next_allowed_action": decision.next_allowed_action,
+                "human_steps": human_steps,
                 "rationale": list(decision.rationale),
                 "repairs": [
                     {

@@ -8,6 +8,19 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Actionable recovery guidance (`human_steps`).** The contract named what
+  was blocked but not what to do about it, leaving every resuming agent to
+  translate `reconcile_action:abc` into commands by hand. Resume and
+  validate now render executable next steps derived from the plan plus live
+  project automation: a reconcile step with a registered probe becomes one
+  `continuum reconcile <run>` command; without one it names the external
+  check and the exact `continuum_reconcile_action(...)` call, and says why
+  it is manual; human review points at `continuum confirm`; dependency
+  steps name the `--env` re-pin. Gate presence is surfaced as protocol
+  guidance. Steps flow through CLI text/JSON, MCP `continuum_resume`, and
+  the sidecar's mirrored payload. Guidance is rendering only: derived from
+  existing state and config, never executed by CONTINUUM itself.
+
 - **Client installers for Gemini CLI and Codex CLI (#209).** The observe and
   gate commands were already client-agnostic; wiring them into new clients is
   now data, not code. `CLIENT_PROFILES` describes each client's settings

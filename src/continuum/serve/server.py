@@ -39,6 +39,7 @@ from continuum.models import (
     UnknownSideEffect,
 )
 from continuum.recovery.contract import render_contract
+from continuum.recovery.guidance import human_steps_for
 from continuum.state.semantic import project
 from continuum.storage import RunNotFound, Storage, open_storage
 
@@ -293,6 +294,7 @@ def _decision_payload(decision: Any, *, goal: str) -> dict[str, Any]:
         "mode": decision.mode.value,
         "safe": decision.safe,
         "next_allowed_action": decision.next_allowed_action,
+        "human_steps": human_steps_for(decision, run_id=decision.state.run_id),
         "rationale": list(decision.rationale),
         "repairs": [
             {
