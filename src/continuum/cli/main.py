@@ -632,6 +632,61 @@ def cmd_confirm(args: argparse.Namespace, storage: Storage, out: Any, err: Any) 
     return exit_code_for(decision.mode)
 
 
+def cmd_budget(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Report retry-budget usage per action type (issue #240). Read-only."""
+    from continuum.budgets import (
+        DEFAULT_BUDGETS_PATH,
+        attempts_for_type,
+        evaluate_budget,
+        load_budgets,
+    )
+
+    storage.get_run(args.run_id)
+    try:
+        raw = load_budgets(Path(args.config) if args.config else Path(DEFAULT_BUDGETS_PATH))
+    except Exception as exc:
+        print(f"error: budget registry invalid: {exc}", file=err)
+        return ExitCode.ERROR
+
+    events = storage.read_events(args.run_id)
+    types_seen = sorted(
+        {
+            e.payload.get("action", {}).get("action_type")
+            for e in events
+            if e.type is EventType.ACTION_RECORDED and isinstance(e.payload.get("action"), dict)
+        }
+        | set((raw.get("action_types") or {}).keys())
+    )
+    rows: list[dict[str, Any]] = []
+    for action_type in types_seen:
+        used = attempts_for_type(events, action_type)
+        allowed, _, maximum = evaluate_budget(raw, action_type, 0)
+        remaining = max(0, maximum - used)
+        rows.append(
+            {
+                "action_type": action_type,
+                "attempts": used,
+                "max_attempts": maximum,
+                "remaining": remaining,
+                "exhausted": remaining == 0,
+            }
+        )
+    payload = {"run_id": args.run_id, "budgets": rows}
+    lines = [f"{'ACTION TYPE':<28} {'ATTEMPTS':>8} {'MAX':>4} {'REMAINING':>10}"]
+    for r in rows:
+        lines.append(
+            f"{r['action_type']:<28} {r['attempts']:>8} {r['max_attempts']:>4} {r['remaining']:>10}"
+        )
+    _emit(
+        payload,
+        "\n".join(lines) or "No budgets configured.",
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
+    )
+    return ExitCode.OK
+
+
 def cmd_compact(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
     """Archive the pre-anchor prefix of a run's event log (issue #239). Mutates."""
     storage.get_run(args.run_id)
@@ -1648,6 +1703,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     complete = with_run(add("complete", cmd_complete, "Close a run as done. Mutates storage."))
     complete.add_argument("--summary", default=None, help="one-line closing note")
+
+    budget_cmd = with_run(add("budget", cmd_budget, "Retry-budget usage per action type."))
+    budget_cmd.add_argument(
+        "--config",
+        default=None,
+        help="budget registry path (default: .continuum/budgets.json)",
+    )
 
     compact = with_run(
         add("compact", cmd_compact, "Archive the pre-anchor log prefix. Mutates storage.")
