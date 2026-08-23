@@ -8,6 +8,61 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Production server mode (#238).** Three pieces: (1) CI now runs a real
+  Postgres 16 service container against the Postgres contract tests, and the
+  contract tests themselves were rewritten against the modern surface: the
+  originals predated strict enum validation and Goal models, passing raw
+  strings that today's pydantic models rightly refuse - they had rotted in
+  skip-guaranteed obscurity. The gateway backfill SQL was also fixed to
+  Postgres jsonb operators (it previously used SQLite-only `json_extract`). (2) `continuum serve --transport http`
+  exposes the full sidecar dispatch over POST /<method> JSON for non-Python
+  agents: same handlers, same token auth (`CONTINUUM_SERVE_TOKEN`), errors
+  mapped to status codes (404 unknown method, 403 unauthorized, 400 bad
+  params, 500 storage failures) without killing the server. (3) Honest
+  scoping note: duplicate reconciliation between concurrent workers is
+  already impossible by construction (ledger claims commit inside IMMEDIATE
+  transactions); run-level exclusivity leases remain available to adapters
+  via LeaseCoordinator rather than being forced onto every surface.
+
+- **Replay-safety guard as a portable primitive (#237).** The gate's
+  decision table is extracted into `continuum.replayguard.evaluate`, a pure
+  core over the folded ledger that the gate now delegates to (single source
+  of truth). On top of it: `protected_call` executes a side effect at most
+  once per stable key and returns the journalled result on replay, raising
+  `ReplayBlocked` for uncertain or unclaimed states; and
+  `langgraph_protected_node` wraps LangGraph nodes so interrupt/crash
+  replays become cache hits instead of double-fired side effects - closing
+  the re-execution window LangGraph documents (issue #6208; ACRFence
+  arXiv:2603.20625). A chaos-matrix test encodes the crash points from the
+  durable-execution survey as executable assertions.
+
+- **Native LangGraph checkpointer (#236).** CONTINUUM now implements
+  LangGraph's BaseCheckpointSaver over its own storage
+  (`make_continuum_checkpointer(storage)`), so production LangGraph apps keep
+  their native persistence API while gaining the hash-chained event log,
+  provenance tagging, and everything else CONTINUUM provides. thread_id maps
+  deterministically to a run (`lg-<thread>`); every put lands a
+  STATE_CHECKPOINTED event with EXTERNAL_AGENT provenance; channel values
+  round-trip through LangGraph's JsonPlusSerializer (pydantic models,
+  datetimes). Schema v4 adds the two lg_* tables (additive migration plus
+  baseline DDL). Seven tests cover put/get round trips with typed values,
+  newest-first listing with limit/before/metadata-filter, parent chains and
+  point-in-time gets, pending writes, total thread deletion, per-put
+  provenance events, and a real StateGraph resuming across separately built
+  graph instances.
+
+- **Reasoning-context rehydration (#235).** Task-state recovery without
+  cognitive-state recovery produces sessions that are safe yet amnesiac.
+  New mutating MCP tool `continuum_record_summary` stores a bounded,
+  self-authored summary of where the agent's reasoning stands - plan stack,
+  decisions with rationale, open questions, working set - hard-capped at
+  4096 serialized characters so it can never become a transcript dump.
+  Summaries land as REASONING_SUMMARY events with EXTERNAL_AGENT provenance
+  and are strictly informational: they never move mode or safety. The
+  SessionStart briefing serves the newest summary verbatim ("where the last
+  session left off"), so a fresh session inherits the dead session's plan
+  instead of guessing from a progress bar.
+
 - **README refresh.** The README predated this week's work in every
   direction users touch first: the Quick Start now leads with the two-minute
   harness-wiring path (start a run, `hooks install`, no CLAUDE.md); the

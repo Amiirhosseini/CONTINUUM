@@ -124,9 +124,23 @@ def run_serve(
     transport: str = "stdio",
     instream: TextIO | None = None,
     outstream: TextIO | None = None,
+    port: int = 8765,
 ) -> int:
     """Run the sidecar loop. Defaults to stdin/stdout for a real server."""
     server = SidecarServer(database=db)
+    if transport == "http":
+        from continuum.serve.server import SidecarHTTP
+
+        http = SidecarHTTP(server, port=port)
+        print(f"CONTINUUM sidecar listening on http://{'127.0.0.1'}:{http.port}", flush=True)
+        try:
+            http.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            http.shutdown()
+            server.close()
+        return 0
     try:
         return server.serve_stdio(instream, outstream)
     finally:
@@ -139,4 +153,8 @@ def cmd_serve(args: Any, storage: Any, out: TextIO, err: TextIO) -> int:  # noqa
 
     if storage is not None and isinstance(storage, Storage):
         storage.close()
-    return run_serve(db=getattr(args, "db", None), transport=getattr(args, "transport", "stdio"))
+    return run_serve(
+        db=getattr(args, "db", None),
+        transport=getattr(args, "transport", "stdio"),
+        port=int(getattr(args, "port", 8765)),
+    )

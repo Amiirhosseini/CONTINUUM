@@ -36,7 +36,6 @@ from pathlib import Path
 from typing import Any
 
 from continuum.actions.idempotency import idempotency_key
-from continuum.models import ActionStatus
 
 __all__ = [
     "DEFAULT_GATE_CONFIG_PATH",
@@ -137,30 +136,40 @@ def decide(
     action_type = spec.get("action_type") or tool_name
     try:
         rendered = render_key(spec["key_template"], tool_input)
-        key = _expected_key(action_type, run_id, rendered)
+        _expected_key(action_type, run_id, rendered)
     except GateConfigError as exc:
         return Decision(False, f"gate configuration error: {exc}")
 
-    action = actions_by_key.get(key)
-    if action is None or action.action_type != action_type:
+    from continuum.replayguard import GuardKind
+    from continuum.replayguard import evaluate as core_evaluate
+
+    # Single source of truth (#237): the gate classifies through the shared
+    # replayguard core, then renders its own registry-aware messages.
+    decision = core_evaluate(
+        action_type=action_type,
+        rendered_key=rendered,
+        run_id=run_id,
+        actions_by_key=actions_by_key,
+    )
+    action = actions_by_key.get(decision.key) if decision.key else None
+
+    if decision.kind is GuardKind.ALLOW:
+        return Decision(True, f"live claim {rendered!r}")
+    if decision.kind is GuardKind.DENY_UNCLAIMED:
         return Decision(
             False,
             f"side effect {action_type!r} with key {rendered!r} has no ledger claim. "
             f"Call the MCP tool continuum_intercept_action with run_id={run_id!r}, "
             f"action_type={action_type!r}, key={rendered!r} first, then repeat this call.",
         )
-
-    status = action.status
-    if status is ActionStatus.STARTED:
-        return Decision(True, f"live claim {rendered!r}")
-    if status is ActionStatus.COMPLETED:
+    if decision.kind is GuardKind.SKIP_DUPLICATE or (decision.kind is GuardKind.DENY_DUPLICATE):
         return Decision(
             False,
             f"{action_type!r} with key {rendered!r} was already completed"
-            + (f" (external id {action.external_id!r})" if action.external_id else "")
+            + (f" (external id {action.external_id!r})" if action and action.external_id else "")
             + ". Do not repeat it.",
         )
-    if status is ActionStatus.UNKNOWN:
+    if decision.kind is GuardKind.BLOCK_UNCERTAIN:
         return Decision(
             False,
             f"{action_type!r} with key {rendered!r} has an unknown outcome. Call "
@@ -169,6 +178,6 @@ def decide(
     return Decision(
         False,
         f"the previous attempt of {action_type!r} with key {rendered!r} is closed "
-        f"(status {status.value}). Claim it again through continuum_intercept_action "
-        f"before retrying.",
+        f"(status {action.status.value if action else 'unknown'}). Claim it again "
+        f"through continuum_intercept_action before retrying.",
     )
