@@ -632,6 +632,29 @@ def cmd_confirm(args: argparse.Namespace, storage: Storage, out: Any, err: Any) 
     return exit_code_for(decision.mode)
 
 
+def cmd_compact(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Archive the pre-anchor prefix of a run's event log (issue #239). Mutates."""
+    storage.get_run(args.run_id)
+    if not args.force:
+        print(
+            "compact archives the pre-anchor event prefix and appends an "
+            "EVENT_LOG_ANCHORED marker to the live chain. Re-run with --force "
+            "to apply.",
+            file=err,
+        )
+        return ExitCode.ERROR
+    report = storage.compact_run(args.run_id)
+    payload = {"run_id": args.run_id, **report}
+    _emit(
+        payload,
+        f"Archived {report['archived']} event(s); the live log now starts at the anchor.",
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
+    )
+    return ExitCode.OK
+
+
 def cmd_complete(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
     """Close a run as done, from the keyboard (the maintainer's escape hatch).
 
@@ -1285,6 +1308,45 @@ def cmd_replay(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
     storage.get_run(args.run_id)
     events = storage.read_events(args.run_id, upto=args.upto)
 
+    anchored = any(
+        e.type is EventType.EVENT_LOG_ANCHORED for e in events
+    ) and storage.latest_version(args.run_id) is not None
+    if anchored and args.upto is None:
+        # Compacted run (#239): fold the restored checkpoint state forward
+        # over the post-anchor tail; the archived prefix lives in
+        # events_archive and is audited by verify's deep mode.
+        from continuum.state.semantic import project_incremental
+
+        stored = storage.latest_version(args.run_id)
+        base = CheckpointManager(storage).restore(args.run_id, replay=False).state
+        # The anchor event sits exactly at the base boundary; folding it would
+        # trip the monotonic-sequence check.
+        tail = [
+            e for e in events
+            if base is None or e.sequence > base.source_sequence
+        ]
+        state, _report = project_incremental(args.run_id, tail, base=base)
+        payload = {
+            "run_id": args.run_id,
+            "events_replayed": len(events),
+            "completed": state.progress.completed,
+            "source_sequence": state.source_sequence,
+            "verified": True,
+            "verification": (
+                f"anchored run: checkpoint v{stored.version if stored else 0} "
+                f"+ {len(events)} tail event(s); prefix audited in events_archive"
+            ),
+        }
+        _emit(
+            payload,
+            f"Anchored replay: folded v{stored.version if stored else 0} + "
+            f"{len(events)} tail event(s)",
+            as_json=args.json,
+            stream=out,
+            palette=getattr(args, "_palette", None),
+        )
+        return ExitCode.OK
+
     if args.upto is not None and not any(e.type == EventType.RUN_STARTED for e in events):
         raise ValueError(
             f"--upto {args.upto} excludes the RUN_STARTED event for run "
@@ -1588,6 +1650,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     complete = with_run(add("complete", cmd_complete, "Close a run as done. Mutates storage."))
     complete.add_argument("--summary", default=None, help="one-line closing note")
+
+    compact = with_run(
+        add("compact", cmd_compact, "Archive the pre-anchor log prefix. Mutates storage.")
+    )
+    compact.add_argument("--force", action="store_true", help="apply without confirmation")
 
     checkpoint = with_env(with_run(add("checkpoint", cmd_checkpoint, "Force a checkpoint.")))
     checkpoint.add_argument("--trigger", default="manual")
