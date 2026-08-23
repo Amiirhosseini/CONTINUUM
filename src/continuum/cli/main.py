@@ -721,6 +721,80 @@ def cmd_observe(args: argparse.Namespace, storage: Storage, out: Any, err: Any) 
     return ExitCode.OK
 
 
+def cmd_briefing(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Session-start context injection (no CLAUDE.md required).
+
+    Wired as a SessionStart hook by `hooks install`. Prints, as
+    hook-consumable JSON plus human-readable text, everything a returning
+    agent needs: the active run's goal, progress, recovery verdict,
+    executable next steps, and disk-checked file observations. Read-only;
+    with no active run it says exactly how to create one.
+    """
+    run_id = args.run_id
+    if not run_id:
+        active = storage.get_active_run()
+        run_id = active.run_id if active else None
+
+    if not run_id:
+        text = (
+            "CONTINUUM: no active run. Create one before working durably: "
+            "`continuum start <run_id> --goal '...'`, or call "
+            "continuum_record_progress(run_id, completed, total, goal=...) via MCP."
+        )
+        context = "[CONTINUUM] " + text
+        _emit(
+            {"active_run": None, "context": context},
+            text,
+            as_json=args.json,
+            stream=out,
+            palette=getattr(args, "_palette", None),
+        )
+        return ExitCode.OK
+
+    decision = RecoveryEngine(storage).assess(run_id)
+    steps = _human_steps(decision, run_id)
+    contract = decision.contract
+    state = decision.state
+
+    lines = [
+        f"CONTINUUM active run: {run_id}",
+        f"goal: {state.goal.description}",
+        f"progress: {state.progress.completed}/{state.progress.total or '?'} completed"
+        + (f", {state.progress.failed} failed" if state.progress.failed else ""),
+        f"recovery: {decision.mode.value} (safe={decision.safe})",
+    ]
+    obs = contract.post_checkpoint_observations[:5]
+    if obs:
+        lines.append("files since checkpoint:")
+        lines += [
+            f"  [{o.get('status', '?')}] {o.get('path', '')}" for o in obs if not o.get("truncated")
+        ]
+    if steps:
+        lines.append("next steps:")
+        lines += [f"  {i}. {t}" for i, t in enumerate(steps, 1)]
+
+    text = "\n".join(lines)
+    context = text
+    _emit(
+        {
+            "active_run": run_id,
+            "mode": decision.mode.value,
+            "safe": decision.safe,
+            "context": context,
+            "human_steps": steps,
+            "hookSpecificOutput": {
+                "hookEventName": args.hook_event_name,
+                "additionalContext": context,
+            },
+        },
+        text,
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
+    )
+    return ExitCode.OK
+
+
 def cmd_hooks_install(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
     """Wire a coding CLI's tool events into observe (and optionally gate).
 
@@ -735,6 +809,7 @@ def cmd_hooks_install(args: argparse.Namespace, storage: Storage, out: Any, err:
     command = observe_command(db=args.db)
     gate_command = command[: -len("observe")] + "gate"
 
+    briefing_command = command[: -len("observe")] + "briefing"
     statuses = [
         (
             install_client_hook(
@@ -747,7 +822,19 @@ def cmd_hooks_install(args: argparse.Namespace, storage: Storage, out: Any, err:
             "observe",
             profile["post_event"],
             command,
-        )
+        ),
+        (
+            install_client_hook(
+                settings_path,
+                briefing_command,
+                event_name=profile["start_event"],
+                matcher="",
+            ),
+            "",
+            "briefing",
+            profile["start_event"],
+            briefing_command,
+        ),
     ]
     if getattr(args, "with_gate", False):
         statuses.append(
@@ -1413,6 +1500,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--payload-file",
         default=None,
         help="read the hook payload from this file instead of stdin",
+    )
+
+    briefing = add(
+        "briefing",
+        cmd_briefing,
+        "Session-start context: active run, progress, next steps. Read-only.",
+    )
+    briefing.add_argument(
+        "--run-id",
+        default=None,
+        help="run to brief on (default: the most recently active non-terminal run)",
+    )
+    briefing.add_argument(
+        "--hook-event-name",
+        dest="hook_event_name",
+        default="SessionStart",
+        help=argparse.SUPPRESS,
     )
 
     gate = add(

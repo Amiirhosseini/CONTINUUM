@@ -66,6 +66,7 @@ _PATH_KEYS = ("file_path", "notebook_path")
 CLIENT_PROFILES: dict[str, dict[str, str]] = {
     "claude-code": {
         "settings": ".claude/settings.json",
+        "start_event": "SessionStart",
         "post_event": "PostToolUse",
         "pre_event": "PreToolUse",
         "write_matcher": "Write|Edit|MultiEdit|NotebookEdit",
@@ -73,6 +74,7 @@ CLIENT_PROFILES: dict[str, dict[str, str]] = {
     },
     "gemini": {
         "settings": ".gemini/settings.json",
+        "start_event": "SessionStart",
         "post_event": "AfterTool",
         "pre_event": "BeforeTool",
         "write_matcher": "write_file|replace",
@@ -80,6 +82,7 @@ CLIENT_PROFILES: dict[str, dict[str, str]] = {
     },
     "codex": {
         "settings": ".codex/hooks.json",
+        "start_event": "SessionStart",
         "post_event": "PostToolUse",
         "pre_event": "PreToolUse",
         # Documented surface as of mid-2026: Codex hooks fire for shell/Bash
@@ -333,7 +336,7 @@ def remove_claude_code_hook(settings_path: Path) -> bool:
                 for h in group["hooks"]
                 if not (
                     isinstance(h, dict)
-                    and (_is_continuum_hook(h, "observe") or _is_continuum_hook(h, "gate"))
+                    and any(_is_continuum_hook(h, k) for k in ("observe", "gate", "briefing"))
                 )
             ]
             if len(kept_hooks) != len(group["hooks"]):
