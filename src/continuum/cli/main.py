@@ -34,8 +34,8 @@ from continuum.checkpoint import CheckpointError, CheckpointManager
 from continuum.cli.colour import Palette
 from continuum.cli.exitcodes import ExitCode, exit_code_for
 from continuum.clienthooks import (
-    DEFAULT_MATCHER,
-    install_claude_code_hook,
+    CLIENT_PROFILES,
+    install_client_hook,
     observe_command,
     observe_event_payload,
     remove_claude_code_hook,
@@ -682,42 +682,93 @@ def cmd_observe(args: argparse.Namespace, storage: Storage, out: Any, err: Any) 
 
 
 def cmd_hooks_install(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
-    """Wire file-mutating tool completions of a coding CLI into observe."""
-    settings_path = Path(args.settings)
+    """Wire a coding CLI's tool events into observe (and optionally gate).
+
+    Per-client wiring is data-driven (#209): the profile supplies the
+    settings-path default and the event/matcher names; the installed commands
+    are the same client-agnostic ``continuum observe`` / ``continuum gate``.
+    """
+    from continuum.clienthooks import CLIENT_PROFILES
+
+    profile = CLIENT_PROFILES[args.client]
+    settings_path = Path(args.settings or profile["settings"])
     command = observe_command(db=args.db)
-    status = install_claude_code_hook(settings_path, command)
-    entries = [(DEFAULT_MATCHER, "observe", status)]
+    gate_command = command[: -len("observe")] + "gate"
+
+    statuses = [
+        (
+            install_client_hook(
+                settings_path,
+                command,
+                event_name=profile["post_event"],
+                matcher=profile["write_matcher"],
+            ),
+            profile["write_matcher"],
+            "observe",
+            profile["post_event"],
+            command,
+        )
+    ]
     if getattr(args, "with_gate", False):
-        gate_command = observe_command(db=args.db)[: -len("observe")] + "gate"
-        gate_status = install_claude_code_hook(settings_path, gate_command, kind="gate")
-        entries.append(("*", "gate", gate_status))
+        statuses.append(
+            (
+                install_client_hook(
+                    settings_path,
+                    gate_command,
+                    event_name=profile["pre_event"],
+                    matcher=profile["any_matcher"],
+                ),
+                profile["any_matcher"],
+                "gate",
+                profile["pre_event"],
+                gate_command,
+            )
+        )
+
     lines = [f"Hook configuration written to {settings_path}"]
-    for matcher, kind, st in entries:
-        lines.append(f"  [{st}] {kind} (matcher {matcher})")
-        if kind == "observe":
-            lines.append(f"    command: {command}")
-        else:
-            lines.append(f"    command: {gate_command}")
+    for st, matcher, kind, event, cmd in statuses:
+        lines.append(f"  [{st}] {kind} on {event} (matcher {matcher})")
+        lines.append(f"    command: {cmd}")
+    payload: dict[str, Any] = {
+        "client": args.client,
+        "settings": str(settings_path),
+        "hooks": [
+            {"event": event, "matcher": m, "kind": k, "status": st, "command": cmd}
+            for st, m, k, event, cmd in statuses
+        ],
+    }
+    if args.client == "codex":
+        hint = _codex_feature_flag_hint()
+        if hint:
+            lines.append(hint)
+            payload["feature_flag_hint"] = hint
     _emit(
-        {
-            "client": args.client,
-            "settings": str(settings_path),
-            "hooks": [
-                {
-                    "matcher": m,
-                    "kind": k,
-                    "status": s,
-                    "command": command if k == "observe" else gate_command,
-                }
-                for m, k, s in entries
-            ],
-        },
+        payload,
         "\n".join(lines),
         as_json=args.json,
         stream=out,
         palette=getattr(args, "_palette", None),
     )
     return ExitCode.OK
+
+
+def _codex_feature_flag_hint() -> str:
+    """Codex gates its hook engine behind a config flag; without it hooks are
+    silent no-ops. We do not hand-edit TOML, so surface the exact line."""
+    config = Path.home() / ".codex" / "config.toml"
+    try:
+        text = config.read_text(encoding="utf-8")
+    except OSError:
+        return (
+            "note: Codex hooks are off by default. Add '[features]\\ncodex_hooks = true' "
+            f"to {config} (create it if needed), then restart Codex."
+        )
+    if "codex_hooks" not in text:
+        return (
+            f"note: 'codex_hooks' was not found in {config}; add "
+            "'[features]\\ncodex_hooks = true', then restart Codex."
+        )
+    return ""
 
 
 def cmd_hooks_remove(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
@@ -1255,11 +1306,15 @@ def build_parser() -> argparse.ArgumentParser:
     hooks_sub = hooks.add_subparsers(dest="hooks_command", metavar="ACTION CLIENT", required=True)
 
     def hooks_client(p: argparse.ArgumentParser, func: Any) -> None:
-        p.add_argument("client", choices=("claude-code",), help="which client to configure")
+        p.add_argument(
+            "client",
+            choices=tuple(CLIENT_PROFILES),
+            help="which client to configure (claude-code, gemini, codex)",
+        )
         p.add_argument(
             "--settings",
-            default=".claude/settings.json",
-            help="path to the client's settings file (default: .claude/settings.json)",
+            default=None,
+            help="path to the client's settings file (default: per client profile)",
         )
         p.set_defaults(func=func)
 
