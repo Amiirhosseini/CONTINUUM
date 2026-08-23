@@ -837,3 +837,45 @@ def test_validate_json_carries_mode(db: str) -> None:
     data = json.loads(out)
     assert data["mode"] == "resume"
     assert data["safe"] is True
+
+
+# --- closing a run from the keyboard ------------------------------------------ #
+
+
+def test_complete_closes_a_run_and_clears_it_from_active_resolution(
+    tmp_path: Path,
+) -> None:
+    """Found missing during live testing: finished runs kept surfacing as the
+    active run and hijacked every fresh session's resume."""
+    path = str(tmp_path / "c.db")
+    with SQLiteStorage(path) as store:
+        store.create_run(Run(run_id="old", goal="finished work"))
+    code, out, _ = run("--db", path, "--json", "complete", "old", "--summary", "shipped")
+    assert code == ExitCode.OK, out
+    payload = json.loads(out)
+    assert payload["status"] == "completed"
+
+    with SQLiteStorage(path) as store:
+        assert store.get_run("old").status.value == "completed"
+        events = [e.type.value for e in store.read_events("old")]
+        assert "REVIEW_CONFIRMED" in events and "RUN_COMPLETED" in events
+        # A completed run is terminal: it can never be offered for resume.
+        assert store.get_active_run() is None
+
+
+def test_complete_is_idempotent_enough_for_double_clicks(tmp_path: Path) -> None:
+    path = str(tmp_path / "d.db")
+    with SQLiteStorage(path) as store:
+        store.create_run(Run(run_id="r", goal="g"))
+    code, _, err = run("--db", path, "complete", "r")
+    assert code == ExitCode.OK
+    code, _, err = run("--db", path, "complete", "r")
+    assert code == ExitCode.OK, err
+
+
+def test_complete_unknown_run_is_not_found(tmp_path: Path) -> None:
+    path = str(tmp_path / "e.db")
+    with SQLiteStorage(path):
+        pass
+    code, _, err = run("--db", path, "complete", "ghost")
+    assert code == ExitCode.NOT_FOUND

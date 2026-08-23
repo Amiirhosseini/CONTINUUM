@@ -298,11 +298,39 @@ Python surface (`EventType`, `Run`, `SQLiteStorage`, `diff_states`, `project`) a
 continuum runs                                   # list runs
 continuum inspect <run_id>                       # semantic state
 continuum validate <run_id> --env dataset=v4     # validate, read-only
-continuum resume <run_id> --env dataset=v4       # recovery decision + contract
+continuum resume <run_id> --env dataset=v4       # recovery decision + contract + next steps
 continuum checkpoint <run_id>                    # force a checkpoint, mutates
 continuum actions <run_id>                       # external side effects
-continuum show-contract <run_id>                 # the machine-readable contract
+continuum reconcile <run_id>                     # settle uncertain effects with probes
+continuum complete <run_id>                      # close a run as done, from the keyboard
+continuum verify <run_id>                        # re-audit the event hash chain
 ```
+
+### Wiring into harnesses
+
+CONTINUUM meets agents where they already run. All wiring is host-side; the model's cooperation is optional.
+
+```bash
+# Coding CLIs with lifecycle hooks: evidence capture, session briefing,
+# and claim enforcement, installed in one command.
+continuum hooks install claude-code --with-gate   # also: gemini, codex
+
+# Frameworks without hooks: the enforcing HTTP proxy. Point outbound calls
+# at localhost; unclaimed requests are refused, claims are settled from the
+# real upstream response.
+continuum gateway --port 8765                     # routes: .continuum/gateway.json
+
+# Production stacks emitting OpenTelemetry: spans become evidence.
+provider.add_span_processor(continuum.otel.make_span_processor(storage))
+
+# Anything MCP-capable: the original ten-tool server.
+continuum-mcp                                     # via .mcp.json
+```
+
+Optional registries live beside your code and are data, not code:
+`.continuum/gate.json` (side-effect tools + stable-key templates),
+`.continuum/reconcilers.json` (probes that check external systems),
+`.continuum/gateway.json` (upstream routes).
 
 Every command accepts `--json`, and the read-only commands never write, so they are safe against a live database while an agent is mid-run. Exit codes are a safety contract (only a verified-safe run exits 0). The full command list, exit-code table, and state-diff output are in [references/cli.md](references/cli.md).
 
