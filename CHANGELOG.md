@@ -8,6 +8,42 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Pre-action gate: host-enforced side-effect claims (#217).** The two-phase
+  action protocol was a convention the model was asked to follow; nothing
+  stopped an unclaimed side effect from firing, which degrades exactly-once
+  to at-least-once-with-nothing. `continuum gate` is a pre-tool-use hook that
+  makes the protocol physical: a call whose tool is registered in
+  `.continuum/gate.json` may proceed only when a live ledger claim already
+  exists for its derived key. Keys come from configuration templates
+  (`{"tools": {"send_invoice": {"key_template": "invoice:{customer}:{id}"}}}`
+  applied to the call's structured arguments), never from LLM-authored
+  strings. The decision table mirrors the ledger exactly: no claim denies
+  with instructions to route through `continuum_intercept_action`; a
+  COMPLETED record denies as a duplicate (the dedup verdict made physical);
+  UNKNOWN denies with reconcile instructions; closed attempts must be
+  reclaimed; only STARTED passes. Exit 2 feeds the reason back through the
+  harness so the model can comply on retry. `hooks install claude-code
+  --with-gate` wires PreToolUse alongside PostToolUse observe: claim before,
+  evidence after, both outside model control. Stated limitation: v1 gates
+  structured tool surfaces only, not shell commands run inside Bash.
+  Verified live over the real stdio MCP boundary: deny, claim via MCP,
+  allow, complete, duplicate denied, observation recorded in one hash chain.
+
+- **Lazy adapter imports (#214).** `continuum.adapters` sits on the critical
+  path of every entry point, but eagerly imported the optional SDK adapters,
+  so opening the MCP server cost roughly 3s before answering its first
+  request, and every `continuum observe` hook subprocess paid it again. The
+  dependency-free adapters stay eager; browser/container/kubernetes and the
+  langchain/langgraph/openai names now resolve through module
+  `__getattr__` (PEP 562) on first access, in both `continuum.adapters` and
+  the top-level `continuum` package. The public import surface is unchanged.
+  Measured on this machine: MCP server spawn-to-first-response drops from
+  about 3s to about 0.1s, and importing either package leaves none of
+  langgraph, langchain or openai in `sys.modules`. The full test suite also
+  gets faster for the same reason. Tests in `tests/test_adapters_lazy.py`
+  run their key assertions in subprocesses so earlier imports cannot mask a
+  regression.
+
 - **Action index: indexed cross-run idempotency lookups (#216).** Unscoped
   claims folded every other run's complete event log on a local miss,
   O(total logged events) per lookup. Schema v3 adds `action_index`, a derived
@@ -61,8 +97,6 @@ All notable changes to this project are documented here. The format follows
   identical semantics; it is paid only on the unscoped path after the local
   lookup missed. Regression tests cover cross-run dedup, the uncertain-elsewhere
   refusal, and the certain-failure pass-through.
-
-### Added
 
 - **Automatic durability for every harness (#191).** The file-derived progress
   hook and the policy-gated background checkpoint are now wired into
