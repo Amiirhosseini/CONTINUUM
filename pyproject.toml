@@ -51,6 +51,8 @@ dev = [
 # The MCP server is optional: the core library and CLI never import it, so
 # installing CONTINUUM does not pull in a server stack you may not want.
 mcp = ["mcp>=2.0"]
+# The OpenTelemetry bridge is optional: the core library never imports it.
+otel = ["opentelemetry-api>=1.20"]
 # The LangGraph adapter is optional: it wraps langgraph's StateGraph and tool
 # decorators with CONTINUUM's durability layer.
 langgraph = ["langgraph>=0.2"]
@@ -136,3 +138,6 @@ branch = true
 [tool.coverage.report]
 show_missing = true
 skip_covered = false
+[[tool.mypy.overrides]]
+module = "opentelemetry.*"
+ignore_missing_imports = true
