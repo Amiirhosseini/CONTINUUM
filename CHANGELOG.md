@@ -8,6 +8,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`continuum complete <run>`: close a run from the keyboard.** Found
+  missing during live testing: MCP-driven runs close via adapter events, but
+  there was no CLI way to finish a run, so finished work kept surfacing as
+  the active run and hijacked every fresh session's resume. The command
+  appends `REVIEW_CONFIRMED` plus `RUN_COMPLETED` (both human-sourced, so
+  self-certification gates clear) and flips the run row to COMPLETED, with
+  an optional `--summary` note. Terminal runs can never be offered for
+  resume again; double-clicking is harmless; unknown runs exit NOT_FOUND.
+
 - **Enforcing HTTP gateway (seam 4 of the universality roadmap, #213).**
   The last blind spot no harness hook can see: outbound HTTP calls made from
   agent code in any language. `continuum gateway` runs a local enforcing

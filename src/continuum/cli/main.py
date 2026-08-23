@@ -57,6 +57,7 @@ from continuum.models import (
     Origin,
     RecoveryMode,
     Run,
+    RunStatus,
 )
 from continuum.observability import render_dashboard
 from continuum.provenance_map import summarize
@@ -629,6 +630,51 @@ def cmd_confirm(args: argparse.Namespace, storage: Storage, out: Any, err: Any) 
     )
     print("\nRun `continuum resume` to continue.", file=err)
     return exit_code_for(decision.mode)
+
+
+
+def cmd_complete(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Close a run as done, from the keyboard (the maintainer's escape hatch).
+
+    Found missing during live testing: MCP-driven runs close via
+    RUN_COMPLETED events from adapters, but there was no way to finish a run
+    from the CLI, so finished work kept surfacing as the active run and
+    hijacked every fresh session's resume. This appends REVIEW_CONFIRMED
+    plus RUN_COMPLETED (both Origin.HUMAN, so they clear self-certification
+    gates) and flips the run row to COMPLETED.
+    """
+    run = storage.get_run(args.run_id)  # raises RunNotFound -> NOT_FOUND
+    if args.summary:
+        note = {"summary": args.summary}
+    else:
+        note = {}
+    storage.append_event(
+        args.run_id,
+        EventType.REVIEW_CONFIRMED,
+        {"components": ["goal", "progress"]},
+        source=Origin.HUMAN,
+    )
+    storage.append_event(
+        args.run_id,
+        EventType.RUN_COMPLETED,
+        {"closed_by": "cli", **note},
+        source=Origin.HUMAN,
+    )
+    updated = run.touch(status=RunStatus.COMPLETED)
+    storage.update_run(updated)
+    payload = {
+        "run_id": args.run_id,
+        "status": updated.status.value,
+        "summary": args.summary or "",
+    }
+    _emit(
+        payload,
+        f"Run {args.run_id} completed.",
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
+    )
+    return ExitCode.OK
 
 
 def cmd_checkpoint(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
@@ -1525,6 +1571,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     confirm.add_argument("--model", help="model that will run the resumed agent")
     confirm.add_argument("--tolerate-unknown", action="store_true")
+
+    complete = with_run(
+        add("complete", cmd_complete, "Close a run as done. Mutates storage.")
+    )
+    complete.add_argument("--summary", default=None, help="one-line closing note")
 
     checkpoint = with_env(with_run(add("checkpoint", cmd_checkpoint, "Force a checkpoint.")))
     checkpoint.add_argument("--trigger", default="manual")
