@@ -8,6 +8,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Version pinning on claims and summaries (#241).** Replay correctness
+  needs environment identity: which prompt version, tool schema and model
+  produced a decision (prompt-migration hazard, arXiv:2507.05573; Zylos
+  survey lists pinning as part of replay correctness). New closed-set
+  `pinning` dict - prompt_sha256, tool_schema_sha256, model_id,
+  policy_version - accepted by `continuum intercept_action` and
+  `continuum_record_summary`, stored verbatim with EXTERNAL_AGENT provenance
+  on the ACTION_RECORDED STARTED record / summary payload. Values are
+  validated (known keys only, 256-char cap: store the hash, not the
+  artefact). `continuum resume --pinning '<json>'` diffs caller-supplied
+  pins against the newest recorded set and surfaces drift as informational
+  lines in text and JSON (`pinning_drift`) - degrade, never block. Pure
+  helpers live in `continuum.pinning`.
+
 - **Run-level retry budgets (#240).** Agent loops invent retries: a failing
   upstream gets hammered because the model re-plans after every failure, and
   each attempt opens a fresh ledger slot. New `.continuum/budgets.json`

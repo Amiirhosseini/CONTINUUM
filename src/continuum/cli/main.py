@@ -545,6 +545,24 @@ def cmd_resume(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
     if steps:
         text += "\n\nNext steps:\n" + "\n".join(f"  {i}. {t}" for i, t in enumerate(steps, 1))
 
+    # Version pinning drift (issue #241): informational only.
+    drift_lines: list[str] = []
+    if args.pinning:
+        from continuum.pinning import latest_pinning, normalize_pinning
+        from continuum.pinning import pinning_drift as compute_drift
+
+        try:
+            current = normalize_pinning(json.loads(args.pinning))
+            recorded = latest_pinning(storage.read_events(run_id))
+            drift_lines = compute_drift(recorded, current)
+            if drift_lines:
+                text += "\n\nPinning drift (informational):\n" + "\n".join(
+                    f"  - {line}" for line in drift_lines
+                )
+        except ValueError as exc:
+            print(f"error: --pinning: {exc}", file=err)
+            return ExitCode.ERROR
+
     payload = {
         "run_id": decision.run_id,
         "goal": storage.get_run(run_id).goal,
@@ -552,6 +570,7 @@ def cmd_resume(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
         "safe": decision.safe,
         "next_allowed_action": decision.next_allowed_action,
         "human_steps": steps,
+        "pinning_drift": drift_lines,
         "contract": decision.contract.model_dump(mode="json"),
         "repairs": [s.action_name for s in decision.plan.steps],
         "progress": {
@@ -1694,6 +1713,11 @@ def build_parser() -> argparse.ArgumentParser:
     resume.add_argument("--model", help="model that will run the resumed agent")
     resume.add_argument("--tolerate-unknown", action="store_true")
     resume.add_argument("--repair", action="store_true", help="record the repair plan")
+    resume.add_argument(
+        "--pinning",
+        default=None,
+        help="JSON object of environment pins to diff against the run (issue #241)",
+    )
 
     confirm = with_env(
         with_run(add("confirm", cmd_confirm, "Confirm self-reported state so the run may resume."))
