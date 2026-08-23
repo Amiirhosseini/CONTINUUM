@@ -231,9 +231,7 @@ class Storage(ABC):
     # -- state versions --------------------------------------------------- #
 
     @abstractmethod
-    def put_version(
-        self, state: SemanticState, *, reason: str = "", force: bool = False
-    ) -> int:
+    def put_version(self, state: SemanticState, *, reason: str = "", force: bool = False) -> int:
         """Persist a state version. Returns the assigned version number."""
 
     @abstractmethod

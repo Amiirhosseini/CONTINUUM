@@ -514,24 +514,16 @@ class PostgresStorage(Storage):
 
         lv = self.latest_version(run_id)
         head = self.last_sequence(run_id)
-        needs_fresh_anchor = (
-            lv is None
-            or through_sequence is not None
-            or lv.source_sequence < head
-        )
+        needs_fresh_anchor = lv is None or through_sequence is not None or lv.source_sequence < head
         if needs_fresh_anchor:
             try:
                 CheckpointManager(self).checkpoint(run_id, force_version=True)
             except Exception as exc:
-                raise ValueError(
-                    f"run {run_id!r} could not be anchored: {exc}"
-                ) from exc
+                raise ValueError(f"run {run_id!r} could not be anchored: {exc}") from exc
             lv = self.latest_version(run_id)
         storage_version = lv
         if storage_version is None:
-            raise ValueError(
-                f"run {run_id!r} could not be anchored: no projectable state"
-            )
+            raise ValueError(f"run {run_id!r} could not be anchored: no projectable state")
         through = (
             through_sequence
             if through_sequence is not None
@@ -702,9 +694,7 @@ class PostgresStorage(Storage):
             if checked == 1 and has_anchored_prefix:
                 prev_digest = row["prev_hash"]
                 expected_sequence = int(row["sequence"])
-            if event.sequence != expected_sequence and not (
-                checked == 1 and has_anchored_prefix
-            ):
+            if event.sequence != expected_sequence and not (checked == 1 and has_anchored_prefix):
                 healthy = False
                 violations.append(
                     IntegrityViolation(
@@ -757,9 +747,7 @@ class PostgresStorage(Storage):
 
     # -- state versions --------------------------------------------------- #
 
-    def put_version(
-        self, state: SemanticState, *, reason: str = "", force: bool = False
-    ) -> int:
+    def put_version(self, state: SemanticState, *, reason: str = "", force: bool = False) -> int:
         fingerprint = state_fingerprint(state)
         with self._write():
             self._require_run(self._connection, state.run_id)
