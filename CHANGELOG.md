@@ -8,6 +8,19 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Thin adapters for CrewAI, AutoGen and Pydantic AI (seam 1 extension,
+  #213).** Three more production frameworks get the durability seam with
+  their own verified interception surfaces, all routed through one shared
+  `ContinuumToolGuard` over `ActionLedger`: CrewAI's global before/after
+  tool-call hook registry (with an action-type filter and a working
+  uninstaller), AutoGen's `FunctionTool.run_json` wrapped in place (agent
+  construction code unchanged; failures recorded then re-raised), and Pydantic
+  AI's async Hooks capability (`before_tool_call`/`after_tool_call` matching
+  the documented protocol) registered via `capabilities=[...]`. Keys follow
+  the MCP contract - resource identity via `key_fn`, argument-hash default -
+  so exactly-once survives model drift. Framework imports stay lazy; every
+  surface is tested against duck-typed stand-ins, no SDK required.
+
 - **OpenTelemetry bridge (seam 5 of the universality roadmap, #213).**
   Production stacks already emit OTel; now those spans become CONTINUUM
   evidence with zero framework cooperation. `make_span_processor(storage)`
