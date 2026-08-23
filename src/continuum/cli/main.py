@@ -457,6 +457,30 @@ def cmd_diff(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> 
     return ExitCode.OK
 
 
+def _human_steps(decision: Any, run_id: str) -> list[str]:
+    """Executable next steps for this decision, derived from live config.
+
+    Read-only: the reconciler registry and gate config are inspected, never
+    executed. Absent files simply mean fewer shortcuts to suggest.
+    """
+    from continuum.gate import DEFAULT_GATE_CONFIG_PATH
+    from continuum.reconcilers import DEFAULT_RECONCILERS_PATH, load_reconcilers
+    from continuum.recovery.guidance import human_steps_for
+
+    try:
+        probes = load_reconcilers(Path(DEFAULT_RECONCILERS_PATH))
+        probed: list[str] = list(probes)
+    except Exception:
+        probed = []
+    gate_configured = Path(DEFAULT_GATE_CONFIG_PATH).exists()
+    return human_steps_for(
+        decision,
+        run_id=run_id,
+        probed_types=probed,
+        gate_configured=gate_configured,
+    )
+
+
 def cmd_validate(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
     """Assess a run without touching it. Exit code carries the verdict."""
     decision = RecoveryEngine(storage, strict_unknown=not args.tolerate_unknown).assess(
@@ -468,6 +492,15 @@ def cmd_validate(args: argparse.Namespace, storage: Storage, out: Any, err: Any)
         out.write(render_dashboard(decision) + "\n")
         out.flush()
         return exit_code_for(decision.mode)
+    steps = _human_steps(decision, args.run_id)
+    if steps:
+        text = (
+            decision.render()
+            + "\n\nNext steps:\n"
+            + "\n".join(f"  {i}. {t}" for i, t in enumerate(steps, 1))
+        )
+    else:
+        text = decision.render()
     payload = {
         "run_id": decision.run_id,
         "mode": decision.mode.value,
@@ -475,10 +508,11 @@ def cmd_validate(args: argparse.Namespace, storage: Storage, out: Any, err: Any)
         "contract": decision.contract.model_dump(mode="json"),
         "rationale": list(decision.rationale),
         "repairs": [s.action_name for s in decision.plan.steps],
+        "human_steps": steps,
     }
     _emit(
         payload,
-        decision.render(),
+        text,
         as_json=args.json,
         stream=out,
         palette=getattr(args, "_palette", None),
@@ -505,12 +539,18 @@ def cmd_resume(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
         expected_model=args.model,
     )
 
+    steps = _human_steps(decision, run_id)
+    text = decision.render()
+    if steps:
+        text += "\n\nNext steps:\n" + "\n".join(f"  {i}. {t}" for i, t in enumerate(steps, 1))
+
     payload = {
         "run_id": decision.run_id,
         "goal": storage.get_run(run_id).goal,
         "mode": decision.mode.value,
         "safe": decision.safe,
         "next_allowed_action": decision.next_allowed_action,
+        "human_steps": steps,
         "contract": decision.contract.model_dump(mode="json"),
         "repairs": [s.action_name for s in decision.plan.steps],
         "progress": {
@@ -521,7 +561,7 @@ def cmd_resume(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
     }
     _emit(
         payload,
-        decision.render(),
+        text,
         as_json=args.json,
         stream=out,
         palette=getattr(args, "_palette", None),
