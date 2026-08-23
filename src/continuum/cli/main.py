@@ -222,10 +222,30 @@ def cmd_start(args: argparse.Namespace, storage: Storage, out: Any, err: Any) ->
     goal is asserted by a human at the keyboard, so it is sourced Origin.HUMAN
     rather than self-certified.
     """
-    try:
-        run = storage.create_run_started(
-            Run(run_id=args.run_id, goal=args.goal), source=Origin.HUMAN
+    parent_id = getattr(args, "parent", None)
+    if parent_id:
+        try:
+            parent = storage.get_run(parent_id)
+        except RunNotFound:
+            print(f"error: parent run {parent_id!r} does not exist", file=err)
+            return ExitCode.NOT_FOUND
+        if parent.status.value == "completed":
+            print(f"error: parent run {parent_id!r} is completed; cannot attach children", file=err)
+            return ExitCode.ERROR
+
+    metadata_extra: dict[str, Any] = {}
+    a2a = getattr(args, "a2a_task", None)
+    if a2a:
+        metadata_extra["a2a_task_id"] = a2a
+
+    if parent_id or metadata_extra:
+        child_run = Run(
+            run_id=args.run_id, goal=args.goal, parent_run_id=parent_id, metadata=metadata_extra
         )
+    else:
+        child_run = Run(run_id=args.run_id, goal=args.goal)
+    try:
+        run = storage.create_run_started(child_run, source=Origin.HUMAN)
     except ConcurrentWriteError as exc:
         print(f"error: {exc}", file=err)
         return ExitCode.ERROR
@@ -540,8 +560,26 @@ def cmd_resume(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
         expected_model=args.model,
     )
 
+    # Family aggregation (#243): a parent may not RESUME while any child is
+    # unsafe or blocked - the most cautious signal wins, house-style.
+    from continuum.recovery.family import roll_up_children
+
+    child_statuses, family_blocked = roll_up_children(storage, run_id)
+    family_rationale = [
+        f"child run {c.run_id} is {c.mode} (uncertain={c.uncertain_actions})"
+        for c in child_statuses
+        if not c.safe or c.mode != "resume"
+    ]
     steps = _human_steps(decision, run_id)
     text = decision.render()
+    if family_blocked and decision.mode.value == "resume":
+        # House rule: the most cautious signal wins (#243). A clean parent
+        # with an unsafe child is presented as request_human.
+        text += "\n\nFAMILY BLOCKED: children of this run are not resumable.\n" + "\n".join(
+            f"  !! {r}" for r in family_rationale
+        )
+    if steps:
+        text += "\n\nNext steps:\n" + "\n".join(f"  {i}. {t}" for i, t in enumerate(steps, 1))
     if steps:
         text += "\n\nNext steps:\n" + "\n".join(f"  {i}. {t}" for i, t in enumerate(steps, 1))
 
@@ -563,13 +601,21 @@ def cmd_resume(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
             print(f"error: --pinning: {exc}", file=err)
             return ExitCode.ERROR
 
+    presented_mode = (
+        "request_human"
+        if (family_blocked and decision.mode.value == "resume")
+        else decision.mode.value
+    )
+    presented_safe = decision.safe and not (family_blocked and decision.mode.value == "resume")
     payload = {
         "run_id": decision.run_id,
         "goal": storage.get_run(run_id).goal,
-        "mode": decision.mode.value,
-        "safe": decision.safe,
+        "mode": presented_mode,
+        "safe": presented_safe,
         "next_allowed_action": decision.next_allowed_action,
         "human_steps": steps,
+        "family_rationale": family_rationale,
+        "children": [c.__dict__ for c in child_statuses],
         "pinning_drift": drift_lines,
         "contract": decision.contract.model_dump(mode="json"),
         "repairs": [s.action_name for s in decision.plan.steps],
@@ -699,6 +745,54 @@ def cmd_budget(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
     _emit(
         payload,
         "\n".join(lines) or "No budgets configured.",
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
+    )
+    return ExitCode.OK
+
+
+def cmd_tree(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Show a parent run and its children with recovery states (issue #243)."""
+    from continuum.recovery.family import children_of
+
+    parent_id = args.run_id
+    storage.get_run(parent_id)
+    engine = RecoveryEngine(storage)
+    lines: list[str] = []
+    try:
+        parent_decision = engine.assess(parent_id)
+        lines.append(
+            f"{parent_id}  [{parent_decision.mode.value}, safe={parent_decision.safe}]"
+            f"  {storage.get_run(parent_id).goal[:50]}"
+        )
+    except Exception as exc:
+        lines.append(f"{parent_id}  [assess error: {exc}]")
+
+    children = children_of(storage, parent_id)
+    if not children:
+        lines.append("  (no children)")
+    for child in children:
+        try:
+            d = engine.assess(child.run_id)
+            mark = "ok " if d.safe else "!! "
+            lines.append(
+                f"  {mark}{child.run_id}  [{d.mode.value}, "
+                f"uncertain={len(d.uncertain_actions)}]  {child.goal[:44]}"
+            )
+        except Exception as exc:
+            lines.append(f"  !! {child.run_id}  [assess error: {exc}]")
+    a2a = [
+        (c.run_id, c.metadata.get("a2a_task_id")) for c in children if c.metadata.get("a2a_task_id")
+    ]
+    for rid, task in a2a:
+        lines.append(f"  a2a: {rid} -> {task}")
+    _emit(
+        {
+            "parent": args.run_id,
+            "children": [{"run_id": c.run_id, "status": c.status.value} for c in children],
+        },
+        "\n".join(lines),
         as_json=args.json,
         stream=out,
         palette=getattr(args, "_palette", None),
@@ -1675,6 +1769,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     start = with_run(add("start", cmd_start, "Create a run with a goal. Mutates storage."))
     start.add_argument("--goal", required=True, help="what the run is trying to achieve")
+    start.add_argument("--parent", default=None, help="attach as a child of this run")
+    start.add_argument(
+        "--a2a-task",
+        dest="a2a_task",
+        default=None,
+        help="external A2A task id to record in metadata",
+    )
 
     inspect = with_run(add("inspect", cmd_inspect, "Show semantic state."))
     inspect.add_argument("--version", type=int, dest="version", help="inspect a past version")
@@ -1734,6 +1835,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="budget registry path (default: .continuum/budgets.json)",
     )
+
+    tree_parser = with_run(add("tree", cmd_tree, "Show a parent run and its children."))
+    tree_parser.add_argument("--limit", type=int, default=None, help=argparse.SUPPRESS)
 
     compact = with_run(
         add("compact", cmd_compact, "Archive the pre-anchor log prefix. Mutates storage.")
