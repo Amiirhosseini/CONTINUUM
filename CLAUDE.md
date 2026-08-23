@@ -3,7 +3,7 @@
 This project ships a CONTINUUM MCP server (`continuum-mcp`, in `.mcp.json`). Use
 it so your work survives interruption: a run killed mid-task can be resumed by a
 new session with no memorized id and no manual confirmation. That is the only
-extra step — keep everything else normal and fast.
+extra step, keep everything else normal and fast.
 
 ## On session start, detect and ask
 
@@ -12,7 +12,7 @@ Your **first action** is to call `continuum_resume` with **no `run_id`**.
 - If an in-progress run is returned: show its `run_id`, progress
   (`completed/total`) and `goal`, then **ask the user**:
 
-  > I found an unfinished task in CONTINUUM — run `<run_id>` at `<c>/<t>`:
+  > I found an unfinished task in CONTINUUM, run `<run_id>` at `<c>/<t>`:
   > "<goal>". Resume it, or start a new task?
 
   Then wait.
@@ -21,7 +21,7 @@ Your **first action** is to call `continuum_resume` with **no `run_id`**.
   - **new**: start a fresh run.
 - If `no_active_run`: just do what the user asked.
 
-Do **not** read or write any task file — the task is the run's `goal`, which
+Do **not** read or write any task file, the task is the run's `goal`, which
 `continuum_resume` returns, so a resumed session already knows what to continue.
 
 For instant detection without waiting for a user message, install
