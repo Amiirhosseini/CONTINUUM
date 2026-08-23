@@ -619,14 +619,16 @@ class PostgresStorage(Storage):
         canonical = self._canonical_index_rows()
         with self._write():
             self._connection.execute("DELETE FROM action_index")
-            self._connection.executemany(
-                "INSERT INTO action_index(key, run_id, action_id, status, "
-                "updated_seq, action_json) VALUES (%s, %s, %s, %s, %s, %s)",
-                [
-                    (key, entry[1], entry[2], entry[3], seq, entry[4])
-                    for key, (entry, seq) in canonical.items()
-                ],
-            )
+            # psycopg's Connection has no executemany; the cursor does.
+            with self._connection.cursor() as cur:
+                cur.executemany(
+                    "INSERT INTO action_index(key, run_id, action_id, status, "
+                    "updated_seq, action_json) VALUES (%s, %s, %s, %s, %s, %s)",
+                    [
+                        (key, entry[1], entry[2], entry[3], seq, entry[4])
+                        for key, (entry, seq) in canonical.items()
+                    ],
+                )
         return 0
 
     def action_index_drift(self) -> int:
