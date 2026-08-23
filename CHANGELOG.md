@@ -8,6 +8,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **README refresh.** The README predated this week's work in every
+  direction users touch first: the Quick Start now leads with the two-minute
+  harness-wiring path (start a run, `hooks install`, no CLAUDE.md); the
+  Features table gains nine rows (gate, briefing, observations, reconciler
+  probes, executable guidance, gateway, OTel bridge, action index);
+  Framework Integration documents the CrewAI/AutoGen/Pydantic-AI thin hooks
+  and the gateway/OTel fallback seams; the Roadmap marks the dashboard and
+  the enforced-durability work complete; test counts are current (1224).
+
 - **Gateway hardening and docs refresh.** The enforcing proxy now refuses
   request bodies above 10 MB with 413, draining (without buffering) up to a
   256 MB sanity bound so clients finish sending and read the refusal instead
