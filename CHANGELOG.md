@@ -731,14 +731,14 @@ All notable changes to this project are documented here. The format follows
 - **The `continuum serve` sidecar exported a `MUTATING` constant describing an
   authentication policy it does not implement, and no test pinned the real one
   (issue #95, reported by @abyyxhek).** `MUTATING` names seven of the ten
-  methods, and `_auth_check` gated the shared secret on membership in it — but
+  methods, and `_auth_check` gated the shared secret on membership in it, but
   `_auth_check` had no call sites anywhere in the tree, and `dispatch` calls
   `self.auth.verify` unconditionally, so `resume`, `validate` and `list_actions`
   do require a token despite being absent from the set. `SidecarAuth`'s docstring
   documented the same phantom rule ("every mutating call must present the
   matching `auth_token`"). The behaviour is the correct one and the description
-  was wrong: unlike the MCP server — whose mutating-only policy is deliberate and
-  pinned by `test_read_only_tools_stay_open_to_anyone` — the sidecar is reachable
+  was wrong: unlike the MCP server, whose mutating-only policy is deliberate and
+  pinned by `test_read_only_tools_stay_open_to_anyone`, the sidecar is reachable
   by any process that can speak to its pipe, and its reads are worth closing for
   what they return (`resume` hands back the goal string, `list_actions` the
   arguments and results of external side effects). Gating them costs nothing by
@@ -751,9 +751,9 @@ All notable changes to this project are documented here. The format follows
   consistent with *both* policies, and reinstating the mutating-only gate in
   `dispatch` opened all three read-only methods to unauthenticated callers
   without turning a single existing test red. `tests/test_serve.py` gains three
-  regression tests, twelve cases in all — every method in `list_methods()`
+  regression tests, twelve cases in all, every method in `list_methods()`
   refused without the secret, the read-only methods refused although `MUTATING`
-  omits them, and a read-only method still succeeding with it — verified red
+  omits them, and a read-only method still succeeding with it, verified red
   against that reintroduced gate.
 
 - **The `continuum serve` sidecar's `resume` had drifted from the MCP tool it
@@ -783,7 +783,7 @@ All notable changes to this project are documented here. The format follows
   not copy-pasteable (issue #94).** Both entry points formatted the failing path
   with `!r`, and `repr()` escapes each backslash, so
   `C:\Users\ASUS\no-such-dir\agent.db` came back as
-  `'C:\\Users\\ASUS\\no-such-dir\\agent.db'` — not the path the operator passed,
+  `'C:\\Users\\ASUS\\no-such-dir\\agent.db'`, not the path the operator passed,
   and useless pasted into a shell or a config file. POSIX paths were unaffected,
   having no backslashes to escape, which is also why the MCP server's
   `test_main_reports_an_unopenable_database_instead_of_a_traceback` was red on a
@@ -828,7 +828,7 @@ All notable changes to this project are documented here. The format follows
   `ModuleNotFoundError` traceback (issue #87).** The `mcp` extra is optional, but
   `[project.scripts]` installs the `continuum-mcp` console script
   unconditionally, so a plain `pip install continuum` produces an entry point
-  whose dependency is absent — and `mcp/server.py` imported `MCPServer`,
+  whose dependency is absent, and `mcp/server.py` imported `MCPServer`,
   `Context` and `ToolAnnotations` at module scope. The process therefore died
   during import, before the `initialize` handshake and before any handler in
   `main` could run, so the client reported only that the server never became
@@ -863,7 +863,7 @@ All notable changes to this project are documented here. The format follows
   - *Environment drift was detected but invalidated nothing.* `continuum_checkpoint`
     passed `env` to `capture_state` as an `EnvironmentSnapshot` only, and
     `StateValidator._apply_dependency_status` returns early for a state with no
-    `external_dependencies` — so a moved dataset was rendered in
+    `external_dependencies`, so a moved dataset was rendered in
     `environment_changes` while the verdict stayed `safe: true` with the reason
     "all components verified against the current environment". The core validator
     was never wrong: given a declared dependency it already yields `CONFLICTED`
@@ -871,7 +871,7 @@ All notable changes to this project are documented here. The format follows
     and the existing test appended `DEPENDENCY_DECLARED` straight to storage.
     Checkpointing now records each pinned resource as a `DEPENDENCY_DECLARED`
     event, so the declaration is durable across projections and restores, covered
-    by the hash chain, and carries `EXTERNAL_AGENT` provenance — which does not
+    by the hash chain, and carries `EXTERNAL_AGENT` provenance, which does not
     weaken the check, since a dependency's status comes from comparing two
     snapshots rather than from trusting the claim. Only new or re-pinned resources
     are appended, so checkpointing on a schedule does not grow the log. The
@@ -879,7 +879,7 @@ All notable changes to this project are documented here. The format follows
     surfaces must not disagree about whether drift is safe.
   - *`continuum_list_actions` under-reported an interrupted action.* A claim left
     `STARTED` by a crash reported `side_effect_uncertain: false` while
-    `continuum_resume` described the same action as an unknown outcome — the
+    `continuum_resume` described the same action as an unknown outcome, the
     aggregate `unresolved` count was right while the row a human reads said the
     opposite. `side_effect_uncertain` is only set on escalation to `UNKNOWN`,
     which has not happened yet for a fresh interruption. Each row now carries
@@ -893,7 +893,7 @@ All notable changes to this project are documented here. The format follows
     while the WAL held all 16 events, and deleting it lost everything *silently*,
     because an emptied database still verifies as an intact chain. Recovery is now
     staged least-destructive-first: discard the reconstructable `-shm` and retry,
-    and only if that fails move the `-wal` aside — never unlink it — restoring it
+    and only if that fails move the `-wal` aside, never unlink it, restoring it
     if the retry fails anyway, and warning on stderr with the quarantine path when
     it succeeds. Reachable only when the initial open raises, so latent rather
     than observed, but it is exactly the hard-kill path the feature advertises.
@@ -940,7 +940,7 @@ All notable changes to this project are documented here. The format follows
   `VALID` when the resume model was unknown (fail-open).** When
   `expected_model` is `None` (e.g. `continuum validate`/`resume` run without
   `--model`) or the state itself doesn't record which model produced it,
-  the validator has no way to verify recorded model-specific assumptions —
+  the validator has no way to verify recorded model-specific assumptions,
   but it reported them `VALID` and left `safe_to_resume=True` anyway,
   contradicting the module's own rule that it may say "I cannot tell" but
   must never guess in its own favour. `_check_model` now reports `UNKNOWN`
@@ -1136,13 +1136,13 @@ All notable changes to this project are documented here. The format follows
   declared dependency and a captured `EnvironmentSnapshot`, the `SQLiteStorage` handle is
   closed, a *fresh* `SQLiteStorage` is opened on the same file, and the environment is
   asserted to survive the round-trip. The reloaded run is then assessed against an
-  unchanged environment and must resume as safe — proving `StateValidator.validate_dependency`
+  unchanged environment and must resume as safe, proving `StateValidator.validate_dependency`
   sees the dependency as unchanged rather than treating a missing baseline as
   *added/breaking*. This path (serialising `StateCheckpoint.environment` through the
   checkpoint `body` column and restoring it) had no coverage; this is added test
   coverage for an untested path, not a fix for a defect.
 
-### Added — Phase 12: CONTINUUM-Bench (minimal harness)
+### Added, Phase 12: CONTINUUM-Bench (minimal harness)
 
 - **`continuum benchmark` now runs a real benchmark instead of exiting 4.** The
   harness (`src/continuum/benchmark/__init__.py`) measures three scenarios that
@@ -1162,7 +1162,7 @@ All notable changes to this project are documented here. The format follows
   strategy shows zero duplicate work, exactly one side effect, detects the
   dataset change while the naive strategy does not, and that replay wastes work.
 
-### Added — Phase 8: command-line interface
+### Added, Phase 8: command-line interface
 
 - `continuum` CLI covering `init`, `runs`, `inspect`, `history`, `events`, `diff`, `validate`,
   `resume`, `checkpoint`, `verify`, `actions`, `show-contract`, `replay` and `benchmark`.
@@ -1177,7 +1177,7 @@ All notable changes to this project are documented here. The format follows
   count and version list around all nine of them.
 - `--json` on every command for machine consumption; text and JSON are never mixed on one stream.
 - `--env NAME=VERSION` declares the current environment. Omitting it yields `None`, which the
-  validator treats as *unverified* rather than *unchanged* — not checking must not resemble
+  validator treats as *unverified* rather than *unchanged*, not checking must not resemble
   checking and finding nothing wrong.
 - `benchmark` exits `4` and states plainly that no numbers are published because none have been
   measured.
@@ -1188,14 +1188,14 @@ All notable changes to this project are documented here. The format follows
 
 - **`verify` and `actions` exited 0 for a run that does not exist.** An absent run has a trivially
   valid (empty) event chain and no recorded actions, so `continuum verify $TYPO && deploy` reported
-  a clean bill of health for a name nobody had ever written to — precisely the failure the
+  a clean bill of health for a name nobody had ever written to, precisely the failure the
   exit-code contract exists to prevent. All eight run-scoped commands now check existence first and
   report `NOT_FOUND` consistently. Found by driving the installed binary by hand; the test suite
   had not covered it.
 - `replay` on a missing run reported "the log never recorded RUN_STARTED", diagnosing the wrong
   problem.
 - `RunNotFound` and `CheckpointNotFound` inherit from `KeyError`, whose `__str__` applies `repr()`
-  to the message, so users saw `error: "no such run: 'ghost'"` — quoted twice.
+  to the message, so users saw `error: "no such run: 'ghost'"`, quoted twice.
 - CLI output was written to a block-buffered stdout while hints went to stderr, so when piped the
   hint could appear *before* the report it referred to. Output is now flushed at each emit.
 - `render_diff` duplicated the field name for progress counters (`completed: completed: 1 → 50`).
@@ -1203,14 +1203,14 @@ All notable changes to this project are documented here. The format follows
   reached the unmapped-mode fallback it claimed to protect. Mutation testing caught that defaulting
   the fallback to `OK` went undetected; the replacement exercises an unclassified mode directly.
 
-### Added — Phase 7: recovery engine
+### Added, Phase 7: recovery engine
 
-- `RecoveryEngine` (`continuum.recovery.engine`) reducing three independent signals — validation
-  statuses, action-ledger state and checkpoint integrity — to one `RecoveryMode`.
+- `RecoveryEngine` (`continuum.recovery.engine`) reducing three independent signals, validation
+  statuses, action-ledger state and checkpoint integrity, to one `RecoveryMode`.
 - **The most cautious applicable signal wins.** Each signal proposes a mode and the engine takes the
   maximum on an explicit severity ordering (`RESUME < REPAIR_AND_RESUME < REPLAN < WAIT <
-  REQUEST_HUMAN < ROLLBACK < ABORT`). These signals genuinely co-occur — a run can have a stale
-  dataset *and* an uncertain side effect — and returning whichever was noticed first would let the
+  REQUEST_HUMAN < ROLLBACK < ABORT`). These signals genuinely co-occur, a run can have a stale
+  dataset *and* an uncertain side effect, and returning whichever was noticed first would let the
   unsafe answer win roughly half the time.
 - `plan_repairs` (`continuum.recovery.planner`) producing an ordered, deduplicated, deterministic
   repair plan. Reconciling an uncertain side effect always sorts first: nothing else is safe while
@@ -1222,7 +1222,7 @@ All notable changes to this project are documented here. The format follows
 - `RecoveryContract` (`continuum.recovery.contract`) naming exactly **one** next permitted action.
   Listing everything currently allowed would let an agent pick the convenient step and skip the
   reconciliation it was supposed to do first. Contracts are deterministic and sealed with an
-  integrity hash — a contract editable between issue and enforcement would gate nothing.
+  integrity hash, a contract editable between issue and enforcement would gate nothing.
 - The engine is read-only: it computes and explains a decision without mutating the run, which is
   what makes assessment safe to perform against a live database.
 - 49 new tests (424 total), including a precedence matrix and five mutation checks confirming the
@@ -1241,12 +1241,12 @@ All notable changes to this project are documented here. The format follows
   empty-proposal fallback). `restore()` raises before the first can be reached and the second cannot
   fire; both were verified dead rather than left as untestable code.
 
-### Added — Phase 6: action ledger and idempotency
+### Added, Phase 6: action ledger and idempotency
 
 - Idempotency keys (`continuum.actions.idempotency`) derived from action type plus canonically
   hashed arguments, so argument order never matters but a changed value always does. `scope`
   separates runs; `volatile` excludes fields like retry counters that would otherwise make every
-  retry look like a new action. Nothing is excluded by default — collapsing two genuinely different
+  retry look like a new action. Nothing is excluded by default, collapsing two genuinely different
   operations into one would silently skip real work.
 - `ActionLedger` (`continuum.actions.ledger`) implementing claim -> perform -> complete, stored as
   events so it inherits the log's ordering, durability and tamper-evidence. A repeat claim for a
@@ -1258,7 +1258,7 @@ All notable changes to this project are documented here. The format follows
 - A timeout is treated as uncertainty, not absence: `fail(..., certain=False)` records `UNKNOWN`
   rather than `FAILED`, because a request that timed out may still have been processed.
 - Reconciliation strategies (`continuum.actions.reconciliation`): `ProbeReconciler` (ask the
-  external system — the only strategy producing evidence), `AssumeNotOccurredReconciler` (requires
+  external system, the only strategy producing evidence), `AssumeNotOccurredReconciler` (requires
   explicitly asserting `idempotent=True`), and `ManualReconciler` (escalates). A probe that raises
   is treated as "could not determine", never as evidence of absence. There is deliberately no
   `AssumeOccurred` strategy: assuming success without evidence silently drops work, and a dropped
@@ -1272,11 +1272,11 @@ All notable changes to this project are documented here. The format follows
 - `SQLiteStorage` now closes its connection on finalisation, so a dropped handle does not leak a
   file descriptor. Documented as a safety net, not a substitute for `close()`.
 
-### Added — Phase 5: state validation
+### Added, Phase 5: state validation
 
 - Environment capture (`continuum.environment.snapshot`): pluggable `EnvironmentProvider` with
   `StaticProvider`, `FileProvider` (content hashes, so touching a file does not invalidate work),
-  `ValueProvider` and `CallableProvider`. Providers never raise — a resource that cannot be
+  `ValueProvider` and `CallableProvider`. Providers never raise, a resource that cannot be
   inspected is recorded as `UNKNOWN_VERSION`, because an environment check that fails open defeats
   the purpose of checking.
 - Environment diffing (`continuum.environment.diff`) distinguishing `UNCHANGED`, `CHANGED`, `ADDED`,
@@ -1298,7 +1298,7 @@ All notable changes to this project are documented here. The format follows
 ### Fixed
 
 - `SemanticState.dangling_evidence()` reported a false alarm for any decision citing a *finding*
-  rather than raw evidence — which is legitimate provenance and occurs in every well-formed
+  rather than raw evidence, which is legitimate provenance and occurs in every well-formed
   reasoning chain. Findings now count as citable support. False alarms are how real ones get
   ignored.
 
@@ -1308,12 +1308,12 @@ All notable changes to this project are documented here. The format follows
   already enforces on construction and deserialization. Verified unreachable rather than left as
   untestable code; the invariant is tested at the model level.
 
-### Added — Phase 4: checkpoint creation
+### Added, Phase 4: checkpoint creation
 
 - Checkpoint policies (`continuum.checkpoint.policy`): `ManualPolicy`, `IntervalPolicy`,
   `EventPolicy`, `SemanticPolicy`, `ContextPressurePolicy` and `HybridPolicy`, plus a
   `default_policy()` that checks explicit requests, side effects and meaning before falling back to
-  time — so a checkpoint reports the real reason it was taken rather than "the timer went off".
+  time, so a checkpoint reports the real reason it was taken rather than "the timer went off".
   Policies are pure functions of an explicit `PolicyContext`, including the clock, which makes
   checkpoint timing testable instead of flaky.
 - `SemanticPolicy` fires on meaning, not volume: structural changes (a decision recorded or
@@ -1327,7 +1327,7 @@ All notable changes to this project are documented here. The format follows
   does not discard the work in between. `replay=False` returns the checkpoint on its own terms for
   validators that must judge it before trusting anything newer.
 - Bounded recovery context (`continuum.checkpoint.context`): renders the minimum sufficient briefing
-  — goal, verified progress, stale state, items requiring review, valid decisions, pending work,
+ , goal, verified progress, stale state, items requiring review, valid decisions, pending work,
   findings ranked by confidence, dependencies. Sections drop from the least important end under a
   token budget, but goal, progress and stale state are never dropped: an agent that resumes without
   knowing what to distrust is worse than one that does not resume.
@@ -1342,7 +1342,7 @@ All notable changes to this project are documented here. The format follows
   now advances the cursor past its own annotation, with a fallback for the crash interleaving where
   the annotation was never written.
 
-### Added — Phase 3: SQLite persistence
+### Added, Phase 3: SQLite persistence
 
 - `Storage` interface (`continuum.storage.base`) covering runs, events, state versions and
   checkpoints, with its guarantees and non-guarantees documented in the module itself: append-only
@@ -1368,11 +1368,11 @@ All notable changes to this project are documented here. The format follows
 
 - Event payloads are now validated as JSON-native at construction. A `datetime` in a payload hashed
   one way in memory and another way after being read back, which would have made a valid event fail
-  reload — phantom corruption caused by storage, not by tampering.
+  reload, phantom corruption caused by storage, not by tampering.
 - `sqlite://` URL parsing no longer strips the leading slash of an absolute path, which had caused
   the database to be created in the working directory instead of the requested location.
 
-### Added — Phase 2: semantic state representation
+### Added, Phase 2: semantic state representation
 
 - Deterministic projection (`continuum.state.semantic`): folds an event prefix into `SemanticState`.
   Guarantees reproducibility (no wall-clock dependence) and prefix-closure, so a run can be recovered
@@ -1382,7 +1382,7 @@ All notable changes to this project are documented here. The format follows
   produced it, and `reproducible` distinguishes re-derivable state from asserted or inferred state.
 - Pluggable extraction (`continuum.state.extractor`): `StateExtractor` protocol,
   `DeterministicExtractor` (no model, no network), optional `LLMExtractor` that may only add
-  components — never modify or delete recorded facts — tagging everything `Origin.LLM` and
+  components, never modify or delete recorded facts, tagging everything `Origin.LLM` and
   `REQUIRES_REVIEW`, and degrading to the deterministic result if the callable raises.
   `CompositeExtractor` chains extractors without double-applying events.
 - Content-addressed version chain (`continuum.state.versioning`): linked, verifiable history that
@@ -1394,7 +1394,7 @@ All notable changes to this project are documented here. The format follows
   detecting state that cites support it cannot produce.
 - 84 additional tests (141 total), 100% line coverage of `src/continuum`.
 
-### Added — Phase 1: data models and event system
+### Added, Phase 1: data models and event system
 
 - Durable data model (`continuum.models`): semantic state tree (goal, plan, progress, decisions,
   findings, evidence, pending work, approvals, external dependencies, model state), action ledger
