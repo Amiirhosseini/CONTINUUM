@@ -8,6 +8,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Session briefing: state without CLAUDE.md (#213 ergonomics follow-up).**
+  The last two voluntary behaviours depending on per-repo prose were
+  resume-on-start and knowing the active run at all. New read-only command
+  `continuum briefing` prints exactly what a returning agent needs - active
+  run, goal, progress, recovery verdict, executable next steps and recent
+  disk-checked observations - as SessionStart-compatible context JSON.
+  `hooks install` now wires it alongside observe on every supported client's
+  session-start event (Claude Code, Gemini CLI, Codex), so a fresh session
+  learns its durable state from deterministic injection instead of a prompt
+  file. With no active run it says how to create one.
+
 - **Actionable recovery guidance (`human_steps`).** The contract named what
   was blocked but not what to do about it, leaving every resuming agent to
   translate `reconcile_action:abc` into commands by hand. Resume and

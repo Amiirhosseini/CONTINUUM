@@ -156,3 +156,22 @@ def test_default_settings_path_comes_from_the_profile(
     assert code == ExitCode.OK, err
     expected = CLIENT_PROFILES[client]["settings"]
     assert (tmp_path / expected).exists(), expected
+
+
+@pytest.mark.parametrize("client", ("claude-code", "gemini", "codex"))
+def test_briefing_is_wired_on_session_start(tmp_path: Path, client: str) -> None:
+    """No CLAUDE.md required: the briefing rides the client's own
+    SessionStart event so state reaches the model deterministically."""
+    profile = CLIENT_PROFILES[client]
+    settings = tmp_path / "settings.json"
+    code, _, err = run("--json", "hooks", "install", client, "--settings", str(settings))
+    assert code == ExitCode.OK, err
+    data = json.loads(settings.read_text())
+    starts = data["hooks"][profile["start_event"]]
+    ours = [
+        g
+        for g in starts
+        if isinstance(g.get("hooks"), list)
+        and any(h.get("command", "").split()[-1] == "briefing" for h in g["hooks"])
+    ]
+    assert len(ours) == 1
