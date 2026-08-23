@@ -632,7 +632,6 @@ def cmd_confirm(args: argparse.Namespace, storage: Storage, out: Any, err: Any) 
     return exit_code_for(decision.mode)
 
 
-
 def cmd_complete(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
     """Close a run as done, from the keyboard (the maintainer's escape hatch).
 
@@ -806,6 +805,24 @@ def cmd_briefing(args: argparse.Namespace, storage: Storage, out: Any, err: Any)
         + (f", {state.progress.failed} failed" if state.progress.failed else ""),
         f"recovery: {decision.mode.value} (safe={decision.safe})",
     ]
+    # Newest reasoning summary (#235): the resumed agent inherits the dead
+    # session's plan state, not just its progress counters.
+    summaries = [e for e in storage.read_events(run_id) if e.type is EventType.REASONING_SUMMARY]
+    if summaries:
+        summary = summaries[-1].payload.get("summary", {})
+        lines.append("where the last session left off (self-authored):")
+        for item in summary.get("plan_stack", [])[:3]:
+            lines.append(f"  plan: {item}")
+        for d in summary.get("decisions", [])[-3:]:
+            what = d.get("what", "")
+            why = d.get("why", "")
+            lines.append(f"  decision: {what}" + (f" ({why})" if why else ""))
+        for q in summary.get("open_questions", [])[:3]:
+            lines.append(f"  open: {q}")
+        ws = summary.get("working_set", [])
+        if ws:
+            lines.append(f"  working set: {', '.join(map(str, ws[:5]))}")
+
     obs = contract.post_checkpoint_observations[:5]
     if obs:
         lines.append("files since checkpoint:")
@@ -1569,9 +1586,7 @@ def build_parser() -> argparse.ArgumentParser:
     confirm.add_argument("--model", help="model that will run the resumed agent")
     confirm.add_argument("--tolerate-unknown", action="store_true")
 
-    complete = with_run(
-        add("complete", cmd_complete, "Close a run as done. Mutates storage.")
-    )
+    complete = with_run(add("complete", cmd_complete, "Close a run as done. Mutates storage."))
     complete.add_argument("--summary", default=None, help="one-line closing note")
 
     checkpoint = with_env(with_run(add("checkpoint", cmd_checkpoint, "Force a checkpoint.")))

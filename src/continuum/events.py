@@ -90,6 +90,9 @@ class EventType(StrEnum):
     RECOVERY_BLOCKED = "RECOVERY_BLOCKED"
     REVIEW_CONFIRMED = "REVIEW_CONFIRMED"
 
+    # agent cognition (issue #235): compact self-authored plan state
+    REASONING_SUMMARY = "REASONING_SUMMARY"
+
     # perception and planning (security extension)
     PERCEPTION_OBSERVED = "PERCEPTION_OBSERVED"
     BRANCH_RESOLVED = "BRANCH_RESOLVED"

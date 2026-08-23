@@ -8,6 +8,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Reasoning-context rehydration (#235).** Task-state recovery without
+  cognitive-state recovery produces sessions that are safe yet amnesiac.
+  New mutating MCP tool `continuum_record_summary` stores a bounded,
+  self-authored summary of where the agent's reasoning stands - plan stack,
+  decisions with rationale, open questions, working set - hard-capped at
+  4096 serialized characters so it can never become a transcript dump.
+  Summaries land as REASONING_SUMMARY events with EXTERNAL_AGENT provenance
+  and are strictly informational: they never move mode or safety. The
+  SessionStart briefing serves the newest summary verbatim ("where the last
+  session left off"), so a fresh session inherits the dead session's plan
+  instead of guessing from a progress bar.
+
 - **README refresh.** The README predated this week's work in every
   direction users touch first: the Quick Start now leads with the two-minute
   harness-wiring path (start a run, `hooks install`, no CLAUDE.md); the
