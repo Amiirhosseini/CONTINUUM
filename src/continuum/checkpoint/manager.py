@@ -165,13 +165,15 @@ class CheckpointManager:
         trigger: str = CheckpointTrigger.MANUAL,
         reason: str = "",
         environment: EnvironmentSnapshot | None = None,
+        force_version: bool = False,
     ) -> StateCheckpoint:
         """Create, seal and persist a checkpoint unconditionally."""
         current = state if state is not None else self.project_current(run_id)
         if current.run_id != run_id:
             raise CheckpointError(f"state belongs to run {current.run_id!r}, not {run_id!r}")
 
-        version = self.storage.put_version(current, reason=reason or trigger)
+        version = self.storage.put_version(current, reason=reason or trigger,
+                                           force=force_version)
 
         checkpoint = StateCheckpoint(
             run_id=run_id,
