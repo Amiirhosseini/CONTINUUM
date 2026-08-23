@@ -644,10 +644,7 @@ def cmd_complete(args: argparse.Namespace, storage: Storage, out: Any, err: Any)
     gates) and flips the run row to COMPLETED.
     """
     run = storage.get_run(args.run_id)  # raises RunNotFound -> NOT_FOUND
-    if args.summary:
-        note = {"summary": args.summary}
-    else:
-        note = {}
+    note = {"summary": args.summary} if args.summary else {}
     storage.append_event(
         args.run_id,
         EventType.REVIEW_CONFIRMED,

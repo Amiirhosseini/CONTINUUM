@@ -181,3 +181,20 @@ def test_gateway_cli_refuses_to_start_without_routes(db: str, tmp_path: Path) ->
     )
     assert code != 0
     assert "open relay" in err.getvalue()
+
+
+def test_oversized_body_is_refused_with_413(db: str, gateway: str) -> None:
+    """A proxy reading unbounded bodies is a DoS surface against the agent."""
+    conn = http.client.HTTPConnection(gateway, timeout=10)
+    huge = json.dumps({"id": "x", "blob": "y" * (10 * 1024 * 1024 + 1)})
+    conn.request(
+        "POST",
+        "/v1/invoices",
+        body=huge,
+        headers={"Host": "api.example.com", "Content-Type": "application/json"},
+    )
+    resp = conn.getresponse()
+    body = json.loads(resp.read())
+    conn.close()
+    assert resp.status == 413
+    assert "exceeds" in body["error"]

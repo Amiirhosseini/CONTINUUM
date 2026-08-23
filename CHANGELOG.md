@@ -8,6 +8,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Gateway hardening and docs refresh.** The enforcing proxy now refuses
+  request bodies above 10 MB with 413, draining (without buffering) up to a
+  256 MB sanity bound so clients finish sending and read the refusal instead
+  of dying on a broken pipe - a proxy that reads unbounded bodies into memory
+  is a denial-of-service surface against the agent it protects. The CLI
+  reference gains this week's commands plus an "executable configuration"
+  warning: the `.continuum` registries reference commands that run with your
+  user privileges and deserve the same scrutiny as cloned test scripts.
+
 - **`continuum complete <run>`: close a run from the keyboard.** Found
   missing during live testing: MCP-driven runs close via adapter events, but
   there was no CLI way to finish a run, so finished work kept surfacing as
