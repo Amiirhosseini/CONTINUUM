@@ -53,7 +53,21 @@ uv pip install -e ".[mcp]"    # adds the MCP server (optional)
 
 Two entrypoints are installed: `continuum` (CLI) and `continuum-mcp` (MCP server). The core library and CLI use only the standard library; the `mcp` extra is required solely for the server.
 
-Minimal example, record and recover:
+### Wiring a coding agent (the two-minute path)
+
+For Claude Code, Gemini CLI, or Codex, you do not write Python and do not need a prompt file:
+
+```bash
+continuum start my-task --goal "What the agent should do"
+continuum hooks install claude-code --with-gate   # also: gemini, codex
+```
+
+From then on every file the agent writes is captured as hash-chained evidence,
+its session starts with an automatic status briefing, unclaimed side effects
+registered in `.continuum/gate.json` are refused before they fire, and a fresh
+session after any crash resumes with executable next steps. No CLAUDE.md required.
+
+Minimal library example, record and recover:
 
 ```python
 from continuum import EventType, Run, SQLiteStorage, project
@@ -105,6 +119,14 @@ The detailed explanation, the projection model, and the recovery context are in 
 | Secure planning loop | Two-signal observation verification escalates high-risk branches to REQUIRES_REVIEW |
 | Periodic revalidation | Environment re-checked on a schedule, catching mid-run drift within one cycle |
 | Tamper-evident log | Hash-chained event log (32 event types) with integrity verification |
+| Enforcing gate | Unclaimed side-effect calls are refused before they fire; deny messages teach the claim protocol |
+| Observation hooks | Every file a coding CLI writes becomes digest-verified evidence, outside model control |
+| Session briefing | Fresh sessions learn run state deterministically at start - no prompt file |
+| Reconciler probes | Registered commands settle uncertain side effects automatically; humans see only the rest |
+| Executable guidance | Resume/validate render next steps as runnable commands, not statuses |
+| Enforcing HTTP gateway | Outbound calls in any language require claims; responses settle them from reality |
+| OpenTelemetry bridge | Tool-call spans from production tracing become evidence with zero code changes |
+| Action index | Cross-run idempotency lookups are indexed reads, not full-log scans |
 
 ## Security Extension
 
@@ -149,7 +171,7 @@ CONTINUUM is verified not just with mock unit tests, but against real LLM agents
 
 ### Automated Test Suite and Benchmarks
 
-- **1038 tests passing, 9 skipped** on Python 3.11, 3.12, and 3.13 (including unit, `hypothesis` property-based, concurrency, and adversarial tests).
+- **1224 tests passing, 13 skipped** on Python 3.11, 3.12, and 3.13 (including unit, `hypothesis` property-based, concurrency, and adversarial tests).
 - **CONTINUUM-Bench**: `continuum benchmark` executes in-process recovery benchmarks across five scenarios (`process_crash`, `dataset_change`, `unknown_side_effect`, `partial_completion`, `early_crash`), proving 0 duplicate work, 0 duplicate side effects, and automatic detection of stale environment dependencies.
 
 ### Adversarial Audit of the MCP Surface
@@ -203,6 +225,21 @@ through the LangGraph adapter, showing exactly-once survives the model's argumen
 drift. Treat them as experimental until their adapter-specific tests cover the full
 crash and resume matrix. Full usage, with runnable examples for every adapter, is in
 [references/adapters.md](references/adapters.md).
+
+Three further production frameworks are covered by thin, SDK-free hook
+surfaces in [`adapters/thin.py`](src/continuum/adapters/thin.py), each routing
+through the same claim/complete ledger with stable keys:
+
+| Framework | Interception surface | Entry point |
+|:--|:--|:--|
+| CrewAI | global before/after tool-call hooks | `install_crewai_hooks(storage, run_id)` |
+| AutoGen core | `FunctionTool.run_json` wrapped in place | `wrap_autogen_tool(tool, storage, run_id)` |
+| Pydantic AI | async Hooks capability | `Agent(capabilities=[wrap_pydantic_ai_hooks(storage, run_id)])` |
+
+For stacks none of these reach, two transport-level seams close the gap:
+`continuum gateway` enforces claims on outbound HTTP from any language, and
+`continuum.otel.make_span_processor(storage)` turns existing OpenTelemetry
+tool spans into evidence (`pip install continuum-agent[otel]`).
 
 ### Live LLM validation (real model via OpenRouter)
 
@@ -298,11 +335,39 @@ Python surface (`EventType`, `Run`, `SQLiteStorage`, `diff_states`, `project`) a
 continuum runs                                   # list runs
 continuum inspect <run_id>                       # semantic state
 continuum validate <run_id> --env dataset=v4     # validate, read-only
-continuum resume <run_id> --env dataset=v4       # recovery decision + contract
+continuum resume <run_id> --env dataset=v4       # recovery decision + contract + next steps
 continuum checkpoint <run_id>                    # force a checkpoint, mutates
 continuum actions <run_id>                       # external side effects
-continuum show-contract <run_id>                 # the machine-readable contract
+continuum reconcile <run_id>                     # settle uncertain effects with probes
+continuum complete <run_id>                      # close a run as done, from the keyboard
+continuum verify <run_id>                        # re-audit the event hash chain
 ```
+
+### Wiring into harnesses
+
+CONTINUUM meets agents where they already run. All wiring is host-side; the model's cooperation is optional.
+
+```bash
+# Coding CLIs with lifecycle hooks: evidence capture, session briefing,
+# and claim enforcement, installed in one command.
+continuum hooks install claude-code --with-gate   # also: gemini, codex
+
+# Frameworks without hooks: the enforcing HTTP proxy. Point outbound calls
+# at localhost; unclaimed requests are refused, claims are settled from the
+# real upstream response.
+continuum gateway --port 8765                     # routes: .continuum/gateway.json
+
+# Production stacks emitting OpenTelemetry: spans become evidence.
+provider.add_span_processor(continuum.otel.make_span_processor(storage))
+
+# Anything MCP-capable: the original ten-tool server.
+continuum-mcp                                     # via .mcp.json
+```
+
+Optional registries live beside your code and are data, not code:
+`.continuum/gate.json` (side-effect tools + stable-key templates),
+`.continuum/reconcilers.json` (probes that check external systems),
+`.continuum/gateway.json` (upstream routes).
 
 Every command accepts `--json`, and the read-only commands never write, so they are safe against a live database while an agent is mid-run. Exit codes are a safety contract (only a verified-safe run exits 0). The full command list, exit-code table, and state-diff output are in [references/cli.md](references/cli.md).
 
@@ -313,7 +378,8 @@ Every command accepts `--json`, and the read-only commands never write, so they 
 | 1-11 | Data models, semantic state, persistence, checkpointing, validation, action ledger, recovery engine, CLI, crash-recovery examples, environment snapshots/diffs, framework adapters | Complete |
 | 12 | Benchmark suite (CONTINUUM-Bench) | Complete (minimal harness) |
 | 13 | Cloud API (FastAPI + PostgreSQL) | Planned |
-| 14 | Dashboard | Planned |
+| 14 | Dashboard | Complete (`continuum dashboard`) |
+| 15+ | Enforced durability: observation hooks, gate, session briefing, reconciler probes, enforcing gateway, OTel bridge, action index, executable guidance, multi-client installers | Complete (see issue #213) |
 
 Beyond the original plan: the MCP server, MCP authorization layer, provenance and anti-self-certification, community files, schema versioning, and a bounded recovery context are shipped. The design for CONTINUUM-Bench is in [references/bench.md](references/bench.md). See [STATUS.md](STATUS.md) for the verified-vs-believed breakdown and open correctness bugs.
 
@@ -370,7 +436,7 @@ All arXiv links above were resolved against the arXiv API on 2026-08-22.
 - **Not on PyPI.** Install from a clone (see Quick Start).
 - **MCP caller authentication is optional.** When `CONTINUUM_MCP_TOKEN` is set, the server refuses every mutating tool unless the caller presents that shared secret in the `initialize` handshake's `_meta.authToken`. Without it, authorization is by declared identity only (the historical default, preserved for local single-user use). Tracked as [#1](https://github.com/Cyrax321/CONTINUUM/issues/1).
 - **Confirming self-reported state over MCP needs its own secret.** `continuum_confirm` refuses every caller until the operator sets `CONTINUUM_MCP_CONFIRM_TOKEN`, because an agent allowed to record progress must not also be able to confirm it (issue [#201](https://github.com/Cyrax321/CONTINUUM/issues/201)). The default path stays human-driven: run `continuum confirm <run_id>` on the host.
-- **Unbuilt components**: Cloud API (Phase 13) and Dashboard (Phase 14).
+- **Unbuilt components**: Cloud API (Phase 13).
 - **Framework adapters are experimental.** The OpenAI Agents SDK and LangGraph adapters are newer than the generic facade and do not yet carry the same crash-and-resume verification coverage. Prefer `GenericAgentAdapter` for production recovery until their adapter-specific tests cover the full recovery matrix.
 - **Agent/MCP runs need an explicit confirm before auto-resume.** Because externally-reported state is `REQUIRES_REVIEW`, `continuum resume` returns `request_human` until a human runs `continuum confirm <run_id>` (or the MCP `continuum_confirm` tool). This is by design, not a bug; see [Framework Integration](#framework-integration).
 - **e2e autonomy test series** (issue [#6](https://github.com/Cyrax321/CONTINUUM/issues/6)): Three full Claude Code runs scored 7/7 mechanics with unprompted recovery behavior observed. Defensive token-based fallback and path normalization bridge argument drift. Further test iterations across diverse prompt styles remain open.

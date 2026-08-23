@@ -573,6 +573,11 @@ class RecoveryContract(BaseModel):
     next_allowed_action: str | None = None
     evidence: list[str] = Field(default_factory=list)
     reason: str = ""
+    #: File observations recorded by host hooks (#210) after the latest
+    #: checkpoint, disk-checked at assess time (#208). Informational only:
+    #: never affects the recovery decision. Newest first; a trailing row with
+    #: ``truncated`` marks omitted older rows when the cap bites.
+    post_checkpoint_observations: list[dict[str, Any]] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=utcnow)
     integrity_hash: str | None = None
 

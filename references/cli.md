@@ -16,11 +16,27 @@ continuum verify <run_id>                        # re-audit the event hash chain
 continuum actions <run_id>                       # external side effects
 continuum show-contract <run_id>                 # the machine-readable contract
 continuum replay <run_id> [--upto N]             # re-derive state from events
+continuum reconcile <run_id> [--dry-run]         # settle uncertain effects with probes
+continuum confirm <run_id>                       # human blessing for self-reported state
+continuum complete <run_id> [--summary "..."]    # close a run as done. mutates
+continuum observe                                # record one tool completion (hook)
+continuum gate                                   # pre-tool-use verdict: allow or deny
+continuum briefing                               # session-start context injection
+continuum gateway --port 8765                    # enforcing proxy for registered upstreams
+continuum hooks install <client> [--with-gate]   # wire a coding CLI (claude-code, gemini, codex)
 ```
 
 Every command accepts `--json`. `inspect`, `history`, `events`, `diff`, `validate`, `resume`,
-`verify`, `actions`, `show-contract` and `replay` never write, so they are safe against a live
-database while an agent is mid-run.
+`verify`, `actions`, `show-contract`, `replay`, `gate` and `briefing` never write, so they are safe
+against a live database while an agent is mid-run. The mutating commands (`start`, `checkpoint`,
+`confirm`, `complete`, `observe`, `reconcile`, `gateway`) say so in their help.
+
+#### Registries are executable configuration
+
+`.continuum/gate.json`, `.continuum/reconcilers.json` and `.continuum/gateway.json` reference
+commands that run with your user privileges, exactly like CI pipelines or Makefiles. Treat a
+cloned repository's registries the way you treat its test scripts: read them before you let an
+agent loose.
 
 #### Exit codes are a safety contract
 

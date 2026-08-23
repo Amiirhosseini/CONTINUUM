@@ -33,9 +33,18 @@ from contextlib import suppress
 from typing import Any
 
 from continuum.events import Event, EventType, IntegrityReport, IntegrityViolation
-from continuum.models import Origin, Run, RunStatus, SemanticState, StateCheckpoint, utcnow
+from continuum.models import (
+    Action,
+    Origin,
+    Run,
+    RunStatus,
+    SemanticState,
+    StateCheckpoint,
+    utcnow,
+)
 from continuum.security.hashing import make_id
 from continuum.state.versioning import state_fingerprint
+from continuum.storage.actionindex import index_entry_from_payload
 from continuum.storage.base import (
     CheckpointNotFound,
     ConcurrentWriteError,
@@ -97,6 +106,19 @@ CREATE TABLE IF NOT EXISTS checkpoints (
 );
 
 CREATE INDEX IF NOT EXISTS checkpoints_by_run ON checkpoints(run_id, version);
+
+CREATE SEQUENCE IF NOT EXISTS action_index_ord_seq AS BIGINT;
+
+CREATE TABLE IF NOT EXISTS action_index (
+    key TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    action_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    updated_seq BIGINT NOT NULL DEFAULT nextval('action_index_ord_seq'),
+    action_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS action_index_run ON action_index(run_id);
 """
 
 
@@ -112,6 +134,7 @@ def _require_psycopg() -> Any:
 
 
 class PostgresStorage(Storage):
+    supports_action_index = True
     """Multi-process durable storage backed by PostgreSQL."""
 
     def __init__(self, url: str | Any, *, timeout: float = 30.0) -> None:
@@ -144,6 +167,41 @@ class PostgresStorage(Storage):
     def _create_schema(self) -> None:
         with self._lock:
             self._connection.execute(_SCHEMA)
+            self._backfill_action_index()
+
+    def _backfill_action_index(self) -> None:
+        """Seed the projection from the log when it is empty (issue #216).
+
+        The table is a derived projection: an empty index over existing
+        ACTION_* events means the database predates the index or lost its
+        rows, and rebuilding from events is always safe. Payload is stored as
+        TEXT, so JSON functions apply directly.
+        """
+        has_events = self._connection.execute(
+            "SELECT 1 FROM events WHERE type IN "
+            "('ACTION_RECORDED', 'ACTION_RECONCILED', 'ACTION_COMPENSATED') LIMIT 1"
+        ).fetchone()
+        if has_events is None:
+            return
+        empty = self._connection.execute("SELECT 1 FROM action_index LIMIT 1").fetchone()
+        if empty is not None:
+            return
+        self._connection.execute(
+            """
+            INSERT INTO action_index(key, run_id, action_id, status, updated_seq, action_json)
+            SELECT json_extract(e.payload, '$.key'),
+                   json_extract(e.payload, '$.action.run_id'),
+                   json_extract(e.payload, '$.action.action_id'),
+                   json_extract(e.payload, '$.action.status'),
+                   nextval('action_index_ord_seq'),
+                   json(json_extract(e.payload, '$.action'))
+            FROM events e
+            WHERE e.type IN ('ACTION_RECORDED', 'ACTION_RECONCILED', 'ACTION_COMPENSATED')
+              AND json_extract(e.payload, '$.key') IS NOT NULL
+              AND json_extract(e.payload, '$.action') IS NOT NULL
+            ORDER BY ctid
+            """
+        )
 
     # -- transactions ----------------------------------------------------- #
 
@@ -373,6 +431,83 @@ class PostgresStorage(Storage):
             raise ConcurrentWriteError(
                 f"run {event.run_id!r} sequence {event.sequence} was taken by another writer"
             ) from exc
+        self._maintain_action_index(event)
+
+    def _maintain_action_index(self, event: Event) -> None:
+        """Upsert the projection row for an ACTION_* event, same txn (#216).
+
+        updated_seq comes from a sequence so recency is global insertion
+        order, matching the global last-write-per-key fold.
+        """
+        entry = index_entry_from_payload(event.type, dict(event.payload))
+        if entry is None:
+            return
+        key, run_id, action_id, status, action_json = entry
+        try:
+            self._connection.execute(
+                "INSERT INTO action_index(key, run_id, action_id, status, "
+                "updated_seq, action_json) VALUES (%s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (key) DO UPDATE SET run_id = EXCLUDED.run_id, "
+                "action_id = EXCLUDED.action_id, status = EXCLUDED.status, "
+                "updated_seq = EXCLUDED.updated_seq, action_json = EXCLUDED.action_json",
+                (key, run_id, action_id, status, self._next_index_ord(), action_json),
+            )
+        except self._psycopg.IntegrityError as exc:
+            raise CorruptedRecord(
+                f"action index maintenance failed for key {key[:12]}...: {exc}"
+            ) from exc
+
+    def _next_index_ord(self) -> int:
+        row = self._connection.execute("SELECT nextval('action_index_ord_seq') AS v").fetchone()
+        return int(row["v"])
+
+    def foreign_action(self, key: str, *, exclude_run: str) -> Action | None:
+        """Indexed cross-run ledger lookup (issue #216)."""
+        with self._read():
+            row = self._connection.execute(
+                "SELECT action_json FROM action_index WHERE key = %s AND run_id != %s "
+                "ORDER BY updated_seq DESC LIMIT 1",
+                (key, exclude_run),
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            return Action.model_validate(json.loads(row["action_json"]))
+        except (ValueError, TypeError) as exc:
+            raise CorruptedRecord(
+                f"action index row for key {key[:12]}... failed to load: {exc}"
+            ) from exc
+
+    def rebuild_action_index(self) -> int:
+        """Recompute the whole index from the log (global key space)."""
+        canonical = self._canonical_index_rows()
+        with self._write():
+            self._connection.execute("DELETE FROM action_index")
+            self._connection.executemany(
+                "INSERT INTO action_index(key, run_id, action_id, status, "
+                "updated_seq, action_json) VALUES (%s, %s, %s, %s, %s, %s)",
+                [
+                    (key, entry[1], entry[2], entry[3], seq, entry[4])
+                    for key, (entry, seq) in canonical.items()
+                ],
+            )
+        return 0
+
+    def _canonical_index_rows(self) -> dict[str, tuple[tuple[str, str, str, str, str], int]]:
+        """Fold every run's action events; global last-write-per-key wins."""
+        with self._read():
+            rows = self._connection.execute(
+                "SELECT ctid AS rid, type, payload FROM events ORDER BY ctid"
+            ).fetchall()
+        canonical: dict[str, tuple[tuple[str, str, str, str, str], int]] = {}
+        for i, row in enumerate(rows):
+            payload = (
+                row["payload"] if isinstance(row["payload"], dict) else json.loads(row["payload"])
+            )
+            entry = index_entry_from_payload(EventType(row["type"]), payload)
+            if entry is not None:
+                canonical[entry[0]] = (entry, i)
+        return canonical
 
     @staticmethod
     def _require_run(conn: Any, run_id: str) -> None:
