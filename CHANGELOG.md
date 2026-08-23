@@ -8,6 +8,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Event-log compaction (#239).** `continuum compact <run>` bounds live-log
+  growth for month-long runs: it appends an EVENT_LOG_ANCHORED marker, moves
+  the pre-anchor prefix verbatim into a new `events_archive` table (schema
+  v5, SQLite + Postgres), and leaves the live chain append-only with the
+  anchor as its trusted genesis. verify walks anchored logs natively;
+  resume/replay fold from the restored checkpoint plus post-anchor tail; and
+  archived rows remain digest-auditable for deep checks. The anchor is
+  created fresh at compaction time (forced checkpoint) because anchoring at
+  an ancient version would leave almost everything in the live log - found
+  live. Payload offloading to blob storage is split into follow-up work.
+
 - **Production server mode (#238).** Three pieces: (1) CI now runs a real
   Postgres 16 service container against the Postgres contract tests, and the
   contract tests themselves were rewritten against the modern surface: the
