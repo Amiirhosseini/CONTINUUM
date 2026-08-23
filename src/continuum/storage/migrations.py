@@ -38,7 +38,7 @@ __all__ = [
 ]
 
 #: The schema version this build produces and understands.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 #: The full, current schema applied to a brand-new database.
 BASELINE_SCHEMA = """
@@ -103,6 +103,17 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
     applied_at TEXT NOT NULL,
     PRIMARY KEY (version, name)
 );
+
+CREATE TABLE IF NOT EXISTS action_index (
+    key         TEXT PRIMARY KEY,
+    run_id      TEXT NOT NULL,
+    action_id   TEXT NOT NULL,
+    status      TEXT NOT NULL,
+    updated_seq INTEGER NOT NULL,
+    action_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS action_index_run ON action_index(run_id);
 """
 
 
@@ -146,9 +157,48 @@ def _up_v2() -> str:
     """
 
 
+def _up_v3() -> str:
+    """Introduce the ``action_index`` projection (issue #216).
+
+    Cross-run idempotency lookups previously folded every run's full event
+    log, O(total logged events) per unscoped claim miss. The index is a
+    derived projection of the ``ACTION_*`` events: one row per ledger key,
+    last write per key wins (matching the fold), maintained incrementally by
+    the storage engines and rebuildable at any time because the log remains
+    the source of truth. The backfill seeds it from existing events so a v2
+    database opens with correct lookups.
+    """
+    return """
+    CREATE TABLE IF NOT EXISTS action_index (
+        key         TEXT PRIMARY KEY,
+        run_id      TEXT NOT NULL,
+        action_id   TEXT NOT NULL,
+        status      TEXT NOT NULL,
+        updated_seq INTEGER NOT NULL,
+        action_json TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS action_index_run ON action_index(run_id);
+
+    INSERT OR REPLACE INTO action_index(key, run_id, action_id, status, updated_seq, action_json)
+    SELECT json_extract(e.payload, '$.key')                          AS key,
+           json_extract(e.payload, '$.action.run_id')                AS run_id,
+           json_extract(e.payload, '$.action.action_id')             AS action_id,
+           json_extract(e.payload, '$.action.status')                AS status,
+           e.rowid                                                   AS updated_seq,
+           json(json_extract(e.payload, '$.action'))                 AS action_json
+    FROM events e
+    WHERE e.type IN ('ACTION_RECORDED', 'ACTION_RECONCILED', 'ACTION_COMPENSATED')
+      AND json_extract(e.payload, '$.key') IS NOT NULL
+      AND json_extract(e.payload, '$.action') IS NOT NULL
+    ORDER BY e.rowid;
+    """
+
+
 #: Forward migrations, keyed by the version they *produce*.
 MIGRATIONS: dict[int, Migration] = {
     2: Migration(version=2, name="add_versions_table_and_event_provenance", up=_up_v2()),
+    3: Migration(version=3, name="add_action_index_projection", up=_up_v3()),
 }
 
 

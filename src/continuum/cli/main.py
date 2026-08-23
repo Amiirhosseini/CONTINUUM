@@ -837,6 +837,10 @@ def cmd_verify(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
     # A run that does not exist has an empty, trivially valid chain. Reporting
     # that as "verified" would let `continuum verify $TYPO && deploy` succeed on
     # a name nobody has ever written to.
+    if args.repair_index and not args.index:
+        print("error: --repair-index requires --index", file=err)
+        return ExitCode.ERROR
+
     storage.get_run(args.run_id)
     report = storage.verify_events(args.run_id)
     payload = report.model_dump(mode="json")
@@ -848,6 +852,44 @@ def cmd_verify(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
         trusted = report.trusted_through.get(args.run_id, 0)
         lines.append(f"  trusted through sequence {trusted}")
         text = "\n".join(lines)
+
+    # Action index consistency (issue #216). The index is a projection of the
+    # ACTION_* events, so any disagreement is drift in the projection, never
+    # corruption of the truth, and repair is always safe.
+    index_lines: list[str] = []
+    if getattr(args, "index", False):
+        drift: int | None = None
+        has_index = hasattr(storage, "action_index_drift")
+        rebuild = getattr(storage, "rebuild_action_index", None)
+        if has_index:
+            # Repair only a projection whose source of truth verified: a
+            # tampered log must never be folded into the index (review 221).
+            if args.repair_index and not report.ok:
+                index_lines.append(
+                    "[!!] action index repair refused: the event chain failed "
+                    "verification; repair would launder tampered events"
+                )
+                payload["action_index_repair"] = "refused_chain_failed"
+            else:
+                drift = storage.action_index_drift()
+                if drift and args.repair_index and rebuild is not None:
+                    fixed = int(rebuild())
+                    index_lines.append(
+                        f"[ok] action index repaired from the log ({fixed} row(s) corrected)"
+                    )
+                    drift = storage.action_index_drift()
+                elif drift:
+                    index_lines.append(
+                        f"[!!] action index drifted from the log ({drift} row(s)); "
+                        f"run with --repair-index to rebuild it"
+                    )
+                else:
+                    index_lines.append("[ok] action index matches the log")
+        else:
+            index_lines.append("[auto] this engine maintains no action index")
+        text = text + "\n" + "\n".join(index_lines)
+        payload["action_index_drift"] = drift
+
     _emit(payload, text, as_json=args.json, stream=out, palette=getattr(args, "_palette", None))
     return ExitCode.OK if report.ok else ExitCode.CORRUPTED
 
@@ -1281,7 +1323,17 @@ def build_parser() -> argparse.ArgumentParser:
     remove = hooks_sub.add_parser("remove", help="Remove the observation hook.")
     hooks_client(remove, cmd_hooks_remove)
 
-    with_run(add("verify", cmd_verify, "Re-audit the event chain."))
+    verify = with_run(add("verify", cmd_verify, "Re-audit the event chain."))
+    verify.add_argument(
+        "--index",
+        action="store_true",
+        help="also compare the derived action index against the log (issue #216)",
+    )
+    verify.add_argument(
+        "--repair-index",
+        action="store_true",
+        help="rebuild drifted index rows from the log (requires --index)",
+    )
     with_run(add("actions", cmd_actions, "List external side effects."))
     with_env(with_run(add("show-contract", cmd_contract, "Print the recovery contract.")))
 

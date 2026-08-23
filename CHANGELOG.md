@@ -44,6 +44,25 @@ All notable changes to this project are documented here. The format follows
   run their key assertions in subprocesses so earlier imports cannot mask a
   regression.
 
+- **Action index: indexed cross-run idempotency lookups (#216).** Unscoped
+  claims folded every other run's complete event log on a local miss,
+  O(total logged events) per lookup. Schema v3 adds `action_index`, a derived
+  projection of the `ACTION_*` events (one row per ledger key), maintained
+  inside the same transaction as each event insert and backfilled from
+  existing events by the migration, so v2 databases gain correct lookups on
+  open. `ActionLedger` uses it whenever the engine provides one
+  (`Storage.supports_action_index`) and keeps the historical scan as the
+  fallback for engines without it; verdicts are identical because both read
+  the same log semantics. The log remains the source of truth:
+  `continuum verify --index` compares the projection against the fold and
+  reports drift, `--repair-index` rebuilds rows from events. Measured at 300
+  runs: foreign lookup ~19 ms scanning vs ~0.015 ms indexed, and the scan
+  cost grows linearly with store size while the index does not. Tests in
+  `tests/test_action_index.py` pin incremental maintenance across claims,
+  completions and reopens, equivalence with the scan for completed,
+  duplicate and uncertain-elsewhere cases, scoped-key isolation, drift
+  detection and repair, the engineless fallback path, and v2 backfill.
+
 - **Host-side observation hooks close part of the durability gap (#207).**
   Recovery depends on the agent voluntarily calling the recording tools, so a
   kill between performing work and reporting it left the next session a
@@ -78,8 +97,6 @@ All notable changes to this project are documented here. The format follows
   identical semantics; it is paid only on the unscoped path after the local
   lookup missed. Regression tests cover cross-run dedup, the uncertain-elsewhere
   refusal, and the certain-failure pass-through.
-
-### Added
 
 - **Automatic durability for every harness (#191).** The file-derived progress
   hook and the policy-gated background checkpoint are now wired into
