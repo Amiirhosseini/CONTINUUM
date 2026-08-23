@@ -249,8 +249,22 @@ class ActionLedger:
     # -- reading ---------------------------------------------------------- #
 
     def _replay(self) -> dict[str, Action]:
-        """Rebuild the ledger by folding action events. Cheap and verifiable."""
-        return fold_action_events(self.storage.read_events(self.run_id))
+        """Rebuild the ledger by folding action events. Cheap and verifiable.
+
+        Archived events (compaction, issue #239) fold too: a claim settled
+        before compaction must keep protecting afterwards, or exactly-once
+        would quietly reset at the anchor boundary and a month-old side
+        effect could fire a second time.
+        """
+        events = [
+            *self.storage.read_archived_events(self.run_id),
+            *self.storage.read_events(self.run_id),
+        ]
+        return fold_action_events(sorted(events, key=lambda e: e.sequence))
+
+    def folded(self) -> dict[str, Action]:
+        """Public view of the ``key -> newest action`` fold, archive included."""
+        return self._replay()
 
     def _foreign_action(self, key: str) -> Action | None:
         """Find ``key`` in another run's ledger, for unscoped claims.

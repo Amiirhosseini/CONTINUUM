@@ -16,8 +16,8 @@ All notable changes to this project are documented here. The format follows
   resume/replay fold from the restored checkpoint plus post-anchor tail; and
   archived rows remain digest-auditable for deep checks. The anchor is
   created fresh at compaction time (forced checkpoint) because anchoring at
-  an ancient version would leave almost everything in the live log - found
-  live. Payload offloading to blob storage is split into follow-up work.
+  an ancient version would leave almost everything in the live log. Payload
+  offloading to blob storage is split into follow-up work.
 
 - **Production server mode (#238).** Three pieces: (1) CI now runs a real
   Postgres 16 service container against the Postgres contract tests, and the
@@ -576,6 +576,63 @@ All notable changes to this project are documented here. The format follows
   earlier; the Postgres backend's tests skip without `CONTINUUM_TEST_POSTGRES_DSN`).
 
 ### Fixed
+
+- **Anchored verification trusted the first live row of a compacted run
+  (PR #253 review, security).** After compaction, `verify_events` checked
+  whether an EVENT_LOG_ANCHORED event existed anywhere in the live log and,
+  if so, treated the first surviving row as a trusted genesis: its own
+  `prev_hash` and sequence became the walk's starting point. Deleting the
+  boundary events therefore left a "valid" chain, and verify returned success
+  for a run whose anchor era had been erased. Both engines now read the
+  newest `events_archive` row and require the live chain to continue it
+  exactly (its hash as the expected `prev_hash`, its sequence plus one as
+  the expected sequence), and SEQUENCE_GAP and BROKEN_CHAIN are enforced on
+  anchored logs like any other. The archive itself is deep-audited in the
+  same pass: every archived row is re-digested and chain-linked from sequence
+  1, so editing or truncating history in `events_archive` fails verify
+  instead of hiding behind a healthy live tail. Regression tests cover the
+  tampered row, deleted boundary event, truncated archive and emptied archive
+  cases through both `verify_events` and the CLI exit code.
+
+- **`continuum compact` committed the anchor marker separately from the
+  archive move (PR #253 review).** The marker append was one transaction and
+  the INSERT/DELETE into `events_archive` another, so a crash between them
+  left an anchored live log whose prefix never reached the archive, with
+  verify then trusting a genesis that was never earned. Both engines now
+  append EVENT_LOG_ANCHORED inside the same transaction as the archive move
+  (SQLite through the shared IMMEDIATE transaction via a conn-taking
+  `_append_chained` helper; Postgres through an explicit `transaction()`
+  block around the three statements, since the connection runs in autocommit
+  mode), and the docstrings document the real order: forced anchor checkpoint
+  first, then the atomic marker-plus-move.
+
+- **`replay` reported `verified: true` unconditionally for compacted runs
+  (PR #253 review).** The anchored branch folded the restored checkpoint
+  forward over the post-anchor tail but hardcoded the pass, so replay exited
+  0 even when the folded state disagreed with the stored version; the
+  corruption-detection contract was silently lost for every compacted run.
+  The branch now re-folds only the stored version's own prefix and compares
+  fingerprints exactly as the plain path's `_verify_against_stored` does,
+  returning CORRUPTED with `verified: false` on mismatch. A dead
+  `base is None` test (restore always returns a state) was removed along with
+  the hardcoded flag.
+
+- **Exactly-once reset at the compaction boundary (PR #253 review).** The
+  action ledger folded only live events, so after compaction every archived
+  ACTION_* claim vanished from the fold and a month-old completed side effect
+  could be claimed fresh and fired again. `ActionLedger` now folds archived
+  events too (`Storage.read_archived_events`, empty by default, implemented
+  by both engines), `protected_call` takes its decision fold from the ledger
+  rather than a raw event scan, and the old compaction test that exercised
+  the guard with an unrelated key was replaced by one asserting an archived
+  completed action is a cache hit that never re-runs the callback.
+
+- Smaller PR #253 review items: EVENT_LOG_ANCHORED joined `_NON_PROJECTING`
+  so anchored replays no longer count it under `ignored_types`; `compact`
+  gates on a new `supports_compaction` capability flag instead of surfacing
+  a raw NotImplementedError on engines without the archive table; and two
+  copy-paste artifacts (a duplicated `MIGRATIONS` comment line, an incomplete
+  clause in this changelog) were cleaned up.
 
 - **The `continuum serve` sidecar exported a `MUTATING` constant describing an
   authentication policy it does not implement, and no test pinned the real one

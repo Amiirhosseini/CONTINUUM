@@ -88,9 +88,12 @@ def evaluate(
 
 
 def _fold(storage: Any, run_id: str) -> dict[str, Any]:
-    from continuum.actions.ledger import fold_action_events
+    # Via the ledger, not a raw event fold: the ledger includes events that
+    # compaction (issue #239) moved into the archive, so a completed action
+    # stays a cache hit instead of re-firing after compaction.
+    from continuum.actions.ledger import ActionLedger
 
-    return fold_action_events(storage.read_events(run_id))
+    return ActionLedger(storage, run_id).folded()
 
 
 def protected_call(
