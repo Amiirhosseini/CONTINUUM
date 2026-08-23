@@ -101,6 +101,22 @@ All notable changes to this project are documented here. The format follows
   cover verdict parsing, the settle table, failure isolation, dry-run,
   provenance and exit codes.
 
+- **Post-checkpoint observations surfaced in the recovery contract (#208).**
+  The observation hooks (#210) recorded what landed on disk, but a resuming
+  session had to know to inspect the raw event log to see it; the contract
+  reported self-reported progress alone. `RecoveryContract` now carries
+  `post_checkpoint_observations`: every file observation recorded after the
+  latest state version's source sequence, newest first and capped at 50 with
+  an explicit truncation marker, each disk-checked at assess time as
+  `verified`, `changed`, `missing` or `recorded`. The rows appear in
+  `continuum resume`/`validate` output and every rendered contract.
+  Deliberately informational: provenance stays conservative per #207, so
+  observations never move `mode`, `safe` or any required action; they tell
+  the resuming agent what is true about the workspace without certifying
+  anything. Verified live: an intact artifact shows `verified`, one modified
+  after its observation shows `changed`, and the decision fields are
+  byte-identical to a run without observations.
+
 - **Host-side observation hooks close part of the durability gap (#207).**
   Recovery depends on the agent voluntarily calling the recording tools, so a
   kill between performing work and reporting it left the next session a
@@ -156,8 +172,6 @@ All notable changes to this project are documented here. The format follows
   adapter path, no log bloat over unchanged files, non-blocking auto progress
   after an intercepted action, and subclass forwarding.
 
-### Added
-
 - **Localized recovery is now dep_scope-aware and file-aware (#184).**
   `RecoveryEngine.assess` respects `Action.dep_scope` when a scope is given: an
   uncertain side effect tagged to a dependency outside the scope no longer
@@ -165,8 +179,6 @@ All notable changes to this project are documented here. The format follows
   source-level `DependencyGraph` to `assess`/`assess_scoped` surfaces every file
   importing a scoped dependency as `RecoveryDecision.impacted_files`. Phase 6
   gains an `out_of_scope_side_effect` scenario covering both paths.
-
-### Added
 
 - **Leftover issue sweep (Phases 2, 3, and provenance).** Closed the remaining
   open issues from the master plan with working, tested code:
@@ -193,8 +205,6 @@ All notable changes to this project are documented here. The format follows
     external-world claims.
   - CLI scoped-recovery smoke test and recovery-policy regression tests
     (#110, #104).
-
-### Added
 
 - **Recovery benchmarking and correctness scenarios (Phase 6).** The existing
   CONTINUUM-Bench (`src/continuum/benchmark/__init__.py`) already provides the
@@ -810,8 +820,6 @@ All notable changes to this project are documented here. The format follows
    result dict holding the envelope key intact on cache hit. Closed by `15e0d67`
    (PR #53).
 
-
-### Added
 
 - **Regression test for the checkpoint environment round-trip.** `tests/test_storage.py`
   exercises the checkpoint/reload path end to end: a checkpoint is written with a
