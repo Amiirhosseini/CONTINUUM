@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import io
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -129,7 +130,7 @@ def test_mcp_resume_includes_human_steps(db: str, tmp_path: Path) -> None:
     """Drive the real stdio server: resume must carry executable steps."""
     import subprocess
 
-    env = {"PATH": "/usr/bin:/bin:/opt/miniconda3/bin", "HOME": os.environ["HOME"]}
+    env = dict(os.environ)
     handshake = [
         json.dumps(
             {
@@ -157,7 +158,7 @@ def test_mcp_resume_includes_human_steps(db: str, tmp_path: Path) -> None:
         ),
     ]
     proc = subprocess.Popen(
-        ["python", "-m", "continuum.mcp.server", "--db", db],
+        [sys.executable, "-m", "continuum.mcp.server", "--db", db],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -170,16 +171,17 @@ def test_mcp_resume_includes_human_steps(db: str, tmp_path: Path) -> None:
             proc.stdin.write(line + "\n")
             proc.stdin.flush()
         reply = None
-        deadline = 50
-        while deadline:
+        import time
+
+        deadline = time.monotonic() + 60.0
+        while time.monotonic() < deadline:
             line = proc.stdout.readline()
             if not line:
-                break
+                break  # server exited; do not spin
             parsed = json.loads(line)
             if parsed.get("id") == 2:
                 reply = parsed
                 break
-            deadline -= 1
     finally:
         proc.kill()
     assert reply is not None
