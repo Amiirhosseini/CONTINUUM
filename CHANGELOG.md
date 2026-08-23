@@ -8,6 +8,69 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Human-in-the-loop surface on the dashboard (#242).** request_human
+  walls finally have a door with an audit row: the run page renders buttons
+  for confirm (REVIEW_CONFIRMED, Origin.HUMAN), reconcile
+  occurred=true/false through ActionLedger.reconcile, and complete (run row
+  flipped to COMPLETED) whenever a run is blocked or has uncertain actions.
+  Mutating POST endpoints are fail-closed - refused until
+  CONTINUUM_DASHBOARD_TOKEN is set - and every action maps 1:1 onto the
+  human CLI verb, landing identical event types and provenance. Reads stay
+  open; unknown routes 404.
+
+- **Version pinning on claims and summaries (#241).** Replay correctness
+  needs environment identity: which prompt version, tool schema and model
+  produced a decision (prompt-migration hazard, arXiv:2507.05573; Zylos
+  survey lists pinning as part of replay correctness). New closed-set
+  `pinning` dict - prompt_sha256, tool_schema_sha256, model_id,
+  policy_version - accepted by `continuum intercept_action` and
+  `continuum_record_summary`, stored verbatim with EXTERNAL_AGENT provenance
+  on the ACTION_RECORDED STARTED record / summary payload. Values are
+  validated (known keys only, 256-char cap: store the hash, not the
+  artefact). `continuum resume --pinning '<json>'` diffs caller-supplied
+  pins against the newest recorded set and surfaces drift as informational
+  lines in text and JSON (`pinning_drift`) - degrade, never block. Pure
+  helpers live in `continuum.pinning`.
+
+- **Run-level retry budgets (#240).** Agent loops invent retries: a failing
+  upstream gets hammered because the model re-plans after every failure, and
+  each attempt opens a fresh ledger slot. New `.continuum/budgets.json`
+  registry caps attempts per action type (with a default fallback); every
+  ACTION_RECORDED claim slot counts as one attempt, so retries under the
+  same key still consume budget. `continuum intercept_action` refuses claims
+  beyond the budget with an instructive error, and new read-only command
+  `continuum budget <run>` reports attempts/max/remaining per type.
+  `backoff_delay` ships as a pure helper (exponential + cap; jitter is the
+  caller's job) because CONTINUUM never performs retries itself - it counts
+  and gates them.
+
+- **Event-log compaction (#239).** `continuum compact <run>` bounds live-log
+  growth for month-long runs: it appends an EVENT_LOG_ANCHORED marker, moves
+  the pre-anchor prefix verbatim into a new `events_archive` table (schema
+  v5, SQLite + Postgres), and leaves the live chain append-only with the
+  anchor as its trusted genesis. verify walks anchored logs natively;
+  resume/replay fold from the restored checkpoint plus post-anchor tail; and
+  archived rows remain digest-auditable for deep checks. The anchor is
+  created fresh at compaction time (forced checkpoint) because anchoring at
+  an ancient version would leave almost everything in the live log - found
+  live. Payload offloading to blob storage is split into follow-up work.
+
+- **Production server mode (#238).** Three pieces: (1) CI now runs a real
+  Postgres 16 service container against the Postgres contract tests, and the
+  contract tests themselves were rewritten against the modern surface: the
+  originals predated strict enum validation and Goal models, passing raw
+  strings that today's pydantic models rightly refuse - they had rotted in
+  skip-guaranteed obscurity. The gateway backfill SQL was also fixed to
+  Postgres jsonb operators (it previously used SQLite-only `json_extract`). (2) `continuum serve --transport http`
+  exposes the full sidecar dispatch over POST /<method> JSON for non-Python
+  agents: same handlers, same token auth (`CONTINUUM_SERVE_TOKEN`), errors
+  mapped to status codes (404 unknown method, 403 unauthorized, 400 bad
+  params, 500 storage failures) without killing the server. (3) Honest
+  scoping note: duplicate reconciliation between concurrent workers is
+  already impossible by construction (ledger claims commit inside IMMEDIATE
+  transactions); run-level exclusivity leases remain available to adapters
+  via LeaseCoordinator rather than being forced onto every surface.
+
 - **Replay-safety guard as a portable primitive (#237).** The gate's
   decision table is extracted into `continuum.replayguard.evaluate`, a pure
   core over the folded ledger that the gate now delegates to (single source

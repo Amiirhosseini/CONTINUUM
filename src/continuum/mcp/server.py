@@ -572,8 +572,12 @@ def build_server(
         open_questions: list[str] | None = None,
         working_set: list[str] | None = None,
         note: str = "",
+        pinning: dict[str, Any] | None = None,
     ) -> str:
         """Store one bounded reasoning summary (issue #235)."""
+        from continuum.pinning import normalize_pinning
+
+        pinning_clean = normalize_pinning(pinning)
         summary = {
             "plan_stack": plan_stack or [],
             "decisions": decisions or [],
@@ -590,10 +594,13 @@ def build_server(
                 "Summarise harder: fewer, shorter entries."
             )
         ctx.ensure_run(run_id)
+        payload: dict[str, Any] = {"summary": summary}
+        if pinning_clean:
+            payload["pinning"] = pinning_clean
         event = ctx.storage.append_event(
             run_id,
             EventType.REASONING_SUMMARY,
-            {"summary": summary},
+            payload,
             source=Origin.EXTERNAL_AGENT,
         )
         return _json(
@@ -818,13 +825,61 @@ def build_server(
         arguments: dict[str, Any] | None = None,
         key: str | None = None,
         scoped_to_run: bool = True,
+        pinning: dict[str, Any] | None = None,
     ) -> str:
         """Claim an action in the ledger and report whether to proceed."""
+        from continuum.pinning import normalize_pinning
+
+        pinning_clean = normalize_pinning(pinning)
         ctx.ensure_run(run_id)
+
+        # Run-level retry budget (issue #240): every claim slot counts as one
+        # attempt, so a model re-planning after failures hits the wall here
+        # instead of hammering the upstream.
+        from pathlib import Path as _Path
+
+        from continuum.budgets import (
+            DEFAULT_BUDGETS_PATH,
+            BudgetConfigError,
+            attempts_for_type,
+            evaluate_budget,
+        )
+
+        try:
+            from continuum.budgets import load_budgets as _lb
+
+            budgets = _lb(_Path(DEFAULT_BUDGETS_PATH))
+        except BudgetConfigError as exc:
+            return _json(
+                {
+                    "run_id": run_id,
+                    "action_type": action_type,
+                    "proceed": False,
+                    "reason": f"retry budget registry invalid: {exc}",
+                }
+            )
+
+        events = ctx.storage.read_events(run_id)
+        attempts = attempts_for_type(events, action_type)
+        allowed, used, maximum = evaluate_budget(budgets, action_type, attempts)
+        if not allowed:
+            from mcp.server.mcpserver.exceptions import ToolError
+
+            raise ToolError(
+                f"retry budget exhausted for {action_type!r}: "
+                f"{used} attempt(s) recorded, budget is {maximum}. "
+                "Reconcile existing attempts or ask the operator to raise "
+                ".continuum/budgets.json."
+            )
+
         ledger = ctx.ledger(run_id)
         try:
             outcome = ledger.claim(
-                action_type, arguments=arguments, key=key, scoped_to_run=scoped_to_run
+                action_type,
+                arguments=arguments,
+                key=key,
+                scoped_to_run=scoped_to_run,
+                pinning=pinning_clean or None,
             )
         except UnknownSideEffect as exc:
             return _json(

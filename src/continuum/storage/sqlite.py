@@ -358,6 +358,61 @@ class SQLiteStorage(Storage):
             ) from exc
         _maintain_action_index(conn, event, int(cursor.lastrowid or 0))
 
+    def compact_run(self, run_id: str, *, through_sequence: int | None = None) -> dict[str, int]:
+        """Archive the pre-anchor prefix of a run's log (issue #239).
+
+        Order matters: the EVENT_LOG_ANCHORED marker is appended first so it
+        becomes the trusted genesis of the post-compaction chain, then the
+        forced anchor checkpoint records state at the boundary, then the
+        prefix is moved to ``events_archive`` verbatim.
+        """
+        from continuum.checkpoint.manager import CheckpointManager
+
+        lv = self.latest_version(run_id)
+        head = self.last_sequence(run_id)
+        needs_fresh_anchor = lv is None or through_sequence is not None or lv.source_sequence < head
+        if needs_fresh_anchor:
+            try:
+                CheckpointManager(self).checkpoint(run_id, force_version=True)
+            except Exception as exc:
+                raise ValueError(f"run {run_id!r} could not be anchored: {exc}") from exc
+            lv = self.latest_version(run_id)
+        storage_version = lv
+        if storage_version is None:
+            raise ValueError(f"run {run_id!r} could not be anchored: no projectable state")
+        through = (
+            through_sequence
+            if through_sequence is not None
+            else min(storage_version.source_sequence, self.last_sequence(run_id))
+        )
+        if through < 1:
+            raise ValueError("nothing to compact: anchor would be empty")
+
+        self.append_event(
+            run_id,
+            EventType.EVENT_LOG_ANCHORED,
+            {"anchored_through": through, "version": storage_version.version},
+            source=Origin.DETERMINISTIC,
+        )
+
+        with self._write() as conn:
+            cur = conn.execute(
+                "INSERT INTO events_archive"
+                " (run_id, sequence, event_id, type, timestamp, payload,"
+                "  causer_event_id, source, prev_hash, hash)"
+                " SELECT run_id, sequence, event_id, type, timestamp, payload,"
+                "        causer_event_id, source, prev_hash, hash"
+                " FROM events WHERE run_id = ? AND sequence <= ?",
+                (run_id, through),
+            )
+            archived = cur.rowcount
+            conn.execute(
+                "DELETE FROM events WHERE run_id = ? AND sequence <= ?",
+                (run_id, through),
+            )
+
+        return {"archived": max(archived, 0)}
+
     def foreign_action(self, key: str, *, exclude_run: str) -> Action | None:
         """Indexed cross-run ledger lookup (issue #216).
 
@@ -510,6 +565,7 @@ class SQLiteStorage(Storage):
             rows = conn.execute(
                 "SELECT * FROM events WHERE run_id = ? ORDER BY sequence ASC", (run_id,)
             ).fetchall()
+        has_anchored_prefix = any(r["type"] == "EVENT_LOG_ANCHORED" for r in rows)
 
         for row in rows:
             checked += 1
@@ -532,7 +588,15 @@ class SQLiteStorage(Storage):
                 continue
 
             digest = event.digest()
-            if event.sequence != expected_sequence:
+            if checked == 1 and has_anchored_prefix:
+                # Compacted run (#239): the archive holds the verified prefix,
+                # so the live log legitimately starts past sequence 1 with
+                # whatever boundary events compaction wrote (checkpoint marker
+                # + anchor). Trust the first row as the genesis of this walk;
+                # the archived era itself is auditable in events_archive.
+                prev_digest = row["prev_hash"]
+                expected_sequence = int(row["sequence"])
+            if event.sequence != expected_sequence and not (checked == 1 and has_anchored_prefix):
                 healthy = False
                 violations.append(
                     IntegrityViolation(
@@ -585,7 +649,7 @@ class SQLiteStorage(Storage):
 
     # -- versions --------------------------------------------------------- #
 
-    def put_version(self, state: SemanticState, *, reason: str = "") -> int:
+    def put_version(self, state: SemanticState, *, reason: str = "", force: bool = False) -> int:
         fingerprint = state_fingerprint(state)
         with self._write() as conn:
             self._require_run(conn, state.run_id)
@@ -595,7 +659,7 @@ class SQLiteStorage(Storage):
                 (state.run_id,),
             ).fetchone()
 
-            if head is not None and head["fingerprint"] == fingerprint:
+            if head is not None and head["fingerprint"] == fingerprint and not force:
                 return int(head["version"])  # unchanged: no new version
 
             version = (int(head["version"]) + 1) if head else 0

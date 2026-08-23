@@ -43,15 +43,133 @@ CONTINUUM asks a narrower, harder question: can an agent resume from a compact s
 
 ## Quick Start
 
-Not published to PyPI yet. Install from a clone:
+Not published to PyPI yet. Install from a clone. One clone is enough to get the library, CLI, MCP server, and every adapter ready for contribution.
+
+### Prerequisites
+
+| Requirement | Version / Notes |
+|:--|:--|
+| Python | **3.11+** (3.12 recommended for development, CI tests 3.11 / 3.12 / 3.13) |
+| git | any recent version |
+| uv **or** pip | `uv` is recommended (faster, lockfile-aware). `pip` works with a manual venv. |
+| SQLite | bundled with Python, no extra install (WAL mode is used) |
+| Optional: Docker | only for `ContainerAdapter` and Postgres integration tests |
+| Optional: PostgreSQL 16 | only for `continuum-agent[postgres]` (`CONTINUUM_TEST_POSTGRES_DSN`) |
+| Optional: Node.js | only if you re-build `docs/` frontend |
+
+### 1. Clone
 
 ```bash
-uv venv
-uv pip install -e ".[dev]"    # library, CLI, and test tooling
-uv pip install -e ".[mcp]"    # adds the MCP server (optional)
+git clone https://github.com/Cyrax321/CONTINUUM.git
+cd CONTINUUM
 ```
 
-Two entrypoints are installed: `continuum` (CLI) and `continuum-mcp` (MCP server). The core library and CLI use only the standard library; the `mcp` extra is required solely for the server.
+### 2. Create a virtual environment
+
+With **uv** (recommended):
+
+```bash
+uv venv                          # creates .venv with Python 3.11+
+source .venv/bin/activate        # macOS / Linux
+# .venv\Scripts\activate         # Windows PowerShell
+```
+
+With plain **pip/venv** (no uv):
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+```
+
+### 3. Install — pick your level
+
+The core library has **one** runtime dependency (`pydantic>=2.7`). Everything else is an optional extra (see `pyproject.toml:30` and `pyproject.toml:32-72`).
+
+**For contributors (recommended, installs everything you need to run tests, lint, and type-check):**
+
+```bash
+uv pip install -e ".[dev]"       # library + CLI + all test/tooling
+```
+
+This single command is enough to contribute. It pulls `mcp`, `langgraph`, `openai-agents`, `langchain`, and `cryptography` so `mypy` can type-check the adapter modules and `pytest` can exercise them. To verify, run:
+
+```bash
+continuum --help
+continuum-mcp --help             # MCP server entrypoint (via dev extra's mcp)
+pytest -q                        # 1252 passed (skipped varies by env, no extra services needed)
+```
+
+**Minimal install (just the library + CLI, zero adapter overhead):**
+
+```bash
+uv pip install -e .              # pydantic only
+continuum --help                 # works, SQLite-backed
+```
+
+**Add only what you need (composable extras):**
+
+```bash
+uv pip install -e ".[mcp]"       # MCP server (11 stdio tools) — requires mcp>=2.0
+uv pip install -e ".[otel]"      # OpenTelemetry bridge — opentelemetry-api>=1.20
+uv pip install -e ".[langgraph]" # LangGraph adapter
+uv pip install -e ".[openai]"    # OpenAI Agents SDK adapter (also pulls mcp transitively)
+uv pip install -e ".[langchain]" # LangChain adapter
+uv pip install -e ".[attest]"    # Ed25519 attestation (continuum attest)
+uv pip install -e ".[postgres]"  # PostgreSQL backend — psycopg>=3.2
+uv pip install -e ".[dev,postgres]" # full dev + live Postgres contract tests
+```
+
+Combine freely: `uv pip install -e ".[dev,postgres]"` (`[dev]` already includes `mcp`, `langgraph`, `langchain`, `openai-agents`, and `cryptography`).
+
+> **pip fallback:** replace `uv pip install` with `pip install` in every command above if you are not using `uv`. `uv.lock` pins the resolved versions (`uv.lock:1`) but is optional with pip.
+
+### 4. What gets installed (packages)
+
+| Package | Where declared | Purpose | Required? |
+|:--|:--|:--|:--|
+| `pydantic>=2.7` | `pyproject.toml:30` (core `dependencies`) | Immutable models, hash-chained events | **Yes, always** |
+| `mcp>=2.0` | `pyproject.toml:53` (`[mcp]`), also in `[dev]` | MCP server (`continuum-mcp`) stdio transport | Only for MCP server (also pulled transitively by `openai-agents`) |
+| `opentelemetry-api>=1.20` | `pyproject.toml:55` (`[otel]`) | Span-processor bridge (`continuum.otel`) | Only for OTel directly; may appear transitively via `mcp`/`openai-agents` |
+| `langgraph>=0.2` | `pyproject.toml:58` (`[langgraph]`) | LangGraph adapter | Only for LangGraph (also pulled transitively by `langchain`) |
+| `openai-agents>=0.2` | `pyproject.toml:61` (`[openai]`) | OpenAI Agents SDK adapter | Only for OpenAI |
+| `langchain>=0.3` | `pyproject.toml:64` (`[langchain]`) | LangChain adapter | Only for LangChain |
+| `cryptography>=45.0` | `pyproject.toml:69` (`[attest]`), also in `[dev]` | Ed25519 event-chain attestation | Only for `continuum attest` |
+| `psycopg>=3.2` | `pyproject.toml:72` (`[postgres]`) | PostgreSQL storage backend | Only for Postgres |
+| **Dev / test tooling** (all in `pyproject.toml:33-50` `[dev]`) | | | Only for contributors |
+| `pytest>=8.0`, `pytest-cov>=5.0`, `pytest-asyncio>=0.23` |  | Test runner + coverage + async MCP tests | Dev |
+| `hypothesis>=6.0` |  | Property-based tests (hashing, models) | Dev |
+| `ruff==0.16.3` |  | Lint + format (CI enforces `ruff check` + `ruff format --check`) | Dev |
+| `mypy>=1.13` + `pydantic.mypy` |  | Strict type-check (CI runs `mypy src/continuum`) | Dev |
+
+No other runtime dependencies. The CLI, storage, recovery engine, and checkpointing use only the Python standard library.
+
+### 5. Verify the install
+
+```bash
+# CLI entrypoints
+continuum --help
+continuum-mcp --help             # needs [mcp] or [dev]
+
+# One-command demo (process kill, hash-chain verify)
+./try-it.sh demo                 # same as: python examples/crash_recovery_agent.py
+
+# Full test suite (1252 passed on Python 3.13)
+pytest -q                        # or: ./try-it.sh test
+pytest --no-cov --tb=short -q    # faster, no coverage
+pytest tests/test_events.py -v   # single file
+
+# Lint and type-check (must pass for PRs)
+ruff check src/ tests/ examples/
+ruff format --check src/ tests/ examples/
+mypy src/continuum
+
+# Live Postgres contract tests (needs a running Postgres)
+# docker run -d -p 5432:5432 -e POSTGRES_USER=continuum -e POSTGRES_PASSWORD=continuum -e POSTGRES_DB=continuum_test postgres:16
+# CONTINUUM_TEST_POSTGRES_DSN=postgresql://continuum:continuum@localhost:5432/continuum_test pytest tests/test_storage_postgres.py tests/test_action_index.py -q
+```
+
+Two entrypoints are installed: `continuum` (CLI) and `continuum-mcp` (MCP server). The core library and CLI use only the standard library; the `mcp` extra is required solely for the server. See `CONTRIBUTING.md:1` for the full contributor workflow and `pyproject.toml:1` for the authoritative dependency list.
 
 ### Wiring a coding agent (the two-minute path)
 

@@ -93,6 +93,9 @@ class EventType(StrEnum):
     # agent cognition (issue #235): compact self-authored plan state
     REASONING_SUMMARY = "REASONING_SUMMARY"
 
+    # log maintenance (issue #239): marks the boundary of an archived prefix
+    EVENT_LOG_ANCHORED = "EVENT_LOG_ANCHORED"
+
     # perception and planning (security extension)
     PERCEPTION_OBSERVED = "PERCEPTION_OBSERVED"
     BRANCH_RESOLVED = "BRANCH_RESOLVED"

@@ -545,6 +545,24 @@ def cmd_resume(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
     if steps:
         text += "\n\nNext steps:\n" + "\n".join(f"  {i}. {t}" for i, t in enumerate(steps, 1))
 
+    # Version pinning drift (issue #241): informational only.
+    drift_lines: list[str] = []
+    if args.pinning:
+        from continuum.pinning import latest_pinning, normalize_pinning
+        from continuum.pinning import pinning_drift as compute_drift
+
+        try:
+            current = normalize_pinning(json.loads(args.pinning))
+            recorded = latest_pinning(storage.read_events(run_id))
+            drift_lines = compute_drift(recorded, current)
+            if drift_lines:
+                text += "\n\nPinning drift (informational):\n" + "\n".join(
+                    f"  - {line}" for line in drift_lines
+                )
+        except ValueError as exc:
+            print(f"error: --pinning: {exc}", file=err)
+            return ExitCode.ERROR
+
     payload = {
         "run_id": decision.run_id,
         "goal": storage.get_run(run_id).goal,
@@ -552,6 +570,7 @@ def cmd_resume(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
         "safe": decision.safe,
         "next_allowed_action": decision.next_allowed_action,
         "human_steps": steps,
+        "pinning_drift": drift_lines,
         "contract": decision.contract.model_dump(mode="json"),
         "repairs": [s.action_name for s in decision.plan.steps],
         "progress": {
@@ -630,6 +649,84 @@ def cmd_confirm(args: argparse.Namespace, storage: Storage, out: Any, err: Any) 
     )
     print("\nRun `continuum resume` to continue.", file=err)
     return exit_code_for(decision.mode)
+
+
+def cmd_budget(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Report retry-budget usage per action type (issue #240). Read-only."""
+    from continuum.budgets import (
+        DEFAULT_BUDGETS_PATH,
+        attempts_for_type,
+        evaluate_budget,
+        load_budgets,
+    )
+
+    storage.get_run(args.run_id)
+    try:
+        raw = load_budgets(Path(args.config) if args.config else Path(DEFAULT_BUDGETS_PATH))
+    except Exception as exc:
+        print(f"error: budget registry invalid: {exc}", file=err)
+        return ExitCode.ERROR
+
+    events = storage.read_events(args.run_id)
+    types_seen = sorted(
+        {
+            e.payload.get("action", {}).get("action_type")
+            for e in events
+            if e.type is EventType.ACTION_RECORDED and isinstance(e.payload.get("action"), dict)
+        }
+        | set((raw.get("action_types") or {}).keys())
+    )
+    rows: list[dict[str, Any]] = []
+    for action_type in types_seen:
+        used = attempts_for_type(events, action_type)
+        allowed, _, maximum = evaluate_budget(raw, action_type, 0)
+        remaining = max(0, maximum - used)
+        rows.append(
+            {
+                "action_type": action_type,
+                "attempts": used,
+                "max_attempts": maximum,
+                "remaining": remaining,
+                "exhausted": remaining == 0,
+            }
+        )
+    payload = {"run_id": args.run_id, "budgets": rows}
+    lines = [f"{'ACTION TYPE':<28} {'ATTEMPTS':>8} {'MAX':>4} {'REMAINING':>10}"]
+    for r in rows:
+        lines.append(
+            f"{r['action_type']:<28} {r['attempts']:>8} {r['max_attempts']:>4} {r['remaining']:>10}"
+        )
+    _emit(
+        payload,
+        "\n".join(lines) or "No budgets configured.",
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
+    )
+    return ExitCode.OK
+
+
+def cmd_compact(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Archive the pre-anchor prefix of a run's event log (issue #239). Mutates."""
+    storage.get_run(args.run_id)
+    if not args.force:
+        print(
+            "compact archives the pre-anchor event prefix and appends an "
+            "EVENT_LOG_ANCHORED marker to the live chain. Re-run with --force "
+            "to apply.",
+            file=err,
+        )
+        return ExitCode.ERROR
+    report = storage.compact_run(args.run_id)
+    payload = {"run_id": args.run_id, **report}
+    _emit(
+        payload,
+        f"Archived {report['archived']} event(s); the live log now starts at the anchor.",
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
+    )
+    return ExitCode.OK
 
 
 def cmd_complete(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
@@ -1285,6 +1382,43 @@ def cmd_replay(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
     storage.get_run(args.run_id)
     events = storage.read_events(args.run_id, upto=args.upto)
 
+    anchored = (
+        any(e.type is EventType.EVENT_LOG_ANCHORED for e in events)
+        and storage.latest_version(args.run_id) is not None
+    )
+    if anchored and args.upto is None:
+        # Compacted run (#239): fold the restored checkpoint state forward
+        # over the post-anchor tail; the archived prefix lives in
+        # events_archive and is audited by verify's deep mode.
+        from continuum.state.semantic import project_incremental
+
+        stored = storage.latest_version(args.run_id)
+        base = CheckpointManager(storage).restore(args.run_id, replay=False).state
+        # The anchor event sits exactly at the base boundary; folding it would
+        # trip the monotonic-sequence check.
+        tail = [e for e in events if base is None or e.sequence > base.source_sequence]
+        state, _report = project_incremental(args.run_id, tail, base=base)
+        payload = {
+            "run_id": args.run_id,
+            "events_replayed": len(events),
+            "completed": state.progress.completed,
+            "source_sequence": state.source_sequence,
+            "verified": True,
+            "verification": (
+                f"anchored run: checkpoint v{stored.version if stored else 0} "
+                f"+ {len(events)} tail event(s); prefix audited in events_archive"
+            ),
+        }
+        _emit(
+            payload,
+            f"Anchored replay: folded v{stored.version if stored else 0} + "
+            f"{len(events)} tail event(s)",
+            as_json=args.json,
+            stream=out,
+            palette=getattr(args, "_palette", None),
+        )
+        return ExitCode.OK
+
     if args.upto is not None and not any(e.type == EventType.RUN_STARTED for e in events):
         raise ValueError(
             f"--upto {args.upto} excludes the RUN_STARTED event for run "
@@ -1579,6 +1713,11 @@ def build_parser() -> argparse.ArgumentParser:
     resume.add_argument("--model", help="model that will run the resumed agent")
     resume.add_argument("--tolerate-unknown", action="store_true")
     resume.add_argument("--repair", action="store_true", help="record the repair plan")
+    resume.add_argument(
+        "--pinning",
+        default=None,
+        help="JSON object of environment pins to diff against the run (issue #241)",
+    )
 
     confirm = with_env(
         with_run(add("confirm", cmd_confirm, "Confirm self-reported state so the run may resume."))
@@ -1588,6 +1727,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     complete = with_run(add("complete", cmd_complete, "Close a run as done. Mutates storage."))
     complete.add_argument("--summary", default=None, help="one-line closing note")
+
+    budget_cmd = with_run(add("budget", cmd_budget, "Retry-budget usage per action type."))
+    budget_cmd.add_argument(
+        "--config",
+        default=None,
+        help="budget registry path (default: .continuum/budgets.json)",
+    )
+
+    compact = with_run(
+        add("compact", cmd_compact, "Archive the pre-anchor log prefix. Mutates storage.")
+    )
+    compact.add_argument("--force", action="store_true", help="apply without confirmation")
 
     checkpoint = with_env(with_run(add("checkpoint", cmd_checkpoint, "Force a checkpoint.")))
     checkpoint.add_argument("--trigger", default="manual")
@@ -1749,9 +1900,10 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument(
         "--transport",
         default="stdio",
-        choices=("stdio",),
-        help="wire transport (default: stdio)",
+        choices=("stdio", "http"),
+        help="wire transport (default: stdio; http serves POST /<method> JSON)",
     )
+    serve.add_argument("--port", type=int, default=8765, help="port for --transport http")
 
     def cmd_dashboard(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
         from continuum.dashboard import serve_dashboard as _serve

@@ -106,6 +106,15 @@ class Storage(ABC):
     #: lookups when False, so the flag must reflect real capability.
     supports_action_index: ClassVar[bool] = False
 
+    def compact_run(self, run_id: str, *, through_sequence: int | None = None) -> dict[str, int]:
+        """Archive the pre-anchor prefix of a run's log (issue #239).
+
+        Only meaningful on engines that maintain the archive table; callers
+        gate on ``supports_action_index``-style capability flags or catch the
+        NotImplementedError.
+        """
+        raise NotImplementedError
+
     def foreign_action(self, key: str, *, exclude_run: str) -> Action | None:
         """Newest action recorded under ``key`` outside ``exclude_run``.
 
@@ -222,7 +231,7 @@ class Storage(ABC):
     # -- state versions --------------------------------------------------- #
 
     @abstractmethod
-    def put_version(self, state: SemanticState, *, reason: str = "") -> int:
+    def put_version(self, state: SemanticState, *, reason: str = "", force: bool = False) -> int:
         """Persist a state version. Returns the assigned version number."""
 
     @abstractmethod
