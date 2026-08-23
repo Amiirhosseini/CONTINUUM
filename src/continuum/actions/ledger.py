@@ -404,20 +404,26 @@ class ActionLedger:
     # -- writing ---------------------------------------------------------- #
 
     def _record(
-        self, key: str, action: Action, event_type: EventType = EventType.ACTION_RECORDED
+        self,
+        key: str,
+        action: Action,
+        event_type: EventType = EventType.ACTION_RECORDED,
+        pinning: dict[str, str] | None = None,
     ) -> Action:
-        self.storage.append_event(
-            self.run_id,
-            event_type,
-            {
-                "key": key,
-                "action_id": action.action_id,
-                "action_type": action.action_type,
-                "status": action.status.value,
-                "external_id": action.external_id,
-                "action": action.model_dump(mode="json"),
-            },
-        )
+        payload: dict[str, Any] = {
+            "key": key,
+            "action_id": action.action_id,
+            "action_type": action.action_type,
+            "status": action.status.value,
+            "external_id": action.external_id,
+            "action": action.model_dump(mode="json"),
+        }
+        if pinning:
+            # Issue #241: caller-asserted environment hashes ride on the
+            # STARTED record so drift is diffable per attempt. Settlements
+            # omit it; the fold keeps the newest non-empty anyway.
+            payload["pinning"] = dict(pinning)
+        self.storage.append_event(self.run_id, event_type, payload)
         return action
 
     def claim(
@@ -430,8 +436,14 @@ class ActionLedger:
         key: str | None = None,
         on_unknown: Callable[[Action], ActionOutcome | None] | None = None,
         dep_scope: str | None = None,
+        pinning: dict[str, str] | None = None,
     ) -> ActionOutcome:
         """Register intent to perform an action, or report it already happened.
+
+        ``pinning`` (issue #241) is an optional validated dict of environment
+        hashes/ids recorded verbatim in the ACTION_RECORDED payload so replay
+        correctness can diff the agent's moving parts across a run.
+
 
         Returns ``fresh=True`` when the caller should go ahead. Returns
         ``fresh=False`` with the stored result when the action already
@@ -502,7 +514,7 @@ class ActionLedger:
                 status=ActionStatus.STARTED,
                 started_at=utcnow(),
             )
-            self._record(key, action)
+            self._record(key, action, pinning=pinning)
             return ActionOutcome(key=key, action=action, fresh=True)
 
         if existing.status is ActionStatus.COMPLETED:

@@ -8,6 +8,60 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Citation audit for external-report references (#261).** An external
+  Gemini-generated survey pitching a "CONTINUUM paradigm" cited works absent
+  from our verified related-work list. Each candidate ID was resolved against
+  the arXiv API on 2026-08-24 and the verdicts recorded in
+  `references/citation-audit-2026-08-24.md`: Belayer (arXiv:2608.14635) is real
+  but RL-training-scoped, so out of scope here; the transactional sandboxing
+  paper (arXiv:2512.12806) is real with its 14.5% overhead figure confirmed;
+  ReliabilityBench (arXiv:2601.06112) is real and accurately described, and is
+  the model for the #258 stress surface; DAPH exists only as a self-published
+  Medium post and its "(ICLR Workshop)" attribution has no supporting record,
+  so it stays uncited. A full-text pass additionally proved the report's
+  "10.6% task completion" figure for the sandboxing paper appears nowhere in
+  that paper, and quoted ACRFence's own conclusion ("does not yet include an
+  implementation of ACRFence itself") against the report's inverted claim of
+  a 10/10 defence success rate. The report's unsourced statistics are documented as
+  corrections. Two verified-relevant papers joined the README related-work
+  list with abstract-backed descriptions.
+
+- **Human-in-the-loop surface on the dashboard (#242).** request_human
+  walls finally have a door with an audit row: the run page renders buttons
+  for confirm (REVIEW_CONFIRMED, Origin.HUMAN), reconcile
+  occurred=true/false through ActionLedger.reconcile, and complete (run row
+  flipped to COMPLETED) whenever a run is blocked or has uncertain actions.
+  Mutating POST endpoints are fail-closed - refused until
+  CONTINUUM_DASHBOARD_TOKEN is set - and every action maps 1:1 onto the
+  human CLI verb, landing identical event types and provenance. Reads stay
+  open; unknown routes 404.
+
+- **Version pinning on claims and summaries (#241).** Replay correctness
+  needs environment identity: which prompt version, tool schema and model
+  produced a decision (prompt-migration hazard, arXiv:2507.05573; Zylos
+  survey lists pinning as part of replay correctness). New closed-set
+  `pinning` dict - prompt_sha256, tool_schema_sha256, model_id,
+  policy_version - accepted by `continuum intercept_action` and
+  `continuum_record_summary`, stored verbatim with EXTERNAL_AGENT provenance
+  on the ACTION_RECORDED STARTED record / summary payload. Values are
+  validated (known keys only, 256-char cap: store the hash, not the
+  artefact). `continuum resume --pinning '<json>'` diffs caller-supplied
+  pins against the newest recorded set and surfaces drift as informational
+  lines in text and JSON (`pinning_drift`) - degrade, never block. Pure
+  helpers live in `continuum.pinning`.
+
+- **Run-level retry budgets (#240).** Agent loops invent retries: a failing
+  upstream gets hammered because the model re-plans after every failure, and
+  each attempt opens a fresh ledger slot. New `.continuum/budgets.json`
+  registry caps attempts per action type (with a default fallback); every
+  ACTION_RECORDED claim slot counts as one attempt, so retries under the
+  same key still consume budget. `continuum intercept_action` refuses claims
+  beyond the budget with an instructive error, and new read-only command
+  `continuum budget <run>` reports attempts/max/remaining per type.
+  `backoff_delay` ships as a pure helper (exponential + cap; jitter is the
+  caller's job) because CONTINUUM never performs retries itself - it counts
+  and gates them.
+
 - **Event-log compaction (#239).** `continuum compact <run>` bounds live-log
   growth for month-long runs: it appends an EVENT_LOG_ANCHORED marker, moves
   the pre-anchor prefix verbatim into a new `events_archive` table (schema
@@ -560,6 +614,32 @@ All notable changes to this project are documented here. The format follows
   that needs deeper harness modelling of side effects and model or decision state.
 
 ### Changed
+
+- **MCP docs: the `CONNECTION_CLOSED` failure mode, and the eleventh tool.**
+  `docs/api/mcp.md` promised that with `.mcp.json` present "Claude Code registers
+  the server automatically". That holds only when the environment CONTINUUM was
+  installed into is on the `PATH` the client inherited. When it is not, the client
+  cannot spawn `continuum-mcp` at all and reports the failed spawn as
+  `CONNECTION_CLOSED` - a message that reads like a server that crashed but
+  describes an executable that was never found. No CONTINUUM code runs in that
+  state, so the server cannot detect, report, or recover from it, and the whole
+  diagnosis has to happen client-side. The registration section now states what a
+  bare command name actually requires, and a new Troubleshooting section carries
+  the diagnosis (`which` / `where.exe`, then `--help` through the full path) and
+  two remedies: launch the client from the activated environment, or pin the
+  absolute path with `claude mcp add --scope local`. The second also documents the
+  conflicting-scopes diagnostic it produces and warns against
+  `claude mcp remove continuum-mcp -s project`, which edits the committed
+  `.mcp.json` and unregisters the server for every other clone. Registration is no
+  longer described as instrumenting anything on its own: state is recorded when
+  the agent calls the tools, or when the `PostToolUse` hook records a write
+  outside the model's control.
+- **MCP tool count corrected to eleven.** `continuum_record_summary` (#235)
+  shipped with a CHANGELOG entry but never reached the reference docs. It is now
+  in the `docs/api/mcp.md` tool table, and the count is corrected from ten to
+  eleven - three read-only, eight mutating - in `README.md`, `docs/api/README.md`,
+  `docs/research/token_floor.md`, `references/mcp.md`,
+  `references/auto-resume-integration.md`, and `references/testing.md`.
 
 
 - **README.** `Contents` laid out as a horizontal wrapping nav; Security
