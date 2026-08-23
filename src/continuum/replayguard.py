@@ -23,7 +23,7 @@ into a graph-node decorator so interrupt-resume replays become cache hits.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -52,7 +52,7 @@ def evaluate(
     action_type: str,
     rendered_key: str,
     run_id: str,
-    actions_by_key: dict[str, Any],
+    actions_by_key: Mapping[str, Any],
 ) -> GuardDecision:
     """Classify one intended side effect against the folded ledger."""
     from continuum.actions.idempotency import idempotency_key
@@ -125,7 +125,7 @@ def protected_call(
     # reuse the live slot when a previous attempt was interrupted mid-call.
     if decision.kind is GuardKind.DENY_UNCLAIMED:
         outcome = ledger.claim(action_type, {}, key=key)
-        key_to_use = outcome.key
+        key_to_use: str = outcome.key
     else:
         assert decision.key is not None, decision
         key_to_use = decision.key
@@ -141,6 +141,7 @@ def protected_call(
         return GuardKind.ALLOW, result
 
     if decision.kind is GuardKind.SKIP_DUPLICATE:
+        assert decision.key is not None
         cached_action = actions[decision.key]
         cached = cached_action.result
         value = cached.get("return", cached) if isinstance(cached, dict) else cached
