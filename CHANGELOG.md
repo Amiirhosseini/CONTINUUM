@@ -8,6 +8,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Run-level retry budgets (#240).** Agent loops invent retries: a failing
+  upstream gets hammered because the model re-plans after every failure, and
+  each attempt opens a fresh ledger slot. New `.continuum/budgets.json`
+  registry caps attempts per action type (with a default fallback); every
+  ACTION_RECORDED claim slot counts as one attempt, so retries under the
+  same key still consume budget. `continuum intercept_action` refuses claims
+  beyond the budget with an instructive error, and new read-only command
+  `continuum budget <run>` reports attempts/max/remaining per type.
+  `backoff_delay` ships as a pure helper (exponential + cap; jitter is the
+  caller's job) because CONTINUUM never performs retries itself - it counts
+  and gates them.
+
 - **Event-log compaction (#239).** `continuum compact <run>` bounds live-log
   growth for month-long runs: it appends an EVENT_LOG_ANCHORED marker, moves
   the pre-anchor prefix verbatim into a new `events_archive` table (schema
