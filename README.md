@@ -97,7 +97,7 @@ This single command is enough to contribute. It pulls `mcp`, `langgraph`, `opena
 ```bash
 continuum --help
 continuum-mcp --help             # MCP server entrypoint (via dev extra's mcp)
-pytest -q                        # 1252 passed (skipped varies by env, no extra services needed)
+pytest -q                        # ~1,300 passed (exact count and skips vary by environment)
 ```
 
 **Minimal install (just the library + CLI, zero adapter overhead):**
@@ -154,7 +154,7 @@ continuum-mcp --help             # needs [mcp] or [dev]
 # One-command demo (process kill, hash-chain verify)
 ./try-it.sh demo                 # same as: python examples/crash_recovery_agent.py
 
-# Full test suite (1252 passed on Python 3.13)
+# Full test suite (~1,300 tests; exact skips vary by environment)
 pytest -q                        # or: ./try-it.sh test
 pytest --no-cov --tb=short -q    # faster, no coverage
 pytest tests/test_events.py -v   # single file
@@ -232,11 +232,11 @@ The detailed explanation, the projection model, and the recovery context are in 
 | Environment revalidation | Every checkpoint component verified against the current world before resume |
 | Provenance-aware state | Agent-reported progress is marked `REQUIRES_REVIEW`, never self-certifying |
 | Recovery engine | Seven recovery modes with a deterministic, sealed next-action contract |
-| Deny-by-default MCP server | Nine tools, read-only/mutating split, caller allowlist |
+| Deny-by-default MCP server | Eleven tools, read-only/mutating split, caller allowlist |
 | Framework adapters | Generic Python, OpenAI Agents SDK, LangGraph, and LangChain integrations |
 | Secure planning loop | Two-signal observation verification escalates high-risk branches to REQUIRES_REVIEW |
 | Periodic revalidation | Environment re-checked on a schedule, catching mid-run drift within one cycle |
-| Tamper-evident log | Hash-chained event log (32 event types) with integrity verification |
+| Tamper-evident log | Hash-chained event log (34 event types) with integrity verification |
 | Enforcing gate | Unclaimed side-effect calls are refused before they fire; deny messages teach the claim protocol |
 | Observation hooks | Every file a coding CLI writes becomes digest-verified evidence, outside model control |
 | Session briefing | Fresh sessions learn run state deterministically at start - no prompt file |
@@ -289,7 +289,7 @@ CONTINUUM is verified not just with mock unit tests, but against real LLM agents
 
 ### Automated Test Suite and Benchmarks
 
-- **1224 tests passing, 13 skipped** on Python 3.11, 3.12, and 3.13 (including unit, `hypothesis` property-based, concurrency, and adversarial tests).
+- **Roughly 1,300 tests passing** on Python 3.11, 3.12, and 3.13 (including unit, `hypothesis` property-based, concurrency, and adversarial tests; the exact count and skips vary by environment and optional services).
 - **CONTINUUM-Bench**: `continuum benchmark` executes in-process recovery benchmarks across five scenarios (`process_crash`, `dataset_change`, `unknown_side_effect`, `partial_completion`, `early_crash`), proving 0 duplicate work, 0 duplicate side effects, and automatic detection of stale environment dependencies.
 
 ### Adversarial Audit of the MCP Surface
@@ -421,27 +421,27 @@ Key guarantees: append-only events, atomic sequence allocation, durability on `a
 
 ### Project structure
 
-CONTINUUM is one library (`src/continuum`, about 80 Python files) plus a large test suite (68 files, 1038 tests). The modules are layered and all append to and replay one hash-chained event log:
+CONTINUUM is one library (`src/continuum`, 100 Python files) plus a large test suite (93 files, roughly 1,300 tests). The modules are layered and all append to and replay one hash-chained event log:
 
 | Module | LOC | Role |
 |:--|--:|:--|
-| `events.py` | 391 | Append-only, hash-chained event log and `verify()` |
-| `state/` | 1,637 | Projection (`semantic.py`), validation (`validator.py`), extraction |
-| `storage/` | 1,690 | `SQLiteStorage` (v2 schema), `postgres.py`, `migrations.py` |
-| `actions/` | 1,183 | Idempotent action ledger, reconciliation, claim/complete |
-| `checkpoint/` | 924 | Policy-driven checkpoints |
-| `recovery/` | 699 | Engine (max-severity wins), planner, sealed contract |
-| `adapters/` | 1,596 | Generic, LangChain, LangGraph, OpenAI Agents SDK |
-| `mcp/` | 1,334 | Ten stdio tools plus `authz.py` (token auth, allowlist) |
-| `serve/` | 739 | Language-agnostic newline-JSON sidecar mirroring MCP |
-| `cli/` | 1,218 | `argparse` commands, exit codes as verdict |
-| `benchmark/` | 440 | CONTINUUM-Bench scenario harness |
+| `events.py` | 397 | Append-only, hash-chained event log and `verify()` |
+| `state/` | 1,662 | Projection (`semantic.py`), validation (`validator.py`), extraction |
+| `storage/` | 2,485 | `SQLiteStorage` (v2 schema), `postgres.py`, `migrations.py` |
+| `actions/` | 1,265 | Idempotent action ledger, reconciliation, claim/complete |
+| `checkpoint/` | 993 | Policy-driven checkpoints |
+| `recovery/` | 1,838 | Engine (max-severity wins), planner, sealed contract, retry budgets |
+| `adapters/` | 2,798 | Generic, LangChain, LangGraph, OpenAI Agents SDK, thin SDK-free hooks |
+| `mcp/` | 1,621 | Eleven stdio tools plus `authz.py` (token auth, allowlist) |
+| `serve/` | 841 | Language-agnostic newline-JSON sidecar mirroring MCP |
+| `cli/` | 2,329 | `argparse` commands (dashboard, hooks, gateway), exit codes as verdict |
+| `benchmark/` | 1,130 | CONTINUUM-Bench scenario harness |
 | `environment/` | 514 | Snapshots and diffs |
 | `security/` | 608 | Provenance, trust gate, revalidation (in progress) |
 | `interchange/` | 312 | B4 portable recovery-state JSON envelope |
 | `concurrency/` | 255 | B2.2 lease and distributed-lock coordinator |
 | `plugins/` | 174 | Registry and capability seams |
-| `models.py`, `observability.py`, `__init__.py` | ~1,100 | Shared models, metrics, public surface |
+| `models.py`, `observability.py`, `__init__.py` | ~1,212 | Shared models, metrics, public surface |
 
 Three entry points, all from `main`: the `continuum` CLI, the `continuum-mcp` server, and the `continuum serve` sidecar. `storage/`, `state/`, `adapters/`, `mcp/`, `cli/`, `actions/`, and `checkpoint/` hold roughly 72% of the core and are the mature, heavily-tested layers. `security/`, `storage/postgres.py`, `migrations.py`, and `concurrency/` are committed but newer: the Postgres backend is unverified against a live server in this environment (its tests skip without `CONTINUUM_TEST_POSTGRES_DSN` / `psycopg`). `interchange/` is done and tested. The full data model, projection, and recovery reference is in [references/architecture.md](references/architecture.md).
 
@@ -478,7 +478,7 @@ continuum gateway --port 8765                     # routes: .continuum/gateway.j
 # Production stacks emitting OpenTelemetry: spans become evidence.
 provider.add_span_processor(continuum.otel.make_span_processor(storage))
 
-# Anything MCP-capable: the original ten-tool server.
+# Anything MCP-capable: the eleven-tool server.
 continuum-mcp                                     # via .mcp.json
 ```
 
@@ -552,10 +552,10 @@ All arXiv links above were resolved against the arXiv API (original list on 2026
 
 ## Status and limitations
 
-- **Tested**: 1063 tests passing, 10 skipped (a few skip without optional services such as Postgres; see [STATUS.md](STATUS.md)). The MCP surface has also been audited adversarially over the live protocol; see [test.md](test.md).
+- **Tested**: roughly 1,300 tests passing across Python 3.11, 3.12, and 3.13; the exact count and skips vary by platform and optional services such as Postgres (see [STATUS.md](STATUS.md)). The MCP surface has also been audited adversarially over the live protocol; see [test.md](test.md).
 - **Not on PyPI.** Install from a clone (see Quick Start).
-- **MCP caller authentication is optional.** When `CONTINUUM_MCP_TOKEN` is set, the server refuses every mutating tool unless the caller presents that shared secret in the `initialize` handshake's `_meta.authToken`. Without it, authorization is by declared identity only (the historical default, preserved for local single-user use). Tracked as [#1](https://github.com/Cyrax321/CONTINUUM/issues/1).
-- **Confirming self-reported state over MCP needs its own secret.** `continuum_confirm` refuses every caller until the operator sets `CONTINUUM_MCP_CONFIRM_TOKEN`, because an agent allowed to record progress must not also be able to confirm it (issue [#201](https://github.com/Cyrax321/CONTINUUM/issues/201)). The default path stays human-driven: run `continuum confirm <run_id>` on the host.
+- **MCP caller authentication is opt-in per deployment.** When `CONTINUUM_MCP_TOKEN` is set, the server refuses every mutating tool unless the caller presents that shared secret in the `initialize` handshake's `_meta.authToken`. Without it, authorization is by declared identity only (the historical default, preserved for local single-user use).
+- **Confirming self-reported state over MCP requires a separate secret.** `continuum_confirm` refuses every caller until the operator sets `CONTINUUM_MCP_CONFIRM_TOKEN`, because an agent allowed to record progress must not also be able to confirm it. The default path stays human-driven: run `continuum confirm <run_id>` on the host.
 - **Unbuilt components**: Cloud API (Phase 13).
 - **Framework adapters are experimental.** The OpenAI Agents SDK and LangGraph adapters are newer than the generic facade and do not yet carry the same crash-and-resume verification coverage. Prefer `GenericAgentAdapter` for production recovery until their adapter-specific tests cover the full recovery matrix.
 - **Agent/MCP runs need an explicit confirm before auto-resume.** Because externally-reported state is `REQUIRES_REVIEW`, `continuum resume` returns `request_human` until a human runs `continuum confirm <run_id>` (or the MCP `continuum_confirm` tool). This is by design, not a bug; see [Framework Integration](#framework-integration).
@@ -576,6 +576,7 @@ Open an issue before submitting large PRs. See [CONTRIBUTING.md](CONTRIBUTING.md
   <a href="https://github.com/lesbass"><img src="docs/contributors/lesbass.png" width="60" alt="Stefano Maffeis" /></a>
   <a href="https://github.com/as950118"><img src="docs/contributors/as950118.png" width="60" alt="heonjinjeong" /></a>
   <a href="https://github.com/abyyxhek"><img src="docs/contributors/abyyxhek.png" width="60" alt="Abishek" /></a>
+  <a href="https://github.com/Parthipashok04"><img src="docs/contributors/parthipashok04.png" width="60" alt="Parthipashok04" /></a>
 
 
 ## License
