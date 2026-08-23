@@ -1308,9 +1308,10 @@ def cmd_replay(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
     storage.get_run(args.run_id)
     events = storage.read_events(args.run_id, upto=args.upto)
 
-    anchored = any(
-        e.type is EventType.EVENT_LOG_ANCHORED for e in events
-    ) and storage.latest_version(args.run_id) is not None
+    anchored = (
+        any(e.type is EventType.EVENT_LOG_ANCHORED for e in events)
+        and storage.latest_version(args.run_id) is not None
+    )
     if anchored and args.upto is None:
         # Compacted run (#239): fold the restored checkpoint state forward
         # over the post-anchor tail; the archived prefix lives in
@@ -1321,10 +1322,7 @@ def cmd_replay(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
         base = CheckpointManager(storage).restore(args.run_id, replay=False).state
         # The anchor event sits exactly at the base boundary; folding it would
         # trip the monotonic-sequence check.
-        tail = [
-            e for e in events
-            if base is None or e.sequence > base.source_sequence
-        ]
+        tail = [e for e in events if base is None or e.sequence > base.source_sequence]
         state, _report = project_incremental(args.run_id, tail, base=base)
         payload = {
             "run_id": args.run_id,

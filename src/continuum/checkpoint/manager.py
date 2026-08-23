@@ -172,8 +172,7 @@ class CheckpointManager:
         if current.run_id != run_id:
             raise CheckpointError(f"state belongs to run {current.run_id!r}, not {run_id!r}")
 
-        version = self.storage.put_version(current, reason=reason or trigger,
-                                           force=force_version)
+        version = self.storage.put_version(current, reason=reason or trigger, force=force_version)
 
         checkpoint = StateCheckpoint(
             run_id=run_id,
