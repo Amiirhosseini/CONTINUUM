@@ -38,7 +38,7 @@ __all__ = [
 ]
 
 #: The schema version this build produces and understands.
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 #: The full, current schema applied to a brand-new database.
 BASELINE_SCHEMA = """
@@ -102,6 +102,21 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
     name      TEXT NOT NULL,
     applied_at TEXT NOT NULL,
     PRIMARY KEY (version, name)
+);
+
+CREATE TABLE IF NOT EXISTS events_archive (
+    run_id       TEXT NOT NULL,
+    sequence     INTEGER NOT NULL,
+    event_id     TEXT NOT NULL,
+    type         TEXT NOT NULL,
+    timestamp    TEXT NOT NULL,
+    payload      TEXT NOT NULL,
+    causer_event_id TEXT,
+    source       TEXT NOT NULL,
+    prev_hash    TEXT,
+    hash         TEXT NOT NULL,
+    archived_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (run_id, sequence)
 );
 
 CREATE TABLE IF NOT EXISTS lg_checkpoints (
@@ -259,11 +274,38 @@ def _up_v4() -> str:
 """
 
 
-#: Forward migrations, keyed by the version they *produce*.
+def _up_v5() -> str:
+    """Add the event-archive table for compaction (issue #239).
+
+    `continuum compact` moves the pre-anchor prefix of a run's event log into
+    ``events_archive`` verbatim (sequence numbers preserved) and appends an
+    EVENT_LOG_ANCHORED marker to the live chain. The live log stays
+    append-only; the archive is the historical record.
+    """
+    return """
+    CREATE TABLE IF NOT EXISTS events_archive (
+        run_id       TEXT NOT NULL,
+        sequence     INTEGER NOT NULL,
+        event_id     TEXT NOT NULL,
+        type         TEXT NOT NULL,
+        timestamp    TEXT NOT NULL,
+        payload      TEXT NOT NULL,
+        causer_event_id TEXT,
+        source       TEXT NOT NULL,
+        prev_hash    TEXT,
+        hash         TEXT NOT NULL,
+        archived_at  TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (run_id, sequence)
+    );
+"""
+
+
+#: Forward migrations, keyed by the version they *produce*.#: Forward migrations, keyed by the version they *produce*.
 MIGRATIONS: dict[int, Migration] = {
     2: Migration(version=2, name="add_versions_table_and_event_provenance", up=_up_v2()),
     3: Migration(version=3, name="add_action_index_projection", up=_up_v3()),
     4: Migration(version=4, name="add_langgraph_checkpoint_tables", up=_up_v4()),
+    5: Migration(version=5, name="add_events_archive", up=_up_v5()),
 }
 
 
