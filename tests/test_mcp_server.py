@@ -123,6 +123,7 @@ async def test_every_tool_is_registered(server_ctx: tuple[Any, Any]) -> None:
         "continuum_reconcile_action",
         "continuum_list_actions",
         "continuum_confirm",
+        "continuum_record_summary",
     }
 
 

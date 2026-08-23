@@ -66,6 +66,10 @@ MUTATING_CALLS: dict[str, dict[str, Any]] = {
         "occurred": True,
     },
     "continuum_confirm": {"run_id": "run_1"},
+    "continuum_record_summary": {
+        "run_id": "run_1",
+        "plan_stack": ["step"],
+    },
 }
 MUTATING = list(MUTATING_CALLS)
 READ_ONLY = ["continuum_validate", "continuum_resume", "continuum_list_actions"]

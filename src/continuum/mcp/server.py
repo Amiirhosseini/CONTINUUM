@@ -550,6 +550,61 @@ def build_server(
             }
         )
 
+    # -- reasoning summaries ---------------------------------------------- #
+
+    @server.tool(
+        name="continuum_record_summary",
+        description=(
+            "Record a compact summary of WHERE your reasoning is, so a fresh "
+            "session after any interruption inherits your plan instead of "
+            "guessing. Call at natural checkpoints and before ending a turn. "
+            "Schema: {plan_stack: [current step first], decisions: [{what, why}], "
+            "open_questions: [...], working_set: [files/ids in play]}. Hard cap "
+            "4096 characters serialized - summarise, never dump transcripts."
+        ),
+        annotations=mutating,
+    )
+    @guard
+    def continuum_record_summary(
+        run_id: str,
+        plan_stack: list[str] | None = None,
+        decisions: list[dict[str, str]] | None = None,
+        open_questions: list[str] | None = None,
+        working_set: list[str] | None = None,
+        note: str = "",
+    ) -> str:
+        """Store one bounded reasoning summary (issue #235)."""
+        summary = {
+            "plan_stack": plan_stack or [],
+            "decisions": decisions or [],
+            "open_questions": open_questions or [],
+            "working_set": working_set or [],
+            "note": note,
+        }
+        serialized = json.dumps(summary, ensure_ascii=False)
+        if len(serialized) > 4096:
+            from mcp.server.mcpserver.exceptions import ToolError
+
+            raise ToolError(
+                f"reasoning summary is {len(serialized)} chars; cap is 4096. "
+                "Summarise harder: fewer, shorter entries."
+            )
+        ctx.ensure_run(run_id)
+        event = ctx.storage.append_event(
+            run_id,
+            EventType.REASONING_SUMMARY,
+            {"summary": summary},
+            source=Origin.EXTERNAL_AGENT,
+        )
+        return _json(
+            {
+                "run_id": run_id,
+                "sequence": event.sequence,
+                "recorded": True,
+                "bytes": len(serialized),
+            }
+        )
+
     # -- validation ------------------------------------------------------- #
 
     @server.tool(
