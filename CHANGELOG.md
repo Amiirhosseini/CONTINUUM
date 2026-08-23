@@ -8,6 +8,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **OpenTelemetry bridge (seam 5 of the universality roadmap, #213).**
+  Production stacks already emit OTel; now those spans become CONTINUUM
+  evidence with zero framework cooperation. `make_span_processor(storage)`
+  returns a standard SpanProcessor to register on any TracerProvider: ended
+  spans carrying a recognised tool-name attribute (`gen_ai.tool.name` per the
+  GenAI semantic conventions plus common vendor spellings) are mirrored into
+  the active run's hash-chained log as `TOOL_COMPLETED`/`TOOL_FAILED`,
+  EXTERNAL_AGENT provenance, identical in shape to hook observations. The
+  pure core (`observation_from_span`, `record_span`) is duck-typed and
+  dependency-free; the SDK import is lazy with an actionable install hint,
+  and the bridge ships behind the new `otel` extra. This covers frameworks
+  CONTINUUM cannot wrap or hook - Rust/Go/TS agents, internal platforms -
+  wherever they emit traces.
+
 - **Session briefing: state without CLAUDE.md (#213 ergonomics follow-up).**
   The last two voluntary behaviours depending on per-repo prose were
   resume-on-start and knowing the active run at all. New read-only command
