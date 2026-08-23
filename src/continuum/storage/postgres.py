@@ -629,19 +629,32 @@ class PostgresStorage(Storage):
         return 0
 
     def _canonical_index_rows(self) -> dict[str, tuple[tuple[str, str, str, str, str], int]]:
-        """Fold every run's action events; global last-write-per-key wins."""
+        """Fold every run's action events; global last-write-per-key wins.
+
+        Compacted history (#239) folds too, archive first and live second:
+        everything in ``events_archive`` predates every live row of its run,
+        so folding the two tables in one shared stream would let an archived
+        action claimed long ago outrank a newer live write of the same key
+        (they number their rows independently). Archived rows receive
+        negative order positions below every possible live value, oldest
+        first, so last-write-per-key stays true after compaction.
+        """
         with self._read():
+            archived = self._connection.execute(
+                "SELECT type, payload FROM events_archive ORDER BY ctid"
+            ).fetchall()
             rows = self._connection.execute(
-                "SELECT ctid AS rid, type, payload FROM events ORDER BY ctid"
+                "SELECT type, payload FROM events ORDER BY ctid"
             ).fetchall()
         canonical: dict[str, tuple[tuple[str, str, str, str, str], int]] = {}
-        for i, row in enumerate(rows):
+        offset = len(archived)
+        for i, row in enumerate([*archived, *rows]):
             payload = (
                 row["payload"] if isinstance(row["payload"], dict) else json.loads(row["payload"])
             )
             entry = index_entry_from_payload(EventType(row["type"]), payload)
             if entry is not None:
-                canonical[entry[0]] = (entry, i)
+                canonical[entry[0]] = (entry, i if i >= offset else i - offset)
         return canonical
 
     @staticmethod
@@ -718,7 +731,16 @@ class PostgresStorage(Storage):
             rows = self._connection.execute(
                 "SELECT * FROM events WHERE run_id = %s ORDER BY sequence ASC", (run_id,)
             ).fetchall()
-            if any(r["type"] == "EVENT_LOG_ANCHORED" for r in rows):
+            # Gate on either signal: a surviving anchor marks a compacted run,
+            # but if that row itself was deleted the archive must still be
+            # audited rather than silently escaping the walk.
+            has_archive = (
+                self._connection.execute(
+                    "SELECT 1 FROM events_archive WHERE run_id = %s LIMIT 1", (run_id,)
+                ).fetchone()
+                is not None
+            )
+            if has_archive or any(r["type"] == "EVENT_LOG_ANCHORED" for r in rows):
                 archive_violations, archive_edge = self._audit_archive(run_id)
                 violations.extend(archive_violations)
                 if archive_violations:

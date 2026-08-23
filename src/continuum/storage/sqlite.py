@@ -527,20 +527,36 @@ class SQLiteStorage(Storage):
         return corrections
 
     def _canonical_index_rows(self) -> dict[str, tuple[tuple[str, str, str, str, str], int]]:
-        """Fold the log into ``{key: ((entry...), order_seq)}``, last write wins."""
+        """Fold the log into ``{key: ((entry...), order_seq)}``, last write wins.
+
+        Compacted history (#239) folds too, archive first and live second:
+        everything in ``events_archive`` predates every live row of its run,
+        so folding the two tables in one shared stream would let an archived
+        action claimed long ago outrank a newer live write of the same key
+        (they number their rows independently). Live rows keep their
+        insertion rowid, matching incremental index maintenance exactly;
+        archived rows receive negative order positions below every possible
+        rowid, oldest first, so last-write-per-key stays true after
+        compaction while uncompacted stores fold identically to before.
+        """
         with self._read() as conn:
+            archived = conn.execute(
+                "SELECT type, payload FROM events_archive ORDER BY rowid"
+            ).fetchall()
             rows = conn.execute(
                 "SELECT rowid AS rid, type, payload FROM events ORDER BY rowid"
             ).fetchall()
         canonical: dict[str, tuple[tuple[str, str, str, str, str], int]] = {}
-        for row in rows:
+        offset = len(archived)
+        for position, row in enumerate([*archived, *rows]):
             try:
                 payload = json.loads(row["payload"])
             except json.JSONDecodeError:
                 continue
             entry = index_entry_from_payload(EventType(row["type"]), payload)
             if entry is not None:
-                canonical[entry[0]] = (entry, int(row["rid"]))
+                order = int(row["rid"]) if position >= offset else position - offset
+                canonical[entry[0]] = (entry, order)
         return canonical
 
     @staticmethod
@@ -617,7 +633,13 @@ class SQLiteStorage(Storage):
             rows = conn.execute(
                 "SELECT * FROM events WHERE run_id = ? ORDER BY sequence ASC", (run_id,)
             ).fetchall()
-            if any(r["type"] == "EVENT_LOG_ANCHORED" for r in rows):
+            # Gate on either signal: a surviving anchor marks a compacted run,
+            # but if that row itself was deleted the archive must still be
+            # audited rather than silently escaping the walk.
+            has_archive = conn.execute(
+                "SELECT 1 FROM events_archive WHERE run_id = ? LIMIT 1", (run_id,)
+            ).fetchone() is not None
+            if has_archive or any(r["type"] == "EVENT_LOG_ANCHORED" for r in rows):
                 archive_violations, archive_edge = self._audit_archive(conn, run_id)
                 violations.extend(archive_violations)
                 if archive_violations:

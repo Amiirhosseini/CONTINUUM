@@ -20,11 +20,12 @@ from pathlib import Path
 
 import pytest
 
+from continuum.actions.idempotency import idempotency_key
 from continuum.checkpoint import CheckpointManager
 from continuum.cli import ExitCode, main
 from continuum.cli.main import cmd_compact
 from continuum.events import Event, EventType
-from continuum.models import Origin, Run, SemanticState, utcnow
+from continuum.models import ActionStatus, Origin, Run, SemanticState, utcnow
 from continuum.replayguard import GuardKind, protected_call
 from continuum.state.semantic import project_incremental
 from continuum.state.versioning import state_fingerprint
@@ -283,6 +284,32 @@ def test_a_key_with_no_archived_claim_still_gets_a_fresh_slot(db: str) -> None:
         fn=lambda: {"doc": 99},
     )
     assert kind is GuardKind.ALLOW and value == {"doc": 99}
+
+
+def test_action_index_covers_the_archive_after_rebuild(tmp_path: Path) -> None:
+    """The derived index must not forget archived claims (PR #260 review):
+    after compaction it lags until rebuilt, then cross-run lookups see the
+    archived completion again. A second run interleaves global insertion
+    order, so the post-compaction fold provably differs from what the
+    incremental index recorded."""
+    path = str(tmp_path / "idx.db")
+    with SQLiteStorage(path) as store:
+        store.create_run_started(Run(run_id="r1", goal="one"))
+        kind, _ = protected_call(
+            store, "r1", action_type="process_doc", key="doc:1", fn=lambda: {"doc": 1}
+        )
+        assert kind is GuardKind.ALLOW
+        store.create_run_started(Run(run_id="r2", goal="two"))
+        store.append_event("r2", EventType.TASK_UPDATED, {"n": 1})
+
+        store.compact_run("r1")
+        assert store.action_index_drift() > 0
+        store.rebuild_action_index()
+        assert store.action_index_drift() == 0
+        key = str(idempotency_key("process_doc", None, scope="r1", key="doc:1"))
+        foreign = store.foreign_action(key, exclude_run="r2")
+    assert foreign is not None
+    assert foreign.status is ActionStatus.COMPLETED
 
 
 # --- capability gate and projection hygiene -------------------------------------- #

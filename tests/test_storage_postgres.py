@@ -249,3 +249,23 @@ def test_pg_deleted_boundary_event_fails_verify(storage: PostgresStorage) -> Non
     assert report.ok is False
     kinds = {v.kind for v in report.violations}
     assert {"SEQUENCE_GAP", "BROKEN_CHAIN"} & kinds
+
+
+def test_pg_action_index_covers_the_archive_after_rebuild(
+    storage: PostgresStorage,
+) -> None:
+    from continuum.actions.idempotency import idempotency_key
+
+    make_run(storage, "pg_ki", "index target")
+    ledger = ActionLedger(storage, "pg_ki")
+    outcome = ledger.claim("process_doc", {}, key="doc:1")
+    ledger.complete(outcome.key, external_id="doc:1")
+    storage.compact_run("pg_ki")
+
+    assert storage.action_index_drift() > 0
+    storage.rebuild_action_index()
+    assert storage.action_index_drift() == 0
+    key = str(idempotency_key("process_doc", None, scope="pg_ki", key="doc:1"))
+    foreign = storage.foreign_action(key, exclude_run="some_other_run")
+    assert foreign is not None
+    assert foreign.status is ActionStatus.COMPLETED
