@@ -42,9 +42,11 @@ from pathlib import Path
 from typing import Any
 
 __all__ = [
+    "CLIENT_PROFILES",
     "DEFAULT_MATCHER",
     "observe_event_payload",
     "observe_command",
+    "install_client_hook",
     "install_claude_code_hook",
     "remove_claude_code_hook",
 ]
@@ -55,6 +57,37 @@ DEFAULT_MATCHER = "Write|Edit|MultiEdit|NotebookEdit"
 
 #: Keys of ``tool_input`` that hold the primary file path, in priority order.
 _PATH_KEYS = ("file_path", "notebook_path")
+
+#: Per-client wiring profiles (issue #209). Everything that differs between
+#: clients is data, not code: which settings file they read, which hook
+#: events exist, and which tools count as file-mutating there. The observe
+#: and gate commands stay client-agnostic because every profiled client
+#: speaks the same stdin contract (tool_name plus tool_input JSON).
+CLIENT_PROFILES: dict[str, dict[str, str]] = {
+    "claude-code": {
+        "settings": ".claude/settings.json",
+        "post_event": "PostToolUse",
+        "pre_event": "PreToolUse",
+        "write_matcher": "Write|Edit|MultiEdit|NotebookEdit",
+        "any_matcher": "*",
+    },
+    "gemini": {
+        "settings": ".gemini/settings.json",
+        "post_event": "AfterTool",
+        "pre_event": "BeforeTool",
+        "write_matcher": "write_file|replace",
+        "any_matcher": ".*",
+    },
+    "codex": {
+        "settings": ".codex/hooks.json",
+        "post_event": "PostToolUse",
+        "pre_event": "PreToolUse",
+        # Documented surface as of mid-2026: Codex hooks fire for shell/Bash
+        # calls only; apply_patch and MCP tools do not traverse them.
+        "write_matcher": "^Bash$|^shell$",
+        "any_matcher": "^Bash$|^shell$",
+    },
+}
 
 
 def observe_event_payload(raw: Mapping[str, Any]) -> dict[str, Any]:
@@ -151,12 +184,43 @@ def _is_observe_hook(hook: Mapping[str, Any]) -> bool:
     return _is_continuum_hook(hook, "observe")
 
 
+def install_client_hook(
+    settings_path: Path,
+    command: str,
+    *,
+    event_name: str,
+    matcher: str,
+) -> str:
+    """Install one continuum hook entry into any client's settings file.
+
+    The client-agnostic core behind every installer (#209): add (or repoint,
+    or recognise as present) a single entry under ``hooks.<event_name>``.
+    Returns "installed", "updated" or "present", matching the claude-code
+    contract this was extracted from.
+    """
+    return _install_hook(settings_path, command, event_name=event_name, matcher=matcher)
+
+
 def install_claude_code_hook(
     settings_path: Path,
     command: str,
     *,
     kind: str = "observe",
     matcher: str | None = None,
+) -> str:
+    """Claude Code wrapper; see :func:`install_client_hook`."""
+    if matcher is None:
+        matcher = DEFAULT_MATCHER if kind == "observe" else "*"
+    event_name = "PostToolUse" if kind == "observe" else "PreToolUse"
+    return _install_hook(settings_path, command, event_name=event_name, matcher=matcher)
+
+
+def _install_hook(
+    settings_path: Path,
+    command: str,
+    *,
+    event_name: str,
+    matcher: str,
 ) -> str:
     """Add a continuum hook entry to a Claude Code settings file.
 
@@ -172,8 +236,6 @@ def install_claude_code_hook(
     overwritten: a file someone edited by hand is a statement of intent, and
     silently replacing it would destroy work to save a typo.
     """
-    if matcher is None:
-        matcher = DEFAULT_MATCHER if kind == "observe" else "*"
     if settings_path.exists():
         try:
             settings: dict[str, Any] = json.loads(settings_path.read_text(encoding="utf-8"))
@@ -190,7 +252,6 @@ def install_claude_code_hook(
     if not isinstance(hooks, dict):
         raise ValueError(f"{settings_path}: 'hooks' is not an object")
 
-    event_name = "PostToolUse" if kind == "observe" else "PreToolUse"
     hook_list: list[Any] = hooks.setdefault(event_name, [])
     if not isinstance(hook_list, list):
         raise ValueError(f"{settings_path}: 'hooks.{event_name}' is not a list")
@@ -204,7 +265,10 @@ def install_claude_code_hook(
         if not isinstance(entries, list):
             continue
         for hook in entries:
-            if isinstance(hook, dict) and _is_continuum_hook(hook, kind):
+            ours = isinstance(hook, dict) and (
+                _is_continuum_hook(hook, "observe") or _is_continuum_hook(hook, "gate")
+            )
+            if ours:
                 entry_found = True
                 if hook.get("command") != command:
                     hook["command"] = command
@@ -248,8 +312,10 @@ def remove_claude_code_hook(settings_path: Path) -> bool:
         return False
 
     removed = False
-    for event_name in ("PostToolUse", "PreToolUse"):
-        hook_list = hooks.get(event_name)
+    # Scan every event list, not just the Claude Code names: clients differ
+    # in what they call their hook points (Gemini uses AfterTool/BeforeTool).
+    for event_name in [k for k, v in hooks.items() if isinstance(v, list)]:
+        hook_list = hooks[event_name]
         if not isinstance(hook_list, list):
             continue
 

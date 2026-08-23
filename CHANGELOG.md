@@ -8,6 +8,23 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Client installers for Gemini CLI and Codex CLI (#209).** The observe and
+  gate commands were already client-agnostic; wiring them into new clients is
+  now data, not code. `CLIENT_PROFILES` describes each client's settings
+  path, hook event names and tool matchers, and `continuum hooks
+  install|remove` accepts all three clients: claude-code (PostToolUse/
+  PreToolUse on Write|Edit), gemini (AfterTool/BeforeTool on
+  write_file|replace, per the official hooks reference) and codex
+  (PostToolUse/PreToolUse, Bash-only today because Codex's documented hook
+  surface does not traverse apply_patch or MCP tools). Removal scans every
+  event list rather than hardcoded names, so it works across clients while
+  still touching only entries this tool installed. The installer surfaces
+  Codex's `[features].codex_hooks = true` requirement as an explicit hint
+  instead of hand-editing TOML. A regression test pins that each client's
+  default settings path comes from its profile, closing a gap found live:
+  every earlier test passed explicit paths, so a hardcoded CLI default was
+  silently writing all clients' hooks into Claude Code's settings file.
+
 - **Pre-action gate: host-enforced side-effect claims (#217).** The two-phase
   action protocol was a convention the model was asked to follow; nothing
   stopped an unclaimed side effect from firing, which degrades exactly-once
