@@ -21,7 +21,10 @@ import pytest
 from continuum.cli import ExitCode, main
 from continuum.clienthooks import (
     DEFAULT_MATCHER,
+    _is_continuum_hook,
+    _split_command,
     install_claude_code_hook,
+    observe_command,
     remove_claude_code_hook,
 )
 from continuum.events import EventType
@@ -256,14 +259,14 @@ def test_installed_command_actually_records_through_the_real_entrypoint(
     (project / ".claude").mkdir(parents=True)
     monkeypatch.chdir(project)
 
-    subprocess.run(["python", "-m", "continuum.cli", "init"], check=True, capture_output=True)
+    subprocess.run([sys.executable, "-m", "continuum.cli", "init"], check=True, capture_output=True)
     subprocess.run(
-        ["python", "-m", "continuum.cli", "start", "demo", "--goal", "write things"],
+        [sys.executable, "-m", "continuum.cli", "start", "demo", "--goal", "write things"],
         check=True,
         capture_output=True,
     )
     subprocess.run(
-        ["python", "-m", "continuum.cli", "hooks", "install", "claude-code"],
+        [sys.executable, "-m", "continuum.cli", "hooks", "install", "claude-code"],
         check=True,
         capture_output=True,
     )
@@ -283,3 +286,40 @@ def test_installed_command_actually_records_through_the_real_entrypoint(
     assert events[-1].type is EventType.TOOL_COMPLETED
     assert events[-1].payload["path"] == str(artifact)
     assert shlex.split(command)[-1] == "observe"
+
+
+def test_the_baked_command_survives_a_round_trip_through_the_host_quoting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Quoting must match the shell that will run the hook, on either platform.
+
+    The path is forced to contain a space because that is what exposed the
+    original bug: ``shlex.quote`` wraps such a path in single quotes, which
+    ``cmd.exe`` has no syntax for, so every hook installed on Windows failed
+    with "The filename, directory name, or volume label syntax is incorrect"
+    and the durability the hook exists to provide was silently absent.
+    Asserting the round-trip rather than a literal string keeps the test
+    meaningful on POSIX, where the correct quoting is the other one.
+    """
+    spaced = str(Path("D:/pROJ OPEN/CONTINUUM/.venv/Scripts/continuum.exe"))
+    monkeypatch.setattr("continuum.clienthooks.shutil.which", lambda _: spaced)
+
+    command = observe_command(db=None)
+    assert _split_command(command) == [spaced, "observe"]
+    assert _is_continuum_hook({"command": command}, "observe")
+
+    with_db = observe_command(db="C:/some dir/continuum.db")
+    assert _split_command(with_db) == [spaced, "--db", "C:/some dir/continuum.db", "observe"]
+
+
+def test_a_hook_written_by_an_older_version_is_still_recognised() -> None:
+    """``hooks remove`` has to clean up after an upgrade.
+
+    Before the quoting fix every command was POSIX-quoted regardless of
+    platform, so a settings file written by an older CONTINUUM still contains
+    that form. Failing to recognise it would leave the stale hook behind and
+    let ``hooks install`` add a duplicate alongside it.
+    """
+    legacy = r"'D:\pROJ OPEN\CONTINUUM\.venv\Scripts\python.exe' -m continuum.cli observe"
+    assert _is_continuum_hook({"command": legacy}, "observe")
+    assert not _is_continuum_hook({"command": "some-other-tool observe"}, "observe")

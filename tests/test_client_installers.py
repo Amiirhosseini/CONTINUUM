@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -119,9 +120,11 @@ def test_gemini_payload_shape_matches_the_observation_contract() -> None:
     import tempfile
 
     project = Path(tempfile.mkdtemp())
-    subprocess.run(["python", "-m", "continuum.cli", "init"], cwd=project, capture_output=True)
     subprocess.run(
-        ["python", "-m", "continuum.cli", "start", "g", "--goal", "gemini"],
+        [sys.executable, "-m", "continuum.cli", "init"], cwd=project, capture_output=True
+    )
+    subprocess.run(
+        [sys.executable, "-m", "continuum.cli", "start", "g", "--goal", "gemini"],
         cwd=project,
         capture_output=True,
     )
@@ -135,7 +138,7 @@ def test_gemini_payload_shape_matches_the_observation_contract() -> None:
         }
     )
     result = subprocess.run(
-        ["python", "-m", "continuum.cli", "--db", str(project / "continuum.db"), "observe"],
+        [sys.executable, "-m", "continuum.cli", "--db", str(project / "continuum.db"), "observe"],
         input=gemini_payload,
         capture_output=True,
         text=True,
