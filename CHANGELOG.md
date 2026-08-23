@@ -9,10 +9,12 @@ All notable changes to this project are documented here. The format follows
 ### Added
 
 - **Production server mode (#238).** Three pieces: (1) CI now runs a real
-  Postgres 16 service container against the Postgres contract tests
-  (`tests/test_storage_postgres.py` plus the action-index suite), and the
-  gateway backfill SQL was fixed to Postgres jsonb operators (it previously
-  used SQLite-only `json_extract`). (2) `continuum serve --transport http`
+  Postgres 16 service container against the Postgres contract tests, and the
+  contract tests themselves were rewritten against the modern surface: the
+  originals predated strict enum validation and Goal models, passing raw
+  strings that today's pydantic models rightly refuse - they had rotted in
+  skip-guaranteed obscurity. The gateway backfill SQL was also fixed to
+  Postgres jsonb operators (it previously used SQLite-only `json_extract`). (2) `continuum serve --transport http`
   exposes the full sidecar dispatch over POST /<method> JSON for non-Python
   agents: same handlers, same token auth (`CONTINUUM_SERVE_TOKEN`), errors
   mapped to status codes (404 unknown method, 403 unauthorized, 400 bad
