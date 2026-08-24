@@ -105,6 +105,9 @@ class EventType(StrEnum):
     ACTION_RECONCILED = "ACTION_RECONCILED"
     ACTION_COMPENSATED = "ACTION_COMPENSATED"
 
+    # authority (issue #269): a claim tried to reuse a consumed single-use grant
+    GRANT_DENIED = "GRANT_DENIED"
+
 
 class AppendOnlyViolation(RuntimeError):
     """Raised when an operation would rewrite history."""

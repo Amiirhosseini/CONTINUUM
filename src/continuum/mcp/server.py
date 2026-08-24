@@ -826,8 +826,10 @@ def build_server(
         key: str | None = None,
         scoped_to_run: bool = True,
         pinning: dict[str, Any] | None = None,
+        grant: dict[str, Any] | None = None,
     ) -> str:
         """Claim an action in the ledger and report whether to proceed."""
+        from continuum.actions.grants import GrantDenied, normalize_grant
         from continuum.pinning import normalize_pinning
 
         pinning_clean = normalize_pinning(pinning)
@@ -874,12 +876,30 @@ def build_server(
 
         ledger = ctx.ledger(run_id)
         try:
+            grant_clean = normalize_grant(grant)
             outcome = ledger.claim(
                 action_type,
                 arguments=arguments,
                 key=key,
                 scoped_to_run=scoped_to_run,
                 pinning=pinning_clean or None,
+                grant=grant_clean,
+            )
+        except GrantDenied as exc:
+            return _json(
+                {
+                    "run_id": run_id,
+                    "action_type": action_type,
+                    "proceed": False,
+                    "reason_code": "grant_denied",
+                    "grant_id": exc.grant_id,
+                    "reason": str(exc),
+                    "guidance": (
+                        "This single-use authority was already consumed (recorded "
+                        "in the ledger); it does not come back after a restore. "
+                        "Ask the operator for a fresh grant."
+                    ),
+                }
             )
         except UnknownSideEffect as exc:
             return _json(

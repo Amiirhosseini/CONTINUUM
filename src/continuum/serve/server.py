@@ -535,12 +535,16 @@ def _h_intercept_action(server: SidecarServer, params: dict[str, Any]) -> dict[s
     action_type = _require(params, "action_type")
     server._ensure_run(run_id)
     ledger = server._ledger(run_id)
+    from continuum.actions.grants import GrantDenied, normalize_grant
+
+    grant_clean = normalize_grant(params.get("grant"))
     try:
         outcome = ledger.claim(
             action_type,
             arguments=params.get("arguments"),
             key=params.get("key"),
             scoped_to_run=params.get("scoped_to_run", True),
+            grant=grant_clean,
         )
     except UnknownSideEffect as exc:
         return {
@@ -553,6 +557,20 @@ def _h_intercept_action(server: SidecarServer, params: dict[str, Any]) -> dict[s
                 "A previous attempt was interrupted and its outcome is unknown. "
                 "Do not retry. Verify with the external system, then report via "
                 "reconcile_action."
+            ),
+        }
+    except GrantDenied as exc:
+        return {
+            "run_id": run_id,
+            "action_type": action_type,
+            "proceed": False,
+            "reason_code": "grant_denied",
+            "grant_id": exc.grant_id,
+            "reason": str(exc),
+            "guidance": (
+                "This single-use authority was already consumed (recorded in the "
+                "ledger). It does not come back after a restore. Ask the operator "
+                "for a fresh grant."
             ),
         }
     if outcome.fresh:
