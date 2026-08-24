@@ -243,33 +243,113 @@ The deep reference for each concept lives in [references/concepts.md](references
 
 ## Architecture
 
-The system is built on immutable Pydantic v2 models with a cryptographic hash chain. State is projected from an append-only event log by a pure fold, not stored and mutated. The full reference is in [references/architecture.md](references/architecture.md); a system diagram and enumerated reference in [references/architecture-diagram.md](references/architecture-diagram.md).
+CONTINUUM is organised around one invariant: **every fact carries its origin, and trust is earned, never assumed.** The system has five layers, five integration seams, and three guarantees.
 
-Key guarantees: append-only events, atomic sequence allocation, durability on `append_event` return, write races fail loudly, and corruption is refused rather than returned.
+### The three guarantees
 
-CONTINUUM is one library (`src/continuum`, 100 Python files) plus a large test suite (93 files, roughly 1,300 tests). All modules append to and replay one hash-chained event log:
+1. **No self-certification.** Agent-reported state is marked EXTERNAL_AGENT and degrades to human review on resume. Only trusted writers (in-process adapters, CLI operators) produce DETERMINISTIC state.
+2. **Side effects require claims.** External effects are claimed in an idempotent ledger before they fire; unclaimed effects are blocked at the harness boundary.
+3. **Recovery decisions verify against reality.** Resume contracts check checkpoint state against the current environment (dependency versions, file digests, model identity) before declaring safety.
 
-| Module | LOC | Role |
-|:--|--:|:--|
-| `events.py` | 397 | Append-only, hash-chained event log and `verify()` |
-| `state/` | 1,662 | Projection, validation, extraction |
-| `storage/` | 2,485 | `SQLiteStorage` (v2 schema), `postgres.py`, `migrations.py` |
-| `actions/` | 1,265 | Idempotent action ledger, reconciliation, claim/complete |
-| `checkpoint/` | 993 | Policy-driven checkpoints |
-| `recovery/` | 1,838 | Engine (max-severity wins), planner, sealed contract, retry budgets |
-| `adapters/` | 2,798 | Generic, LangChain, LangGraph, OpenAI Agents SDK, thin SDK-free hooks |
-| `mcp/` | 1,621 | Eleven stdio tools plus `authz.py` (token auth, allowlist) |
-| `serve/` | 841 | Language-agnostic newline-JSON sidecar mirroring MCP |
-| `cli/` | 2,329 | `argparse` commands (dashboard, hooks, gateway), exit codes as verdict |
-| `benchmark/` | 1,130 | CONTINUUM-Bench scenario harness |
-| `environment/` | 514 | Snapshots and diffs |
-| `security/` | 608 | Provenance, trust gate, revalidation (in progress) |
-| `interchange/` | 312 | B4 portable recovery-state JSON envelope |
-| `concurrency/` | 255 | B2.2 lease and distributed-lock coordinator |
-| `plugins/` | 174 | Registry and capability seams |
-| `models.py`, `observability.py`, `__init__.py` | ~1,212 | Shared models, metrics, public surface |
+### Five integration seams
 
-Three entry points: the `continuum` CLI, the `continuum-mcp` server, and the `continuum serve` sidecar. The storage, state, adapters, mcp, cli, actions, and checkpoint layers hold roughly 72% of the core and are the mature, heavily-tested layers. `security/`, the Postgres backend, migrations, and `concurrency/` are committed but newer; the Postgres backend skips without a live DSN. `interchange/` is done and tested.
+Any agent harness connects through exactly one of these; no framework cooperation is required.
+
+```
+Seam 1: In-process adapters     GenericAgentAdapter.wrap_tool(key_fn=...)
+         Python frameworks       LangChain, LangGraph, OpenAI SDK,
+                                 CrewAI, AutoGen, Pydantic AI
+Seam 2: MCP server              continuum-mcp (11 tools over stdio)
+         MCP-capable clients
+Seam 3: CLI lifecycle hooks     continuum hooks install <client> [--with-gate]
+         Coding CLIs             claude-code, gemini, codex
+Seam 4: Enforcing HTTP gateway  continuum gateway --port N
+         Any language            routes: .continuum/gateway.json
+Seam 5: OpenTelemetry bridge    make_span_processor(storage)
+         Traced applications     spans -> TOOL_COMPLETED evidence
+```
+
+### Enforcement pipeline
+
+The gate-to-observe pipeline closes the durability gap at the harness boundary:
+
+```
+PreToolUse hook                    PostToolUse hook
+    |                                    |
+    v                                    v
+continuum gate                    continuum observe
+    |                                    |
+    |-- no claim? DENY (exit 2)          |-- TOOL_COMPLETED event:
+    |   + instructions to claim          |     path, bytes, sha256
+    |                                    |
+    |-- live claim? ALLOW                |-- disk-checked status:
+    |                                    |     verified / changed / missing
+    v
+agent performs effect
+    |
+    v
+continuum_complete_action
+    |
+    v
+claim settled from reality
+```
+
+### Recovery decision tree
+
+The recovery engine evaluates signals in severity order and returns the maximum:
+
+```
+RESUME < REPAIR_AND_RESUME < REPLAN < WAIT < REQUEST_HUMAN < ROLLBACK < ABORT
+```
+
+Every resume produces a sealed contract with: recovery status, verified/invalidated components, executable next steps (`human_steps`), post-checkpoint observations (disk-checked), pinning drift, and family aggregation (multi-agent).
+
+### Storage architecture
+
+Schema v6. SQLite is primary; Postgres is CI-verified.
+
+| Table | Purpose |
+|:--|:--|
+| `events` | Hash-chained append-only log (32 event types) |
+| `runs` | Run metadata with parent_run_id for multi-agent |
+| `versions` | SemanticState snapshots per checkpoint |
+| `checkpoints` | Sealed checkpoint records |
+| `action_index` | Cross-run idempotency projection (schema v3+) |
+| `events_archive` | Compacted prefix storage (schema v5+) |
+| `lg_checkpoints` / `lg_writes` | LangGraph native persistence (schema v4+) |
+
+### Module map
+
+| Module | Role |
+|:--|:--|
+| `events.py` | Append-only, hash-chained event log and `verify()` |
+| `state/` | Projection, validation, extraction |
+| `storage/` | SQLiteStorage (v6 schema), postgres.py, migrations.py, actionindex.py |
+| `actions/` | Idempotent action ledger, reconciliation, claim/complete |
+| `checkpoint/` | Policy-driven checkpoints with forced anchoring |
+| `recovery/` | Engine, planner, sealed contract, guidance, observations, family rollup, fork semantics |
+| `gate.py` | Pre-tool-use enforcement: allow/deny against ledger claims |
+| `clienthooks.py` | Client installer profiles and hook command management |
+| `budgets.py` | Retry budget registry and evaluation |
+| `pinning.py` | Version pinning normalisation and drift detection |
+| `replay_similarity.py` | Semantic similarity backends (exact/fuzzy/embedding) |
+| `reconcilers.py` | Probe registry for automatic settlement |
+| `adapters/` | 9 class-based adapters + thin hooks (CrewAI/AutoGen/Pydantic AI) + LangGraph store |
+| `mcp/` | 11 stdio tools plus authz (token auth, allowlist, confirmation token) |
+| `serve/` | Sidecar (stdio JSON wire + HTTP transport) |
+| `dashboard/` | Web dashboard with HITL buttons (confirm/reconcile/complete) |
+| `cli/` | 25+ argparse commands, exit codes as verdict |
+| `otel.py` | OpenTelemetry span processor bridge |
+
+### Honest limitations
+
+- Gate does not see inside shell commands (Bash/curl bypass structured-tool claims)
+- Postgres backend is CI-tested but not battle-tested in production
+- No webhook-out for request_human notifications yet
+- One level of multi-agent hierarchy v1
+- Payload offloading (#254) not yet implemented
+
+Full reference in [references/architecture.md](references/architecture.md).
 
 ## API and CLI
 
