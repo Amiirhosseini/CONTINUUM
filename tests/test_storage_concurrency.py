@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 
 from continuum.events import EventType
-from continuum.models import Progress, Run, SemanticState
+from continuum.models import Progress, Run, SemanticState, UnknownSideEffect
 from continuum.state.semantic import project
 from continuum.storage import ConcurrentWriteError, SQLiteStorage
 
@@ -207,28 +207,47 @@ def test_concurrent_claims_on_one_key_are_not_serialised_by_the_ledger(
 
     Pinned deliberately rather than left to be discovered in production. The
     ledger folds the log to decide whether a key was already claimed, and
-    nothing stands between that read and the append, so simultaneous claimants
-    all read "no prior slot". The exactly-once promise therefore rests on the
-    caller holding the run lease, per docs/multi_agent_isolation.md.
+    nothing stands between that read and the append, so the result depends
+    purely on thread timing:
 
-    If a future change makes claiming atomic in storage, this test should start
-    failing. That is the signal to tighten it to `== 1`, not to delete it.
+    - a claimant that reads before anyone writes is told to proceed, and several
+      can reach that conclusion at once
+    - a claimant that reads after a slot is opened raises ``UnknownSideEffect``,
+      because an unsettled attempt is genuinely ambiguous
+
+    Which of those a given thread gets is not decidable in advance, so this test
+    asserts the shape of the outcome rather than a fixed count. That
+    nondeterminism is the finding: exactly-once rests on the caller holding the
+    run lease, per docs/multi_agent_isolation.md, and
+    ``test_the_run_lease_restores_exactly_once_under_concurrency`` proves the
+    lease is sufficient.
+
+    If a future change makes claiming atomic in storage, the assertion below
+    becomes ``== 1``. That is the signal to tighten it, not to delete it.
     """
     from continuum.actions.ledger import ActionLedger
 
     db = tmp_path / "race.db"
     _seed(db)
 
-    def claim(_: int) -> bool:
+    def claim(_: int) -> str:
         with SQLiteStorage(db) as store:
-            return ActionLedger(store, "run_1").claim("charge", {"amt": 100}, key="k").fresh
+            try:
+                outcome = ActionLedger(store, "run_1").claim("charge", {"amt": 100}, key="k")
+            except UnknownSideEffect:
+                # A prior claimant's unsettled slot was visible. Refusing here is
+                # correct behaviour, not a failure.
+                return "ambiguous"
+            return "proceed" if outcome.fresh else "dedup"
 
     with ThreadPoolExecutor(max_workers=8) as pool:
-        winners = sum(pool.map(claim, range(8)))
+        outcomes = list(pool.map(claim, range(8)))
 
-    assert winners >= 1, "at least one claimant must be allowed to proceed"
-    # The chain stays sound: these are honestly-recorded duplicate attempts,
-    # not corruption, which is why only a lease can prevent them.
+    assert set(outcomes) <= {"proceed", "dedup", "ambiguous"}, outcomes
+    assert outcomes.count("proceed") >= 1, f"someone must be allowed to work: {outcomes}"
+    # More than one go-ahead is possible and is exactly why the lease is needed.
+    # The chain still verifies: these are honestly-recorded duplicate attempts,
+    # not corruption, which is why no integrity check can catch them.
     with SQLiteStorage(db) as store:
         assert store.verify_events("run_1").ok
 
