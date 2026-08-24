@@ -797,3 +797,56 @@ def test_an_unconfigured_confirm_secret_never_conflicts(store: SQLiteStorage) ->
         auth=AuthPolicy("session-secret"),
     )
     assert srv is not None
+
+
+# --- a refusal has to say why -------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_is_raised_as_tool_error_carrying_its_reason(
+    store: SQLiteStorage,
+) -> None:
+    """The reason must survive the SDK's error wrapping, not just exist.
+
+    Refusing is part of this server's contract, so the caller has to be told
+    which refusal it hit. The SDK decides that by exception type: from mcp 2.1.0
+    an exception it does not recognise becomes UnexpectedToolError whose message
+    is only "Error executing tool <name>", with the cause demoted to __cause__.
+    Authz raises PermissionError subclasses, so on 2.1.0 a refused caller learned
+    nothing: not that it was a permissions problem, and not the env var that
+    grants access. This asserts the message itself, because asserting only the
+    type would have passed throughout that regression.
+    """
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    server, _ = build_server(storage=store, policy=AuthorizationPolicy([ALLOWED]))
+
+    with pytest.raises(ToolError) as caught:
+        await server.call_tool(
+            "continuum_record_progress",
+            {"run_id": "r", "completed": 1, "total": 2, "goal": "g"},
+            context=fake_context("a-stranger"),
+        )
+    message = str(caught.value)
+    assert "not permitted" in message, message
+    assert CLIENT_TOKENS_ENV_VAR in message or "CONTINUUM_MCP_MUTATING_CLIENTS" in message, message
+
+
+@pytest.mark.asyncio
+async def test_a_validation_refusal_also_carries_its_reason(store: SQLiteStorage) -> None:
+    """Same contract for the caller's own mistakes, not only for authz.
+
+    A progress counter that breaks its own arithmetic is a refusal the caller can
+    act on, so the numbers have to reach it. These are ValueError, which the SDK
+    also treats as unexpected.
+    """
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    server, _ = build_server(storage=store, policy=AuthorizationPolicy([ALLOWED]))
+
+    with pytest.raises(ToolError, match="exceeds total"):
+        await server.call_tool(
+            "continuum_record_progress",
+            {"run_id": "r", "completed": 999, "total": 10, "goal": "g"},
+            context=fake_context(ALLOWED),
+        )

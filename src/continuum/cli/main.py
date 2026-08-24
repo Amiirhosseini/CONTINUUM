@@ -1750,13 +1750,22 @@ def cmd_attest_verify(args: argparse.Namespace, storage: Storage, out: Any, err:
     live_hash = events[-1].hash if events else None
     live_seq = events[-1].sequence if events else 0
 
+    # Recompute the chain before trusting any hash read out of it. `live_hash`
+    # above is the digest *stored* in the row, and an edit made straight through
+    # the database changes the payload while leaving that column untouched, so
+    # comparing the attestation against it reports "chain matches" on content
+    # that has demonstrably been altered. Only the recomputing walk in
+    # verify_events can tell, which is why the verdict has to consult it.
+    integrity = storage.verify_events(args.run_id)
+    chain_intact = integrity.ok
+
     signature_valid = verify_attestation(doc)
     chain_match = doc.get("chain_hash") == live_hash
     seq_match = doc.get("trusted_through_seq") == live_seq
 
     if not signature_valid:
         verdict = "UNTRUSTED"
-    elif not chain_match or not seq_match:
+    elif not chain_intact or not chain_match or not seq_match:
         verdict = "ALTERED"
     else:
         verdict = "SIGNED"
@@ -1766,6 +1775,7 @@ def cmd_attest_verify(args: argparse.Namespace, storage: Storage, out: Any, err:
         "verdict": verdict,
         "signature_valid": signature_valid,
         "chain_match": chain_match,
+        "chain_intact": chain_intact,
         "signer": doc.get("signer"),
         "signed_seq": doc.get("trusted_through_seq"),
         "live_seq": live_seq,
@@ -1776,10 +1786,20 @@ def cmd_attest_verify(args: argparse.Namespace, storage: Storage, out: Any, err:
             f"chain matches."
         )
     elif verdict == "ALTERED":
-        text = (
-            f"Attestation ALTERED: chain changed since signing "
-            f"(signed seq {doc.get('trusted_through_seq')} vs live {live_seq})."
-        )
+        if not chain_intact:
+            # Name the tampering rather than reporting a sequence mismatch that
+            # is not the problem: the head can sit at the signed sequence while
+            # an earlier event's content has been rewritten underneath it.
+            text = (
+                f"Attestation ALTERED: the event chain no longer verifies "
+                f"({len(integrity.violations)} violation(s)); run "
+                f"`continuum verify {args.run_id}` for the specific events."
+            )
+        else:
+            text = (
+                f"Attestation ALTERED: chain changed since signing "
+                f"(signed seq {doc.get('trusted_through_seq')} vs live {live_seq})."
+            )
     else:
         text = "Attestation UNTRUSTED: signature does not verify against the embedded key."
     _emit(payload, text, as_json=args.json, stream=out, palette=getattr(args, "_palette", None))
