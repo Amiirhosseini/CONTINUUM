@@ -379,7 +379,25 @@ def build_server(
             "checkpoint at meaningful milestones, and before resuming after any "
             "interruption call continuum_resume to find out whether it is safe to "
             "continue. Route every external side effect through "
-            "continuum_intercept_action so it is never performed twice."
+            "continuum_intercept_action so it is never performed twice.\n"
+            "\n"
+            "At the start of a session, call continuum_resume with no run_id. If it "
+            "returns a run, show its run_id, progress and goal, ask the user whether "
+            "to resume it or start something new, and wait for the answer. If it "
+            "returns no_active_run, just do what the user asked. The task is the "
+            "run's goal, which continuum_resume gives you, so never read or write a "
+            "side file to track it.\n"
+            "\n"
+            "mode=request_human on a run you created over MCP is expected and is not "
+            "a blocker. It means the goal and progress are self-reported and nothing "
+            "independent corroborates them. Recording progress, checkpointing and the "
+            "action tools all keep working. Do not call continuum_confirm to clear "
+            "it: that is refused over MCP by design, because an agent must not vouch "
+            "for its own claims. Only a human running 'continuum confirm <run_id>' "
+            "clears it. Until then, treat a recorded progress count as a claim to "
+            "sanity-check rather than a verified fact, and say so once instead of "
+            "stopping work. This matters most before skipping completed units: "
+            "confirm the work really happened rather than trusting the counter."
         ),
     )
 
@@ -706,7 +724,7 @@ def build_server(
         # the resuming agent never translates statuses into commands itself.
         from continuum.gate import DEFAULT_GATE_CONFIG_PATH
         from continuum.reconcilers import DEFAULT_RECONCILERS_PATH, load_reconcilers
-        from continuum.recovery.guidance import human_steps_for
+        from continuum.recovery.guidance import human_steps_for, self_report_guidance
 
         try:
             probed = list(load_reconcilers(Path(DEFAULT_RECONCILERS_PATH)))
@@ -756,6 +774,7 @@ def build_server(
                 "contract": decision.contract.model_dump(mode="json"),
                 "contract_text": render_contract(decision.contract),
                 "report": decision.render(),
+                **self_report_guidance(decision),
             }
         )
 
@@ -831,6 +850,7 @@ def build_server(
     ) -> str:
         """Claim an action in the ledger and report whether to proceed."""
         from continuum.actions.grants import GrantDenied, normalize_grant
+        from continuum.actions.idempotency import idempotency_key
         from continuum.pinning import normalize_pinning
 
         pinning_clean = normalize_pinning(pinning)
@@ -862,20 +882,43 @@ def build_server(
                 }
             )
 
-        events = ctx.storage.read_events(run_id)
-        attempts = attempts_for_type(events, action_type)
-        allowed, used, maximum = evaluate_budget(budgets, action_type, attempts)
-        if not allowed:
-            from mcp.server.mcpserver.exceptions import ToolError
-
-            raise ToolError(
-                f"retry budget exhausted for {action_type!r}: "
-                f"{used} attempt(s) recorded, budget is {maximum}. "
-                "Reconcile existing attempts or ask the operator to raise "
-                ".continuum/budgets.json."
-            )
-
         ledger = ctx.ledger(run_id)
+
+        # The budget may only gate a claim that would open a *new* attempt
+        # slot. Re-claiming an action that already reached a terminal-or-frozen
+        # state is not an attempt: a COMPLETED record returns the stored result
+        # (the whole point of idempotency), and an UNKNOWN one raises
+        # UnknownSideEffect asking for reconciliation. Gating either would make
+        # an exhausted budget suppress the dedup and reconciliation paths a
+        # recovering agent depends on, turning a safety limit into the cause of
+        # a duplicate side effect (issue #309).
+        existing = ledger.get(
+            idempotency_key(
+                action_type,
+                arguments,
+                scope=run_id if scoped_to_run else None,
+                key=key,
+            )
+        )
+        settled = existing is not None and existing.status in (
+            ActionStatus.COMPLETED,
+            ActionStatus.UNKNOWN,
+        )
+
+        if not settled:
+            events = ctx.storage.read_events(run_id)
+            attempts = attempts_for_type(events, action_type)
+            allowed, used, maximum = evaluate_budget(budgets, action_type, attempts)
+            if not allowed:
+                from mcp.server.mcpserver.exceptions import ToolError
+
+                raise ToolError(
+                    f"retry budget exhausted for {action_type!r}: "
+                    f"{used} attempt(s) recorded, budget is {maximum}. "
+                    "Reconcile existing attempts or ask the operator to raise "
+                    ".continuum/budgets.json."
+                )
+
         try:
             grant_clean = normalize_grant(grant)
             outcome = ledger.claim(

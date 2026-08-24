@@ -66,6 +66,57 @@ def test_the_goal_and_progress_are_always_reported() -> None:
 # --- the headline case: a dataset moved ------------------------------------ #
 
 
+def test_omitting_the_current_environment_names_the_missing_side() -> None:
+    """The diagnostic pointed at the wrong side of the comparison (issue #307).
+
+    "no environment snapshot to compare against" says the stored snapshot is
+    missing. It is not: the checkpoint recorded one, and supplying `env` proves
+    it. What is absent is the caller's current observation, and a caller told the
+    wrong thing is missing cannot act on the message.
+
+    The UNKNOWN status is deliberate and stays: never validated is not the same
+    as validated clean.
+    """
+    pinned = state(external_dependencies=[ExternalDependency(resource="dataset", version="v3")])
+    outcome = validate_state(
+        pinned,
+        checkpoint_environment=capture("run_4821", StaticProvider(dataset="v3")),
+    )
+    detail = next(
+        e.detail
+        for e in outcome.report.statuses
+        if e.component is Component.EXTERNAL_DEPENDENCY and e.component_id == "dataset"
+    )
+    assert "no current version supplied" in detail
+    assert 'env={"dataset": "<version>"}' in detail
+    assert status_for(outcome, Component.EXTERNAL_DEPENDENCY, "dataset") is StateStatus.UNKNOWN
+
+
+def test_a_dependency_absent_from_both_snapshots_blames_the_snapshot() -> None:
+    """The caller did observe; this resource was in neither side of the diff.
+
+    A resource the environment provider never reported is unverifiable, and the
+    message must not claim the caller supplied nothing when it plainly did.
+    """
+    outcome = validate_state(
+        state(
+            external_dependencies=[
+                ExternalDependency(resource="dataset", version="v3"),
+                ExternalDependency(resource="registry", version="r1"),
+            ]
+        ),
+        checkpoint_environment=capture("run_4821", StaticProvider(dataset="v3")),
+        current_environment=capture("run_4821", StaticProvider(dataset="v4")),
+    )
+    assert status_for(outcome, Component.EXTERNAL_DEPENDENCY, "registry") is StateStatus.UNKNOWN
+    detail = next(
+        e.detail
+        for e in outcome.report.statuses
+        if e.component is Component.EXTERNAL_DEPENDENCY and e.component_id == "registry"
+    )
+    assert "not present in the current environment snapshot" in detail
+
+
 def test_a_changed_dependency_conflicts_and_blocks_resume() -> None:
     outcome = validate_state(
         state(external_dependencies=[ExternalDependency(resource="dataset", version="v3")]),
@@ -322,6 +373,24 @@ def test_the_same_model_is_not_flagged() -> None:
 def test_no_expected_model_means_no_model_check() -> None:
     outcome = validate_state(state(model=ModelState(model="model-a")))
     assert not any(e.component is Component.MODEL for e in outcome.report.statuses)
+
+
+def test_expected_model_against_an_unrecorded_model_reports_the_gap() -> None:
+    """A safety check that silently does nothing is worse than none (issue #308).
+
+    No MCP tool records a model, so `state.model` is None for every MCP-created
+    run. Returning silently made the answer identical to a clean comparison, so
+    a caller passing expected_model believed it had ruled out drift when nothing
+    had been compared.
+    """
+    outcome = validate_state(state(), expected_model="claude-3-opus-20240229")
+    assert status_for(outcome, Component.MODEL) is StateStatus.UNKNOWN
+    detail = next(e.detail for e in outcome.report.statuses if e.component is Component.MODEL)
+    assert "no model recorded" in detail
+    assert "claude-3-opus-20240229" in detail
+    # The caller explicitly asked for a check that cannot be performed, so under
+    # the default strict_unknown this is not a clean resume.
+    assert not outcome.safe
 
 
 def test_no_expected_model_with_assumptions_is_unknown_not_valid() -> None:

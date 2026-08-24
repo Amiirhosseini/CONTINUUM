@@ -40,7 +40,7 @@ from continuum.models import (
     UnknownSideEffect,
 )
 from continuum.recovery.contract import render_contract
-from continuum.recovery.guidance import human_steps_for
+from continuum.recovery.guidance import human_steps_for, self_report_guidance
 from continuum.state.semantic import project
 from continuum.storage import RunNotFound, Storage, open_storage
 
@@ -403,6 +403,7 @@ def _decision_payload(decision: Any, *, goal: str) -> dict[str, Any]:
         "contract_text": render_contract(decision.contract),
         "report": decision.render(),
         "environment_changes": [d.render() for d in decision.environment_diff.breaking],
+        **self_report_guidance(decision),
     }
 
 

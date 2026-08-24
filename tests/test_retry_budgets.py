@@ -78,6 +78,40 @@ def test_attempts_count_every_claim_slot(db: str) -> None:
     assert attempts_for_type(events, "send_invoice") == 2
 
 
+def test_completed_attempts_do_not_count(db: str) -> None:
+    """A succeeded operation was never retried (issue #309).
+
+    Counting successes turns a retry budget into a cap on how much distinct work
+    a run may do: three invoices sent successfully would exhaust a budget of 3
+    and refuse the fourth, having never retried anything.
+    """
+    ledger = ActionLedger(SQLiteStorage(db), "run_1")
+    for n in range(3):
+        outcome = ledger.claim("send_invoice", {}, key=f"invoice:{n}")
+        ledger.complete(outcome.key, external_id=f"ext-{n}")
+
+    events = SQLiteStorage(db).read_events("run_1")
+    assert attempts_for_type(events, "send_invoice") == 0
+    assert evaluate_budget({"default_max_attempts": 3}, "send_invoice", 0)[0] is True
+
+
+def test_only_the_unsettled_attempts_of_a_retried_key_count(db: str) -> None:
+    """The amplification guard must survive the fix: failures still count."""
+    ledger = ActionLedger(SQLiteStorage(db), "run_1")
+    # One key that fails twice then succeeds, and one that is still in flight.
+    first = ledger.claim("send_invoice", {}, key="invoice:1")
+    ledger.fail(first.key, "boom", certain=True)
+    retry = ledger.claim("send_invoice", {}, key="invoice:1#retry2")
+    ledger.fail(retry.key, "boom again", certain=True)
+    won = ledger.claim("send_invoice", {}, key="invoice:1#retry3")
+    ledger.complete(won.key, external_id="ext-1")
+    ledger.claim("send_invoice", {}, key="invoice:2")
+
+    events = SQLiteStorage(db).read_events("run_1")
+    # Two failures plus one in-flight; the completed retry is excluded.
+    assert attempts_for_type(events, "send_invoice") == 3
+
+
 def test_budget_evaluation_math() -> None:
     raw = {"default_max_attempts": 3, "action_types": {"send_invoice": {"max_attempts": 5}}}
     assert evaluate_budget(raw, "send_invoice", 5)[0] is False
