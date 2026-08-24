@@ -327,7 +327,7 @@ continuum --db continuum.db events guide     # the recorded section trail
 
 ## 10. Key files to read
 
-- `src/continuum/mcp/server.py`  -  `build_server`, `ContinuumMCP`, the 10 tools,
+- `src/continuum/mcp/server.py`  -  `build_server`, `ContinuumMCP`, the 11 tools,
   `continuum_resume` (optional `run_id`, returns `goal`).
 - `src/continuum/storage/sqlite.py`  -  `get_active_run`, `list_runs`, run table.
 - `src/continuum/recovery/engine.py`  -  `RecoveryEngine.assess` (mode decision).
