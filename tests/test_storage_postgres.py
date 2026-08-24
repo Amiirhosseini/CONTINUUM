@@ -201,3 +201,71 @@ def test_langgraph_tables_present(storage: PostgresStorage) -> None:
     ).fetchall()
     names = {r["table_name"] for r in rows}
     assert {"lg_checkpoints", "lg_writes"} <= names
+
+
+# --- compaction (issue #239 parity with the SQLite engine) -------------------------- #
+
+
+def test_compact_archives_prefix_and_verify_stays_ok(storage: PostgresStorage) -> None:
+    make_run(storage, "pg_k", "long task")
+    for i in range(3):
+        storage.append_event("pg_k", EventType.TASK_UPDATED, {"i": i})
+    CheckpointManager(storage).checkpoint("pg_k")
+
+    report = storage.compact_run("pg_k")
+    assert report["archived"] > 0
+
+    live = storage.read_events("pg_k")
+    assert [e.type for e in live][-1] is EventType.EVENT_LOG_ANCHORED
+    archived = storage.read_archived_events("pg_k")
+    assert archived[0].sequence == 1
+    # Archived prefix and live tail agree on history: no gaps, hashes line up.
+    assert storage.verify_events("pg_k").ok is True
+
+
+def test_pg_archive_tampering_fails_verify(storage: PostgresStorage) -> None:
+    make_run(storage, "pg_kt", "tamper target")
+    CheckpointManager(storage).checkpoint("pg_kt")
+    storage.compact_run("pg_kt")
+
+    storage._connection.execute(
+        "UPDATE events_archive SET payload = '{\"tampered\": true}' WHERE run_id = 'pg_kt'"
+    )
+    report = storage.verify_events("pg_kt")
+    assert report.ok is False
+    assert any(v.kind == "TAMPERED_CONTENT" for v in report.violations)
+
+
+def test_pg_deleted_boundary_event_fails_verify(storage: PostgresStorage) -> None:
+    make_run(storage, "pg_kb", "boundary target")
+    CheckpointManager(storage).checkpoint("pg_kb")
+    storage.compact_run("pg_kb")
+
+    storage._connection.execute(
+        "DELETE FROM events WHERE sequence ="
+        " (SELECT MIN(sequence) FROM events WHERE run_id = 'pg_kb')"
+    )
+    report = storage.verify_events("pg_kb")
+    assert report.ok is False
+    kinds = {v.kind for v in report.violations}
+    assert {"SEQUENCE_GAP", "BROKEN_CHAIN"} & kinds
+
+
+def test_pg_action_index_covers_the_archive_after_rebuild(
+    storage: PostgresStorage,
+) -> None:
+    from continuum.actions.idempotency import idempotency_key
+
+    make_run(storage, "pg_ki", "index target")
+    ledger = ActionLedger(storage, "pg_ki")
+    outcome = ledger.claim("process_doc", {}, key="doc:1")
+    ledger.complete(outcome.key, external_id="doc:1")
+    storage.compact_run("pg_ki")
+
+    assert storage.action_index_drift() > 0
+    storage.rebuild_action_index()
+    assert storage.action_index_drift() == 0
+    key = str(idempotency_key("process_doc", None, scope="pg_ki", key="doc:1"))
+    foreign = storage.foreign_action(key, exclude_run="some_other_run")
+    assert foreign is not None
+    assert foreign.status is ActionStatus.COMPLETED

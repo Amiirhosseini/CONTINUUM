@@ -106,14 +106,30 @@ class Storage(ABC):
     #: lookups when False, so the flag must reflect real capability.
     supports_action_index: ClassVar[bool] = False
 
+    #: True when the engine maintains ``events_archive`` and implements
+    #: :meth:`compact_run` (issue #239). Callers gate on this flag rather than
+    #: catching NotImplementedError, mirroring :attr:`supports_action_index`.
+    supports_compaction: ClassVar[bool] = False
+
     def compact_run(self, run_id: str, *, through_sequence: int | None = None) -> dict[str, int]:
         """Archive the pre-anchor prefix of a run's log (issue #239).
 
-        Only meaningful on engines that maintain the archive table; callers
-        gate on ``supports_action_index``-style capability flags or catch the
-        NotImplementedError.
+        Only meaningful on engines with ``events_archive``; callers check
+        :attr:`supports_compaction` first, which is the capability contract.
         """
         raise NotImplementedError
+
+    def read_archived_events(self, run_id: str) -> Sequence[Event]:
+        """Read events moved into ``events_archive``, oldest first.
+
+        Engines without an archive return an empty sequence, so a caller that
+        wants "the whole recorded history" can concatenate this with
+        :meth:`read_events` unconditionally. This is what keeps exactly-once
+        action claims (and any other fold over history) intact across
+        compaction: an archived fact is still a recorded fact.
+        """
+        del run_id
+        return []
 
     def foreign_action(self, key: str, *, exclude_run: str) -> Action | None:
         """Newest action recorded under ``key`` outside ``exclude_run``.

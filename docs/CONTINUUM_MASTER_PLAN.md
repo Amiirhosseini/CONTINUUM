@@ -1,4 +1,4 @@
-# CONTINUUM — Master Plan, Status, Issues, Limitations, and Next Work
+# CONTINUUM, Master Plan, Status, Issues, Limitations, and Next Work
 
 > Single consolidated source of truth (as of 2026-08-20). Companion to
 > `STATUS.md` (deep operational detail), `docs/ARCHITECTURE_EVOLUTION.md`

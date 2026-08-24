@@ -61,6 +61,10 @@ class Decision:
 
     allow: bool
     reason: str
+    #: Fork candidates (#259): journalled same-type actions this denied call
+    #: resembles by resource tokens. Non-empty only on unclaimed denials that
+    #: look like deliberate divergence after a restore, never on allow.
+    fork_candidates: tuple[Any, ...] = ()
 
 
 def load_gate_config(path: Path) -> dict[str, dict[str, Any]] | None:
@@ -156,12 +160,33 @@ def decide(
     if decision.kind is GuardKind.ALLOW:
         return Decision(True, f"live claim {rendered!r}")
     if decision.kind is GuardKind.DENY_UNCLAIMED:
-        return Decision(
-            False,
+        # Fork detection (#259): an unclaimed call whose resource tokens
+        # overlap journalled same-type work is what deliberate divergence
+        # looks like after a restore. Surface the neighbours and the exact
+        # approval command instead of a bare denial.
+        from continuum.recovery.fork import detect_fork_candidates
+
+        candidates = tuple(
+            detect_fork_candidates(
+                action_type=action_type,
+                tool_input=tool_input,
+                actions_by_key=actions_by_key,
+            )
+        )
+        message = (
             f"side effect {action_type!r} with key {rendered!r} has no ledger claim. "
             f"Call the MCP tool continuum_intercept_action with run_id={run_id!r}, "
-            f"action_type={action_type!r}, key={rendered!r} first, then repeat this call.",
+            f"action_type={action_type!r}, key={rendered!r} first, then repeat this call."
         )
+        if candidates:
+            neighbour = candidates[0]
+            message += (
+                f" This call resembles journalled action {neighbour.action_id[:14]} "
+                f"({neighbour.status}, shared tokens: {', '.join(neighbour.shared_tokens[:3])}). "
+                f"If it is a deliberate new direction, branch it with: "
+                f"continuum fork {run_id} --reason '<why>' --child <new-run-id>"
+            )
+        return Decision(False, message, fork_candidates=candidates)
     if decision.kind is GuardKind.SKIP_DUPLICATE or (decision.kind is GuardKind.DENY_DUPLICATE):
         return Decision(
             False,

@@ -117,7 +117,7 @@ def registry(tmp_path: Path, entries: dict[str, str]) -> Path:
 
 def test_a_definitive_probe_settles_the_action(db: str, tmp_path: Path) -> None:
     seed_pending(db, key="invoice:1")
-    probes = load_reconcilers(registry(tmp_path, {"send_invoice": "printf occurred=true"}))
+    probes = load_reconcilers(registry(tmp_path, {"send_invoice": "echo occurred=true"}))
     report = settle_run(SQLiteStorage(db), "run_1", probes)
     assert report.settled_true and report.settled == 1
     with SQLiteStorage(db) as store:
@@ -130,7 +130,7 @@ def test_a_definitive_probe_settles_the_action(db: str, tmp_path: Path) -> None:
 
 def test_false_frees_the_action_for_retry(db: str, tmp_path: Path) -> None:
     seed_pending(db, key="invoice:2")
-    probes = load_reconcilers(registry(tmp_path, {"send_invoice": "printf occurred=false"}))
+    probes = load_reconcilers(registry(tmp_path, {"send_invoice": "echo occurred=false"}))
     report = settle_run(SQLiteStorage(db), "run_1", probes)
     assert report.settled_false
     with SQLiteStorage(db) as store:
@@ -142,7 +142,7 @@ def test_false_frees_the_action_for_retry(db: str, tmp_path: Path) -> None:
 
 def test_an_unknown_verdict_leaves_the_action_untouched(db: str, tmp_path: Path) -> None:
     seed_pending(db)
-    probes = load_reconcilers(registry(tmp_path, {"send_invoice": "printf occurred=unknown"}))
+    probes = load_reconcilers(registry(tmp_path, {"send_invoice": "echo occurred=unknown"}))
     report = settle_run(SQLiteStorage(db), "run_1", probes)
     assert not report.settled
     assert len(report.unresolved) == 1
@@ -153,7 +153,7 @@ def test_probe_failures_never_settle(db: str, tmp_path: Path) -> None:
     seed_pending(db)
     cases = {
         "nonzero": "exit 3",
-        "junk output": "printf hello",
+        "junk output": "echo hello",
         "timeout": "sleep 30",
     }
     for name, command in cases.items():
@@ -169,7 +169,7 @@ def test_probe_failures_never_settle(db: str, tmp_path: Path) -> None:
 
 def test_actions_without_registered_probes_are_skipped(db: str, tmp_path: Path) -> None:
     seed_pending(db)
-    probes = load_reconcilers(registry(tmp_path, {"other_tool": "printf occurred=true"}))
+    probes = load_reconcilers(registry(tmp_path, {"other_tool": "echo occurred=true"}))
     report = settle_run(SQLiteStorage(db), "run_1", probes)
     assert not report.settled
     assert len(report.skipped_no_probe) == 1
@@ -177,7 +177,7 @@ def test_actions_without_registered_probes_are_skipped(db: str, tmp_path: Path) 
 
 def test_dry_run_reports_without_writing(db: str, tmp_path: Path) -> None:
     seed_pending(db)
-    probes = load_reconcilers(registry(tmp_path, {"send_invoice": "printf occurred=true"}))
+    probes = load_reconcilers(registry(tmp_path, {"send_invoice": "echo occurred=true"}))
     report = settle_run(SQLiteStorage(db), "run_1", probes, dry_run=True)
     assert report.settled == 1
     with SQLiteStorage(db) as store:
@@ -187,7 +187,7 @@ def test_dry_run_reports_without_writing(db: str, tmp_path: Path) -> None:
 
 def test_settled_events_are_sourced_deterministic(db: str, tmp_path: Path) -> None:
     seed_pending(db)
-    probes = load_reconcilers(registry(tmp_path, {"send_invoice": "printf occurred=true"}))
+    probes = load_reconcilers(registry(tmp_path, {"send_invoice": "echo occurred=true"}))
     settle_run(SQLiteStorage(db), "run_1", probes)
     with SQLiteStorage(db) as store:
         events = store.read_events("run_1")
@@ -201,7 +201,7 @@ def test_settled_events_are_sourced_deterministic(db: str, tmp_path: Path) -> No
 
 def test_cli_reconcile_exits_zero_when_everything_settles(db: str, tmp_path: Path) -> None:
     seed_pending(db, key="invoice:8")
-    cfg = registry(tmp_path, {"send_invoice": "printf occurred=true"})
+    cfg = registry(tmp_path, {"send_invoice": "echo occurred=true"})
     code, out, err = run("--db", db, "--json", "reconcile", "run_1", "--config", str(cfg))
     assert code == ExitCode.OK, err
     payload = json.loads(out)
@@ -211,7 +211,7 @@ def test_cli_reconcile_exits_zero_when_everything_settles(db: str, tmp_path: Pat
 
 def test_cli_reconcile_requires_human_when_probes_cannot_settle(db: str, tmp_path: Path) -> None:
     seed_pending(db)
-    cfg = registry(tmp_path, {"other_tool": "printf occurred=true"})
+    cfg = registry(tmp_path, {"other_tool": "echo occurred=true"})
     code, out, err = run("--db", db, "--json", "reconcile", "run_1", "--config", str(cfg))
     assert code == ExitCode.REQUIRES_HUMAN
     assert json.loads(out)["settled_total"] == 0
@@ -219,7 +219,7 @@ def test_cli_reconcile_requires_human_when_probes_cannot_settle(db: str, tmp_pat
 
 def test_cli_dry_run_writes_nothing(db: str, tmp_path: Path) -> None:
     seed_pending(db, key="invoice:9")
-    cfg = registry(tmp_path, {"send_invoice": "printf occurred=true"})
+    cfg = registry(tmp_path, {"send_invoice": "echo occurred=true"})
     code, out, _ = run(
         "--db", db, "--json", "reconcile", "run_1", "--config", str(cfg), "--dry-run"
     )

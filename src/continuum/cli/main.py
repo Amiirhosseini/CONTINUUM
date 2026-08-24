@@ -222,10 +222,30 @@ def cmd_start(args: argparse.Namespace, storage: Storage, out: Any, err: Any) ->
     goal is asserted by a human at the keyboard, so it is sourced Origin.HUMAN
     rather than self-certified.
     """
-    try:
-        run = storage.create_run_started(
-            Run(run_id=args.run_id, goal=args.goal), source=Origin.HUMAN
+    parent_id = getattr(args, "parent", None)
+    if parent_id:
+        try:
+            parent = storage.get_run(parent_id)
+        except RunNotFound:
+            print(f"error: parent run {parent_id!r} does not exist", file=err)
+            return ExitCode.NOT_FOUND
+        if parent.status.value == "completed":
+            print(f"error: parent run {parent_id!r} is completed; cannot attach children", file=err)
+            return ExitCode.ERROR
+
+    metadata_extra: dict[str, Any] = {}
+    a2a = getattr(args, "a2a_task", None)
+    if a2a:
+        metadata_extra["a2a_task_id"] = a2a
+
+    if parent_id or metadata_extra:
+        child_run = Run(
+            run_id=args.run_id, goal=args.goal, parent_run_id=parent_id, metadata=metadata_extra
         )
+    else:
+        child_run = Run(run_id=args.run_id, goal=args.goal)
+    try:
+        run = storage.create_run_started(child_run, source=Origin.HUMAN)
     except ConcurrentWriteError as exc:
         print(f"error: {exc}", file=err)
         return ExitCode.ERROR
@@ -540,18 +560,72 @@ def cmd_resume(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
         expected_model=args.model,
     )
 
+    # Family aggregation (#243): a parent may not RESUME while any child is
+    # unsafe or blocked - the most cautious signal wins, house-style.
+    from continuum.recovery.family import roll_up_children
+
+    child_statuses, family_blocked = roll_up_children(storage, run_id)
+    family_rationale = [
+        f"child run {c.run_id} is {c.mode} (uncertain={c.uncertain_actions})"
+        for c in child_statuses
+        if not c.safe or c.mode != "resume"
+    ]
     steps = _human_steps(decision, run_id)
     text = decision.render()
+    if family_blocked and decision.mode.value == "resume":
+        # House rule: the most cautious signal wins (#243). A clean parent
+        # with an unsafe child is presented as request_human.
+        text += "\n\nFAMILY BLOCKED: children of this run are not resumable.\n" + "\n".join(
+            f"  !! {r}" for r in family_rationale
+        )
     if steps:
         text += "\n\nNext steps:\n" + "\n".join(f"  {i}. {t}" for i, t in enumerate(steps, 1))
 
+    # Informed retry (#265): prior-attempt account, derived from recovery-path
+    # events already in the chain. Absent history means no section at all.
+    if decision.informed_retry:
+        from continuum.recovery.summary import render_informed_retry
+
+        text += (
+            "\n\nWhat previous attempts changed (informed retry):\n"
+            + "\n".join(f"  {line}" for line in render_informed_retry(decision.informed_retry))
+        )
+
+    # Version pinning drift (issue #241): informational only.
+    drift_lines: list[str] = []
+    if args.pinning:
+        from continuum.pinning import latest_pinning, normalize_pinning
+        from continuum.pinning import pinning_drift as compute_drift
+
+        try:
+            current = normalize_pinning(json.loads(args.pinning))
+            recorded = latest_pinning(storage.read_events(run_id))
+            drift_lines = compute_drift(recorded, current)
+            if drift_lines:
+                text += "\n\nPinning drift (informational):\n" + "\n".join(
+                    f"  - {line}" for line in drift_lines
+                )
+        except ValueError as exc:
+            print(f"error: --pinning: {exc}", file=err)
+            return ExitCode.ERROR
+
+    presented_mode = (
+        "request_human"
+        if (family_blocked and decision.mode.value == "resume")
+        else decision.mode.value
+    )
+    presented_safe = decision.safe and not (family_blocked and decision.mode.value == "resume")
     payload = {
         "run_id": decision.run_id,
         "goal": storage.get_run(run_id).goal,
-        "mode": decision.mode.value,
-        "safe": decision.safe,
+        "mode": presented_mode,
+        "safe": presented_safe,
         "next_allowed_action": decision.next_allowed_action,
         "human_steps": steps,
+        "family_rationale": family_rationale,
+        "children": [c.__dict__ for c in child_statuses],
+        "pinning_drift": drift_lines,
+        "informed_retry": decision.informed_retry,
         "contract": decision.contract.model_dump(mode="json"),
         "repairs": [s.action_name for s in decision.plan.steps],
         "progress": {
@@ -632,9 +706,122 @@ def cmd_confirm(args: argparse.Namespace, storage: Storage, out: Any, err: Any) 
     return exit_code_for(decision.mode)
 
 
+def cmd_budget(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Report retry-budget usage per action type (issue #240). Read-only."""
+    from continuum.budgets import (
+        DEFAULT_BUDGETS_PATH,
+        attempts_for_type,
+        evaluate_budget,
+        load_budgets,
+    )
+
+    storage.get_run(args.run_id)
+    try:
+        raw = load_budgets(Path(args.config) if args.config else Path(DEFAULT_BUDGETS_PATH))
+    except Exception as exc:
+        print(f"error: budget registry invalid: {exc}", file=err)
+        return ExitCode.ERROR
+
+    events = storage.read_events(args.run_id)
+    types_seen = sorted(
+        {
+            e.payload.get("action", {}).get("action_type")
+            for e in events
+            if e.type is EventType.ACTION_RECORDED and isinstance(e.payload.get("action"), dict)
+        }
+        | set((raw.get("action_types") or {}).keys())
+    )
+    rows: list[dict[str, Any]] = []
+    for action_type in types_seen:
+        used = attempts_for_type(events, action_type)
+        allowed, _, maximum = evaluate_budget(raw, action_type, 0)
+        remaining = max(0, maximum - used)
+        rows.append(
+            {
+                "action_type": action_type,
+                "attempts": used,
+                "max_attempts": maximum,
+                "remaining": remaining,
+                "exhausted": remaining == 0,
+            }
+        )
+    payload = {"run_id": args.run_id, "budgets": rows}
+    lines = [f"{'ACTION TYPE':<28} {'ATTEMPTS':>8} {'MAX':>4} {'REMAINING':>10}"]
+    for r in rows:
+        lines.append(
+            f"{r['action_type']:<28} {r['attempts']:>8} {r['max_attempts']:>4} {r['remaining']:>10}"
+        )
+    _emit(
+        payload,
+        "\n".join(lines) or "No budgets configured.",
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
+    )
+    return ExitCode.OK
+
+
+def cmd_tree(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Show a parent run and its children with recovery states (issue #243)."""
+    from continuum.recovery.family import children_of
+
+    parent_id = args.run_id
+    storage.get_run(parent_id)
+    engine = RecoveryEngine(storage)
+    lines: list[str] = []
+    try:
+        parent_decision = engine.assess(parent_id)
+        lines.append(
+            f"{parent_id}  [{parent_decision.mode.value}, safe={parent_decision.safe}]"
+            f"  {storage.get_run(parent_id).goal[:50]}"
+        )
+    except Exception as exc:
+        lines.append(f"{parent_id}  [assess error: {exc}]")
+
+    children = children_of(storage, parent_id)
+    if not children:
+        lines.append("  (no children)")
+    for child in children:
+        fork_mark = "[fork] " if str(child.metadata.get("fork", "")) == "true" else ""
+        try:
+            d = engine.assess(child.run_id)
+            mark = "ok " if d.safe else "!! "
+            lines.append(
+                f"  {mark}{fork_mark}{child.run_id}  [{d.mode.value}, "
+                f"uncertain={len(d.uncertain_actions)}]  {child.goal[:44]}"
+            )
+        except Exception as exc:
+            lines.append(f"  !! {fork_mark}{child.run_id}  [assess error: {exc}]")
+    a2a = [
+        (c.run_id, c.metadata.get("a2a_task_id")) for c in children if c.metadata.get("a2a_task_id")
+    ]
+    for rid, task in a2a:
+        lines.append(f"  a2a: {rid} -> {task}")
+    _emit(
+        {
+            "parent": args.run_id,
+            "children": [{"run_id": c.run_id, "status": c.status.value} for c in children],
+        },
+        "\n".join(lines),
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
+    )
+    return ExitCode.OK
+
+
 def cmd_compact(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
     """Archive the pre-anchor prefix of a run's event log (issue #239). Mutates."""
     storage.get_run(args.run_id)
+    if not getattr(storage, "supports_compaction", False):
+        # Capability flag, not a caught NotImplementedError: a clear refusal
+        # beats a traceback from an engine that never had an archive table.
+        print(
+            f"this storage engine ({type(storage).__name__}) does not support "
+            "compaction; it maintains no events_archive table",
+            file=err,
+        )
+        return ExitCode.ERROR
     if not args.force:
         print(
             "compact archives the pre-anchor event prefix and appends an "
@@ -689,6 +876,40 @@ def cmd_complete(args: argparse.Namespace, storage: Storage, out: Any, err: Any)
     _emit(
         payload,
         f"Run {args.run_id} completed.",
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
+    )
+    return ExitCode.OK
+
+
+def cmd_fork(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Approve a divergent continuation of a run (issue #259).
+
+    The third outcome of replay-or-fork: when the gate surfaces fork
+    candidates on an unclaimed call, this records the human decision to
+    branch rather than block. Writes RUN_FORKED to the parent log
+    (Origin.HUMAN) and creates the linked child run.
+    """
+    from continuum.recovery.fork import approve_fork
+
+    storage.get_run(args.run_id)  # raises RunNotFound -> NOT_FOUND by the dispatcher
+    try:
+        child = approve_fork(
+            storage,
+            args.run_id,
+            reason=args.reason or "",
+            child_run_id=args.child,
+        )
+    except ValueError as exc:
+        print(f"error: {exc}", file=err)
+        return ExitCode.ERROR
+
+    _emit(
+        {"parent": args.run_id, "child": child.run_id, "reason": child.metadata["fork_reason"]},
+        f"Forked {args.run_id} into {child.run_id}.\n"
+        f"Resume it independently: continuum resume {child.run_id}\n"
+        f"Lineage: continuum tree {args.run_id}",
         as_json=args.json,
         stream=out,
         palette=getattr(args, "_palette", None),
@@ -852,6 +1073,13 @@ def cmd_briefing(args: argparse.Namespace, storage: Storage, out: Any, err: Any)
         lines += [
             f"  [{o.get('status', '?')}] {o.get('path', '')}" for o in obs if not o.get("truncated")
         ]
+    # Informed retry (#265): the engine's account of prior attempts, next to
+    # the agent's own summary above. Absent history means no section.
+    if decision.informed_retry:
+        from continuum.recovery.summary import render_informed_retry
+
+        lines.append("what previous attempts changed (engine-recorded):")
+        lines += [f"  {line}" for line in render_informed_retry(decision.informed_retry)]
     if steps:
         lines.append("next steps:")
         lines += [f"  {i}. {t}" for i, t in enumerate(steps, 1)]
@@ -1308,41 +1536,56 @@ def cmd_replay(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
     storage.get_run(args.run_id)
     events = storage.read_events(args.run_id, upto=args.upto)
 
-    anchored = (
-        any(e.type is EventType.EVENT_LOG_ANCHORED for e in events)
-        and storage.latest_version(args.run_id) is not None
-    )
-    if anchored and args.upto is None:
+    stored = storage.latest_version(args.run_id)
+    anchored = any(e.type is EventType.EVENT_LOG_ANCHORED for e in events) and stored is not None
+    if anchored and args.upto is None and stored is not None:
         # Compacted run (#239): fold the restored checkpoint state forward
         # over the post-anchor tail; the archived prefix lives in
-        # events_archive and is audited by verify's deep mode.
+        # events_archive and is deep-audited by verify.
         from continuum.state.semantic import project_incremental
 
-        stored = storage.latest_version(args.run_id)
         base = CheckpointManager(storage).restore(args.run_id, replay=False).state
         # The anchor event sits exactly at the base boundary; folding it would
         # trip the monotonic-sequence check.
-        tail = [e for e in events if base is None or e.sequence > base.source_sequence]
+        tail = [e for e in events if e.sequence > base.source_sequence]
         state, _report = project_incremental(args.run_id, tail, base=base)
+        # Verify for real: re-fold only the stored version's own prefix and
+        # compare fingerprints, exactly as the plain path's
+        # _verify_against_stored does. A hardcoded pass here silently retired
+        # the corruption contract for every compacted run.
+        at_stored, _ = project_incremental(
+            args.run_id,
+            [e for e in tail if e.sequence <= stored.source_sequence],
+            base=base,
+        )
+        matches = state_fingerprint(at_stored) == state_fingerprint(stored)
+        where = f"checkpoint v{stored.version} at sequence {stored.source_sequence}"
+        verification = (
+            f"anchored run: {'matches' if matches else 'DOES NOT match'} stored {where}; "
+            f"{len(tail)} tail event(s) folded, prefix audited in events_archive"
+        )
         payload = {
             "run_id": args.run_id,
             "events_replayed": len(events),
             "completed": state.progress.completed,
             "source_sequence": state.source_sequence,
-            "verified": True,
-            "verification": (
-                f"anchored run: checkpoint v{stored.version if stored else 0} "
-                f"+ {len(events)} tail event(s); prefix audited in events_archive"
-            ),
+            "verified": matches,
+            "verification": verification,
         }
         _emit(
             payload,
-            f"Anchored replay: folded v{stored.version if stored else 0} + "
-            f"{len(events)} tail event(s)",
+            f"Anchored replay: folded {where} + {len(tail)} tail event(s)\n"
+            f"Verification: {verification}",
             as_json=args.json,
             stream=out,
             palette=getattr(args, "_palette", None),
         )
+        if not matches:
+            print(
+                f"replayed state does not match the stored version for run {args.run_id}",
+                file=err,
+            )
+            return ExitCode.CORRUPTED
         return ExitCode.OK
 
     if args.upto is not None and not any(e.type == EventType.RUN_STARTED for e in events):
@@ -1601,6 +1844,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     start = with_run(add("start", cmd_start, "Create a run with a goal. Mutates storage."))
     start.add_argument("--goal", required=True, help="what the run is trying to achieve")
+    start.add_argument("--parent", default=None, help="attach as a child of this run")
+    start.add_argument(
+        "--a2a-task",
+        dest="a2a_task",
+        default=None,
+        help="external A2A task id to record in metadata",
+    )
 
     inspect = with_run(add("inspect", cmd_inspect, "Show semantic state."))
     inspect.add_argument("--version", type=int, dest="version", help="inspect a past version")
@@ -1639,6 +1889,11 @@ def build_parser() -> argparse.ArgumentParser:
     resume.add_argument("--model", help="model that will run the resumed agent")
     resume.add_argument("--tolerate-unknown", action="store_true")
     resume.add_argument("--repair", action="store_true", help="record the repair plan")
+    resume.add_argument(
+        "--pinning",
+        default=None,
+        help="JSON object of environment pins to diff against the run (issue #241)",
+    )
 
     confirm = with_env(
         with_run(add("confirm", cmd_confirm, "Confirm self-reported state so the run may resume."))
@@ -1648,6 +1903,22 @@ def build_parser() -> argparse.ArgumentParser:
 
     complete = with_run(add("complete", cmd_complete, "Close a run as done. Mutates storage."))
     complete.add_argument("--summary", default=None, help="one-line closing note")
+
+    budget_cmd = with_run(add("budget", cmd_budget, "Retry-budget usage per action type."))
+    budget_cmd.add_argument(
+        "--config",
+        default=None,
+        help="budget registry path (default: .continuum/budgets.json)",
+    )
+
+    tree_parser = with_run(add("tree", cmd_tree, "Show a parent run and its children."))
+    tree_parser.add_argument("--limit", type=int, default=None, help=argparse.SUPPRESS)
+
+    fork_cmd = with_run(
+        add("fork", cmd_fork, "Approve a divergent continuation as a child run. Mutates storage.")
+    )
+    fork_cmd.add_argument("--reason", required=True, help="why this divergence is legitimate")
+    fork_cmd.add_argument("--child", default=None, help="run id for the fork (default: auto)")
 
     compact = with_run(
         add("compact", cmd_compact, "Archive the pre-anchor log prefix. Mutates storage.")
@@ -1823,12 +2094,17 @@ def build_parser() -> argparse.ArgumentParser:
         from continuum.dashboard import serve_dashboard as _serve
 
         print(f"Serving dashboard at http://localhost:{args.port}", file=out)
-        _serve(storage, port=args.port)
+        _serve(storage, port=args.port, host=args.host)
         return 0
 
     dashboard = add("dashboard", cmd_dashboard, "Serve the dashboard (presentation over run data).")
     dashboard.add_argument(
         "--port", type=int, default=8000, help="port to listen on (default: 8000)"
+    )
+    dashboard.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="bind address (default: 127.0.0.1; 0.0.0.0 exposes recovery data)",
     )
 
     return parser

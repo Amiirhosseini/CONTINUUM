@@ -38,7 +38,7 @@ __all__ = [
 ]
 
 #: The schema version this build produces and understands.
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 #: The full, current schema applied to a brand-new database.
 BASELINE_SCHEMA = """
@@ -53,8 +53,11 @@ CREATE TABLE IF NOT EXISTS runs (
     status     TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    metadata   TEXT NOT NULL DEFAULT '{}'
+    metadata   TEXT NOT NULL DEFAULT '{}',
+    parent_run_id TEXT REFERENCES runs(run_id)
 );
+
+CREATE INDEX IF NOT EXISTS runs_parent ON runs(parent_run_id);
 
 CREATE TABLE IF NOT EXISTS events (
     run_id          TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
@@ -300,12 +303,22 @@ def _up_v5() -> str:
 """
 
 
-#: Forward migrations, keyed by the version they *produce*.#: Forward migrations, keyed by the version they *produce*.
+def _up_v6() -> str:
+    """Add runs.parent_run_id for multi-agent hierarchies (issue #243)."""
+    return """
+    ALTER TABLE runs ADD COLUMN parent_run_id TEXT REFERENCES runs(run_id);
+
+    CREATE INDEX IF NOT EXISTS runs_parent ON runs(parent_run_id);
+"""
+
+
+#: Forward migrations, keyed by the version they *produce*.
 MIGRATIONS: dict[int, Migration] = {
     2: Migration(version=2, name="add_versions_table_and_event_provenance", up=_up_v2()),
     3: Migration(version=3, name="add_action_index_projection", up=_up_v3()),
     4: Migration(version=4, name="add_langgraph_checkpoint_tables", up=_up_v4()),
     5: Migration(version=5, name="add_events_archive", up=_up_v5()),
+    6: Migration(version=6, name="add_runs_parent_column", up=_up_v6()),
 }
 
 

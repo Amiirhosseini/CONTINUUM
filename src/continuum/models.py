@@ -595,6 +595,9 @@ class Run(BaseModel):
     run_id: str = Field(default_factory=lambda: make_id("run"))
     goal: str
     status: RunStatus = RunStatus.STARTED
+    parent_run_id: str | None = None
+    """Set on child runs in a multi-agent hierarchy (issue #243). Children
+    aggregate into the parent's resume contract; siblings share nothing."""
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
     metadata: Mapping[str, Any] = Field(default_factory=dict)
