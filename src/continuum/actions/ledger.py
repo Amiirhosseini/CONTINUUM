@@ -42,10 +42,13 @@ The distinction is documented rather than marketed away.
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import timedelta
+from functools import wraps
 from heapq import merge
-from typing import Any
+from typing import Any, Concatenate, ParamSpec, TypeVar
 
 from continuum.actions.grants import GrantDenied, normalize_grant, scan_grants
 from continuum.actions.idempotency import (
@@ -55,6 +58,7 @@ from continuum.actions.idempotency import (
     identity_tokens,
     leaf_tokens,
 )
+from continuum.concurrency.lease import LeaseCoordinator
 from continuum.events import EventType
 from continuum.models import Action, ActionStatus, UnknownSideEffect, utcnow
 from continuum.security.hashing import stable_hash
@@ -90,6 +94,7 @@ __all__ = [
     "ActionOutcome",
     "LedgerError",
     "DuplicateAction",
+    "ClaimLockError",
 ]
 
 
@@ -212,6 +217,44 @@ class DuplicateAction(LedgerError):
     """A second attempt was made while the first is still in flight."""
 
 
+class ClaimLockError(LedgerError):
+    """The run's lease is held elsewhere, so this ledger must not write.
+
+    Raised instead of proceeding, because the alternative -- claiming anyway --
+    is the duplicate side effect this ledger exists to prevent. A caller seeing
+    this should back off and retry, not force the write: another agent owns the
+    run right now, and whatever it is claiming may be the very action this
+    caller wanted.
+    """
+
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+def _single_writer(
+    method: Callable[Concatenate[ActionLedger, _P], _R],
+) -> Callable[Concatenate[ActionLedger, _P], _R]:
+    """Run a mutating ledger method while holding the run's lease.
+
+    Every method that folds the log and then appends to it is a
+    read-modify-write, so every one of them races. Marking them declaratively
+    keeps that list honest: a new mutator without this decorator is visibly
+    missing something, whereas a forgotten ``with self._locked()`` deep inside a
+    hundred-line body is not.
+
+    A ledger built without a lease is unaffected, which is what keeps the
+    single-process path exactly as it was.
+    """
+
+    @wraps(method)
+    def wrapper(self: ActionLedger, /, *args: _P.args, **kwargs: _P.kwargs) -> _R:
+        with self._locked():
+            return method(self, *args, **kwargs)
+
+    return wrapper
+
+
 @dataclass(frozen=True, slots=True)
 class ActionOutcome:
     """What a claim returned.
@@ -246,17 +289,87 @@ class ActionLedger:
     Single-writer per run. Deduplication is a claim-then-check against the
     folded log, not an atomic compare-and-set, so two processes claiming the
     same key at the same instant both read "no prior slot" and both open one.
-    The `docs/multi_agent_isolation.md` ownership model applies: a caller must
-    hold the run's lease (`continuum.concurrency.LeaseCoordinator`) before
-    claiming, exactly as `RecoveryLedger` does. Absent a lease, concurrent
-    claims on one key can each proceed and the exactly-once guarantee is only as
-    strong as the caller's own serialization. This class does not acquire the
-    lease itself yet; see issue tracking for lease-aware claiming.
+    The ``docs/multi_agent_isolation.md`` ownership model applies: one run, one
+    owner at a time.
+
+    Pass ``lease`` to have the ledger enforce that itself. Every mutating
+    method then acquires the run's lease for ``holder_id`` before it folds the
+    log, and releases it after the append, so concurrent claimants on one key
+    collapse to a single winner; the losers raise :class:`ClaimLockError`
+    rather than opening a parallel slot. ``holder_id`` is required alongside a
+    lease and must be a stable agent identity, not a shared constant: a default
+    would make every process look like the same holder and quietly disable the
+    protection it was passed to provide.
+
+    The lease is reentrant for its own holder, so the documented pattern of a
+    caller acquiring the run lease and *then* using the ledger still works --
+    the ledger recognises the lease as already its own, and leaves releasing it
+    to whoever acquired it.
+
+    Without ``lease`` the behaviour is exactly as before: unsynchronised, and
+    only as strong as the caller's own serialization. That remains the default
+    because the single-process path has nothing to serialise against.
+
+    Two limits are worth stating rather than implying. The lease is scoped to
+    one ``run_id``, so an unscoped claim (``scoped_to_run=False``) racing the
+    same key from *another* run is not covered by this run's lease; both
+    claimants would need to agree on a lease to be safe. And the claim is still
+    not atomic in storage, so a caller that mixes leased and unleased ledgers on
+    one run gets the weaker guarantee.
     """
 
-    def __init__(self, storage: Storage, run_id: str) -> None:
+    def __init__(
+        self,
+        storage: Storage,
+        run_id: str,
+        *,
+        lease: LeaseCoordinator | None = None,
+        holder_id: str | None = None,
+        ttl: timedelta | None = None,
+    ) -> None:
+        if lease is not None and not holder_id:
+            raise ValueError(
+                "holder_id is required when a lease is supplied: a shared default "
+                "would make two processes appear to be the same lease holder and "
+                "silently defeat the serialization. Pass a stable agent identity."
+            )
         self.storage = storage
         self.run_id = run_id
+        self._lease = lease
+        self._holder_id = holder_id or ""
+        self._ttl = ttl
+
+    # -- single-writer ---------------------------------------------------- #
+
+    @contextmanager
+    def _locked(self) -> Iterator[None]:
+        """Hold the run's lease for the duration of one mutating call.
+
+        Reentrant for the lease's own holder. A caller that already acquired the
+        run lease (the pattern ``docs/multi_agent_isolation.md`` describes, and
+        the one ``continuum serve`` follows) passes straight through, and the
+        lease is left for that caller to release. Without this, the ledger would
+        fail every claim made by an agent that had correctly taken ownership of
+        the run first, which is precisely the well-behaved caller.
+        """
+        if self._lease is None:
+            yield
+            return
+        if self._lease.is_held(self.run_id, self._holder_id):
+            # Already ours. Do not release on the way out: the outer holder owns
+            # the lease's lifetime and may still need it.
+            yield
+            return
+        if not self._lease.acquire(self.run_id, self._holder_id, self._ttl):
+            raise ClaimLockError(
+                f"run {self.run_id!r} is leased to {self._lease.holder(self.run_id)!r}; "
+                f"{self._holder_id!r} must not write to the action ledger while another "
+                f"agent owns the run. Retry once the lease is free."
+            )
+        try:
+            yield
+        finally:
+            self._lease.release(self.run_id, self._holder_id)
 
     # -- reading ---------------------------------------------------------- #
 
@@ -447,6 +560,7 @@ class ActionLedger:
         self.storage.append_event(self.run_id, event_type, payload)
         return action
 
+    @_single_writer
     def claim(
         self,
         action_type: str,
@@ -618,6 +732,7 @@ class ActionLedger:
             f"Reconcile it before retrying."
         )
 
+    @_single_writer
     def complete(
         self,
         key: str,
@@ -639,6 +754,7 @@ class ActionLedger:
         )
         return self._record(key, action)
 
+    @_single_writer
     def fail(self, key: str, error: str, *, certain: bool = True) -> Action:
         """Record that the effect did not happen.
 
@@ -658,6 +774,7 @@ class ActionLedger:
         )
         return self._record(key, action)
 
+    @_single_writer
     def reconcile(
         self,
         key: str,
@@ -720,6 +837,7 @@ class ActionLedger:
             )
         return self._record(key, action, EventType.ACTION_RECONCILED)
 
+    @_single_writer
     def compensate(self, key: str, *, note: str = "", by: str | None = None) -> Action:
         """Record that a completed effect was deliberately undone."""
         existing = self._require(key)
@@ -733,6 +851,7 @@ class ActionLedger:
         )
         return self._record(key, action, EventType.ACTION_COMPENSATED)
 
+    @_single_writer
     def flag_for_review(self, key: str, reason: str) -> Action:
         """Escalate an action a human must judge."""
         existing = self._require(key)

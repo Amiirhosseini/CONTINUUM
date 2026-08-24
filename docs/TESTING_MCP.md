@@ -207,11 +207,19 @@ empirically that the documented remedy is sufficient: wrapping the same eight
 claims in a shared `SQLiteLeaseCoordinator` lease collapses them to exactly one
 winner.
 
-**Partially addressed.** The single-writer requirement is now stated on the
-`ActionLedger` docstring, and two tests pin both halves: that the ledger alone
-does not serialise concurrent claimants, and that the lease restores exactly-once.
-Making the claim atomic in storage, or accepting a `LeaseCoordinator` directly, is
-left to #345.
+**Addressed.** `ActionLedger` now accepts a `LeaseCoordinator` and acquires the
+run's lease itself around `claim` and every settle method, so the eight-thread
+race collapses to exactly one go-ahead and one `STARTED` slot. The losers split
+between `ClaimLockError` (the run was leased elsewhere) and `UnknownSideEffect`
+(the lease was free but the winner's slot was already open and unsettled); both
+are refusals, neither performs the charge. The unleased default is unchanged and
+still pinned by its own test, because a single-process caller has nothing to
+serialise against.
+
+Two things remain, and are tracked rather than implied. The construction sites
+that can face a second writer still build the ledger unleased, so the capability
+is opt-in per caller. And the claim is still not atomic in storage, which is the
+only version of this that would hold without the caller's cooperation.
 
 The event chain stays sound throughout, so these are honestly-recorded duplicate
 attempts rather than corruption. That is precisely why only a lease can prevent
@@ -240,7 +248,7 @@ after every change.
 | Recorded progress and the goal survive a mid-action crash | yes |
 | A completed unscoped effect deduplicates across runs (#34) | yes |
 | A consumed single-use grant cannot be resurrected (#269) | yes |
-| Exactly-once under concurrency, **given the run lease** (#345) | yes |
+| Exactly-once under concurrency, with a lease-aware ledger (#345) | yes |
 
 ## Notes for operators
 
@@ -270,6 +278,9 @@ mypy src
 python -m pytest tests/test_retry_budgets.py tests/test_action_ledger.py \
                  tests/test_validator.py tests/test_mcp_server.py -q
 
+# finding 8, both halves: the unleased race and the lease that closes it
+python -m pytest tests/test_storage_concurrency.py -q
+
 # the security properties that must not move
 python -m pytest tests/test_provenance.py tests/test_toy_task_banner_attack.py \
                  tests/test_trust_gate.py -q
@@ -282,9 +293,11 @@ Stated plainly rather than left implied.
 - **Model drift over MCP is still undetectable.** Finding 3 removes the false
   assurance but adds no write path for the model. Issue #308 remains open for
   that decision.
-- **Concurrent claiming is not atomic.** Finding 8 is documented and pinned by
-  tests, and the lease is proven sufficient, but `ActionLedger` still does not
-  acquire a lease itself. Issue #345.
+- **Concurrent claiming is not atomic.** `ActionLedger` acquires the run lease
+  itself when given a coordinator (finding 8), but the underlying claim is still
+  a fold-then-append rather than a compare-and-set. A caller that omits the
+  lease, or mixes leased and unleased ledgers on one run, gets the weaker
+  guarantee. Atomic claiming in storage stays open on #345.
 - **No Postgres run.** `require_usable_run_id` is wired into the Postgres backend
   but only the SQLite path was executed; the Postgres contract tests need a live
   server.

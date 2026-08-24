@@ -10,6 +10,7 @@ attempt count, corrupting the high watermark.
 ## Current mechanism
 
 - `RecoveryLedger` can be constructed with a `LeaseCoordinator` (`src/continuum/recovery/ledger.py:209`). `append_decision` and `record_attempt` acquire the lease for the run (`_locked` in `src/continuum/recovery/ledger.py:222`) and raise `LedgerLockError` if the lease is held. The same coordinator is used by `continuum serve` sidecars.
+- `ActionLedger` takes the same optional `LeaseCoordinator` (issue #345). Every mutating method (`claim` and each settle method) acquires the run's lease before folding the log and releases it after appending, raising `ClaimLockError` when the lease is held elsewhere. Unlike `RecoveryLedger` it is reentrant for its own holder, so an agent that acquired the run lease first is not locked out of its own ledger, and a `holder_id` is mandatory rather than defaulted, because a shared default holder would make that reentrancy indistinguishable from two agents colliding.
 - `CheckpointManager` writes checkpoints and versions via `Storage` which is
   transactional in SQLite and Postgres. `prune` and `last_recovery_anchor`
   operate per `run_id` and version.
@@ -69,6 +70,19 @@ ownership model for the state itself.
   and in the walkthrough. If a run is observed without a lease, `reconcile`
   should report `drift` and the run should not be resumed until a lease
   holder validates.
+
+- Wire a coordinator through the `ActionLedger` construction sites that can face
+  a second writer (`continuum serve`, the MCP server, the gateway). The class
+  accepts one now, but those callers still build it unleased, so the operator
+  gets the capability only by constructing the ledger directly. Each needs a
+  decision about where its stable `holder_id` comes from.
+
+- Make the claim atomic in storage, so the guarantee holds without cooperation
+  from callers. A unique constraint over open slots per `(run_id,
+  idempotency_key)` is the shape, but the ledger is event-sourced and a legitimate
+  re-claim after `COMPENSATED` or `FAILED` writes a second record under the same
+  key, so "open" has to be expressed against the fold rather than the table. This
+  is the only option that removes the caller's obligation entirely.
 
 This spec may spawn implementation issues for a `LeaseAwareCheckpointManager`
 wrapper and for per kind lease splitting.

@@ -714,6 +714,28 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`ActionLedger` could not serialise concurrent claims on one key (#345).**
+  `claim()` deduplicates by folding the log and then appending, with nothing
+  between the read and the write, so processes racing on one key could each be
+  told to proceed: eight threads, eight go-aheads, eight charges. The outcome was
+  decided purely by thread scheduling, and the event chain verified clean either
+  way, so no integrity check could catch it. `docs/multi_agent_isolation.md`
+  already specified the remedy ("one run, one owner at a time") and
+  `RecoveryLedger` implemented it, but `ActionLedger` (the class whose entire
+  purpose is at-most-once side effects) had no lease parameter. It now accepts an
+  optional `LeaseCoordinator` and acquires the run's lease around `claim` and
+  every settle method (`complete`, `fail`, `reconcile`, `compensate`,
+  `flag_for_review`), so eight simultaneous claimants collapse to exactly one
+  go-ahead and one `STARTED` slot; the losers raise the new `ClaimLockError`, or
+  `UnknownSideEffect` where the winner's slot was already open, and neither
+  performs the effect. The lease is reentrant for its own holder so an agent that
+  correctly took the run lease first is not locked out of its own ledger, and
+  `holder_id` is required rather than defaulted, because a shared default would
+  make two processes look like one holder and silently defeat the protection.
+  Omitting `lease` leaves the single-process path exactly as it was. Atomic
+  claiming in storage, which would drop the caller's obligation entirely, remains
+  open on #345.
+
 - **Em dash in the CI lint job name.** The `mypy` step in `ci.yml` was named
   with an em dash, violating the no-em-dash house rule (#266); renamed with a
   comma. Found while editing the file for the wheel-artifact job.
