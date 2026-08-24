@@ -51,16 +51,19 @@ from typing import Any
 
 __all__ = [
     "AuthorizationPolicy",
+    "AuthPolicy",
+    "ConfirmPolicy",
     "NotAuthorized",
     "UnknownCaller",
-    "AuthPolicy",
     "NotAuthenticated",
     "POLICY_ENV_VAR",
     "POLICY_ENV_VAR_ALIAS",
     "POLICY_FILENAME",
     "AUTH_ENV_VAR",
+    "CONFIRM_ENV_VAR",
     "load_policy",
     "load_auth",
+    "load_confirm",
     "caller_name",
     "token_from",
     "CLIENT_TOKENS_ENV_VAR",
@@ -152,6 +155,13 @@ class AuthPolicy:
             raise NotAuthenticated("the caller did not present the expected shared secret")
 
 
+#: Confirmation of self-reported state over MCP is gated behind its own secret
+#: (issue #201). Without this, any caller allowlisted to record progress could
+#: also call ``continuum_confirm`` to clear the REQUIRES_REVIEW on its own
+#: self-report, which reinstates exactly the exploit the self-certification fix
+#: (``9738b9e``) closed.
+CONFIRM_ENV_VAR = "CONTINUUM_MCP_CONFIRM_TOKEN"
+
 AUTH_ENV_VAR = "CONTINUUM_MCP_TOKEN"
 
 #: Per-client credentials: a ``name:secret`` mapping (whitespace or comma
@@ -205,6 +215,68 @@ def load_auth(
     if value:
         return AuthPolicy(value, source=AUTH_ENV_VAR)
     return AuthPolicy(source="default (disabled)")
+
+
+class ConfirmPolicy:
+    """Gates ``continuum_confirm`` behind a dedicated secret (issue #201).
+
+    Unlike :class:`AuthPolicy` this is fail-closed *by default*: with no secret
+    configured the tool refuses every caller, because an open confirmation path
+    is not a default anyone could want. An agent that may record progress must
+    not also be able to confirm that progress, so confirmation over MCP is off
+    until the operator explicitly turns it on by setting
+    ``CONTINUUM_MCP_CONFIRM_TOKEN``; a human confirms instead with
+    ``continuum confirm <run_id>`` on the host.
+
+    When configured, the caller must present that secret in the handshake's
+    ``_meta.authToken``. A missing, empty, or mismatched secret always refuses.
+    """
+
+    __slots__ = ("expected", "source")
+
+    def __init__(self, expected: str | None = None, *, source: str = "default (refusing)") -> None:
+        self.expected = expected
+        self.source = source
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        mode = "configured" if self.expected else "refusing"
+        return f"ConfirmPolicy(mode={mode}, source={self.source!r})"
+
+    @property
+    def disabled(self) -> bool:
+        """True when no secret is configured, in which case every call refuses."""
+        return not self.expected
+
+    def verify(self, token: str | None) -> None:
+        """Raise ``NotAuthenticated`` unless ``token`` proves the confirm secret."""
+        if not self.expected:
+            raise NotAuthenticated(
+                f"continuum_confirm is refused because no {CONFIRM_ENV_VAR} is configured; "
+                f"an agent must not confirm its own self-reported state. Have a human run "
+                f"'continuum confirm <run_id>' instead, or set {CONFIRM_ENV_VAR} if "
+                f"confirmation over MCP is genuinely wanted."
+            )
+        if not token or token != self.expected:
+            raise NotAuthenticated(
+                f"the caller did not present the confirmation secret required by {CONFIRM_ENV_VAR}"
+            )
+
+
+def load_confirm(
+    expected: str | None = None, *, env: Mapping[str, str] | None = None
+) -> ConfirmPolicy:
+    """Resolve the confirmation policy: explicit argument, then env var, then refuse.
+
+    There is deliberately no state in which an unset secret allows calls: an
+    unset secret means ``continuum_confirm`` refuses every caller.
+    """
+    if expected is not None:
+        return ConfirmPolicy(expected, source="argument")
+    environ = os.environ if env is None else env
+    value = environ.get(CONFIRM_ENV_VAR)
+    if value:
+        return ConfirmPolicy(value, source=CONFIRM_ENV_VAR)
+    return ConfirmPolicy(source=f"default (refuse; set {CONFIRM_ENV_VAR} to enable)")
 
 
 def token_from(context: Any) -> str | None:

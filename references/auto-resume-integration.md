@@ -82,10 +82,11 @@ Registered in `.mcp.json` (project root):
 
 - Spawns as a stdio MCP server; it opens `continuum.db` in the current working
   directory.
-- **Ten tools**, split read-only vs mutating:
+- **Eleven tools**, split read-only vs mutating:
   `continuum_record_progress`, `continuum_checkpoint`,
-  `continuum_intercept_action`, `continuum_complete_action`,
-  `continuum_fail_action`, `continuum_reconcile_action`, `continuum_confirm`
+  `continuum_record_summary`, `continuum_intercept_action`,
+  `continuum_complete_action`, `continuum_fail_action`,
+  `continuum_reconcile_action`, `continuum_confirm`
   (mutating), and `continuum_validate`, `continuum_resume`,
   `continuum_list_actions` (read-only).
 - **Authorization** (`authz.py`): mutating tools are gated by an allowlist
@@ -240,7 +241,7 @@ coarser than desired.
 
 ### P7. Per-session token floor
 Every session pays for the system prompt (`CLAUDE.md`) plus the schemas of all
-ten MCP tools, regardless of how little work is done. For many short
+eleven MCP tools, regardless of how little work is done. For many short
 resume checks this fixed cost dominates.
 
 ---

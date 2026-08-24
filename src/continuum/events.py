@@ -57,6 +57,9 @@ class EventType(StrEnum):
     RUN_ABORTED = "RUN_ABORTED"
     TASK_UPDATED = "TASK_UPDATED"
 
+    # lineage (issue #259): a divergent continuation was approved off this run
+    RUN_FORKED = "RUN_FORKED"
+
     # tools
     TOOL_CALLED = "TOOL_CALLED"
     TOOL_COMPLETED = "TOOL_COMPLETED"
@@ -90,6 +93,12 @@ class EventType(StrEnum):
     RECOVERY_BLOCKED = "RECOVERY_BLOCKED"
     REVIEW_CONFIRMED = "REVIEW_CONFIRMED"
 
+    # agent cognition (issue #235): compact self-authored plan state
+    REASONING_SUMMARY = "REASONING_SUMMARY"
+
+    # log maintenance (issue #239): marks the boundary of an archived prefix
+    EVENT_LOG_ANCHORED = "EVENT_LOG_ANCHORED"
+
     # perception and planning (security extension)
     PERCEPTION_OBSERVED = "PERCEPTION_OBSERVED"
     BRANCH_RESOLVED = "BRANCH_RESOLVED"
@@ -98,6 +107,9 @@ class EventType(StrEnum):
     ACTION_RECORDED = "ACTION_RECORDED"
     ACTION_RECONCILED = "ACTION_RECONCILED"
     ACTION_COMPENSATED = "ACTION_COMPENSATED"
+
+    # authority (issue #269): a claim tried to reuse a consumed single-use grant
+    GRANT_DENIED = "GRANT_DENIED"
 
 
 class AppendOnlyViolation(RuntimeError):

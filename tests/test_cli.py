@@ -69,6 +69,53 @@ def interrupt_a_side_effect(db: str) -> None:
         ActionLedger(store, "run_1").claim("github.create_issue", {"title": "Anomaly"})
 
 
+# --- creating a run from the CLI (issue #204) -------------------------------- #
+
+
+def test_start_creates_a_run_the_whole_toolchain_can_use(tmp_path: Path) -> None:
+    """The CLI could not originate work before `start`: the resume hint pointed
+    at `continuum checkpoint <run_id>`, which fails on a run that does not
+    exist yet."""
+    path = str(tmp_path / "fresh.db")
+    code, out, err = run("--db", path, "start", "myrun", "--goal", "Ship the thing")
+    assert code == ExitCode.OK, err
+
+    with SQLiteStorage(path) as store:
+        assert store.get_run("myrun").goal == "Ship the thing"
+        events = store.read_events("myrun")
+    assert [e.type.value for e in events] == ["RUN_STARTED"]
+    assert events[0].payload["goal"] == "Ship the thing"
+
+    # The run is now visible everywhere a run must be.
+    code, out, _ = run("--db", path, "runs")
+    assert "myrun" in out
+    # A human-asserted goal with no self-reported progress is genuinely safe
+    # to resume: the verdict must be OK, not merely "found".
+    code, out, _ = run("--db", path, "resume", "myrun")
+    assert code == ExitCode.OK
+    assert "RESUME" in out
+
+
+def test_start_without_a_goal_is_a_usage_error(tmp_path: Path) -> None:
+    path = str(tmp_path / "fresh.db")
+    with pytest.raises(SystemExit):
+        run("--db", path, "start", "myrun")
+
+
+def test_starting_an_existing_run_fails_without_touching_history(db: str) -> None:
+    before_events: int
+    with SQLiteStorage(db) as store:
+        before_events = store.last_sequence("run_1")
+
+    code, _, err = run("--db", db, "start", "run_1", "--goal", "hijack")
+    assert code == ExitCode.ERROR
+    assert "already exists" in err
+
+    with SQLiteStorage(db) as store:
+        assert store.get_run("run_1").goal == "Analyze 100 documents"
+        assert store.last_sequence("run_1") == before_events
+
+
 # --- the exit-code contract ------------------------------------------------ #
 
 
@@ -118,28 +165,39 @@ def test_a_missing_run_is_distinguishable(db: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "command",
+    "command,extra",
     [
-        "inspect",
-        "history",
-        "events",
-        "verify",
-        "actions",
-        "replay",
-        "resume",
-        "validate",
-        "show-contract",
+        ("inspect", []),
+        ("history", []),
+        ("events", []),
+        ("verify", []),
+        ("actions", []),
+        ("replay", []),
+        ("resume", []),
+        ("validate", []),
+        ("show-contract", []),
+        # Mutating commands were added after issue #202: `checkpoint` used to
+        # fail with a ProjectionError (exit 1) instead of NOT_FOUND because it
+        # projected before checking the run existed.
+        ("checkpoint", []),
+        ("confirm", []),
+        ("attest", []),
+        ("attest-verify", ["--attest", "irrelevant-on-missing-run.json"]),
+        ("fork", ["--reason", "test"]),
     ],
 )
-def test_no_command_reports_success_for_a_run_that_does_not_exist(db: str, command: str) -> None:
+def test_no_command_reports_success_for_a_run_that_does_not_exist(
+    db: str, command: str, extra: list[str]
+) -> None:
     """A typo'd run name must never look like a clean bill of health.
 
     An empty run has a trivially valid (empty) event chain and no recorded
     actions, so `verify` and `actions` would happily exit 0 — letting
     `continuum verify $TYPO && deploy` succeed against a name nobody has ever
-    written to.
+    written to. Mutating commands owe the same distinction: `checkpoint`
+    diagnosed a missing run as a projection error until issue #202.
     """
-    code, _, err = run("--db", db, command, "definitely-not-a-run")
+    code, _, err = run("--db", db, command, "definitely-not-a-run", *extra)
     assert code != ExitCode.OK, f"{command} reported success for a nonexistent run"
     assert code == ExitCode.NOT_FOUND, f"{command} misdiagnosed a missing run (exit {code})"
     assert "definitely-not-a-run" in err
@@ -780,3 +838,45 @@ def test_validate_json_carries_mode(db: str) -> None:
     data = json.loads(out)
     assert data["mode"] == "resume"
     assert data["safe"] is True
+
+
+# --- closing a run from the keyboard ------------------------------------------ #
+
+
+def test_complete_closes_a_run_and_clears_it_from_active_resolution(
+    tmp_path: Path,
+) -> None:
+    """Found missing during live testing: finished runs kept surfacing as the
+    active run and hijacked every fresh session's resume."""
+    path = str(tmp_path / "c.db")
+    with SQLiteStorage(path) as store:
+        store.create_run(Run(run_id="old", goal="finished work"))
+    code, out, _ = run("--db", path, "--json", "complete", "old", "--summary", "shipped")
+    assert code == ExitCode.OK, out
+    payload = json.loads(out)
+    assert payload["status"] == "completed"
+
+    with SQLiteStorage(path) as store:
+        assert store.get_run("old").status.value == "completed"
+        events = [e.type.value for e in store.read_events("old")]
+        assert "REVIEW_CONFIRMED" in events and "RUN_COMPLETED" in events
+        # A completed run is terminal: it can never be offered for resume.
+        assert store.get_active_run() is None
+
+
+def test_complete_is_idempotent_enough_for_double_clicks(tmp_path: Path) -> None:
+    path = str(tmp_path / "d.db")
+    with SQLiteStorage(path) as store:
+        store.create_run(Run(run_id="r", goal="g"))
+    code, _, err = run("--db", path, "complete", "r")
+    assert code == ExitCode.OK
+    code, _, err = run("--db", path, "complete", "r")
+    assert code == ExitCode.OK, err
+
+
+def test_complete_unknown_run_is_not_found(tmp_path: Path) -> None:
+    path = str(tmp_path / "e.db")
+    with SQLiteStorage(path):
+        pass
+    code, _, err = run("--db", path, "complete", "ghost")
+    assert code == ExitCode.NOT_FOUND

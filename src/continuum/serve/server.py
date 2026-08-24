@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 from typing import Any, TextIO, cast
 
 from continuum.actions.ledger import ActionLedger
@@ -39,6 +40,7 @@ from continuum.models import (
     UnknownSideEffect,
 )
 from continuum.recovery.contract import render_contract
+from continuum.recovery.guidance import human_steps_for
 from continuum.state.semantic import project
 from continuum.storage import RunNotFound, Storage, open_storage
 
@@ -273,6 +275,86 @@ class SidecarServer:
         self.storage.close()
 
 
+class SidecarHTTP:
+    """HTTP transport over the sidecar dispatch (issue #238).
+
+    POST /<method> with a JSON body is dispatched exactly like the stdio
+    wire: same handlers, same token auth (``CONTINUUM_SERVE_TOKEN``), same
+    errors mapped to status codes (404 unknown method, 403 unauthorized,
+    400 bad params, 500 sidecar failure). Binds 127.0.0.1 by default; the
+    transport exists so non-Python agents get the durability plane without
+    embedding the library.
+    """
+
+    def __init__(self, sidecar: SidecarServer, port: int = 8765, bind: str = "127.0.0.1") -> None:
+        import http.server
+
+        sidecar_ref = sidecar
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def log_message(self, *args: Any) -> None:  # silence
+                pass
+
+            def _json(self, code: int, payload: dict[str, Any]) -> None:
+                body = json.dumps(payload).encode()
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_POST(self) -> None:  # noqa: N802
+                method = self.path.strip("/").split("?")[0]
+                length = int(self.headers.get("Content-Length") or 0)
+                raw = self.rfile.read(length) if length else b"{}"
+                try:
+                    params = json.loads(raw)
+                    if not isinstance(params, dict):
+                        raise BadParams("body must be a JSON object")
+                except json.JSONDecodeError as exc:
+                    self._json(400, {"error": f"invalid JSON body: {exc}"})
+                    return
+                try:
+                    result = sidecar_ref.dispatch(method, params)
+                except MethodNotFound as exc:
+                    self._json(404, {"error": str(exc)})
+                    return
+                except NotAuthorized as exc:
+                    self._json(403, {"error": str(exc)})
+                    return
+                except BadParams as exc:
+                    self._json(400, {"error": str(exc)})
+                    return
+                except SidecarError as exc:
+                    self._json(500, {"error": str(exc)})
+                    return
+                except Exception as exc:  # storage errors (missing run etc.)
+                    self._json(500, {"error": str(exc)})
+                    return
+                self._json(200, result)
+
+        server = http.server.ThreadingHTTPServer((bind, port), Handler)
+        self.httpd = server
+        self.port = int(server.server_address[1])
+        self._thread: threading.Thread | None = None
+
+    def serve_forever(self) -> None:
+        self.httpd.serve_forever()
+
+    def start_background(self) -> None:
+        self._thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+        self._thread.start()
+
+    def shutdown(self) -> None:
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+
+# -- wire loop ---------------------------------------------------------- #
+
+
 def _write(stream: TextIO, payload: dict[str, Any]) -> None:
     stream.write(json.dumps(payload, default=str) + "\n")
     stream.flush()
@@ -293,6 +375,7 @@ def _decision_payload(decision: Any, *, goal: str) -> dict[str, Any]:
         "mode": decision.mode.value,
         "safe": decision.safe,
         "next_allowed_action": decision.next_allowed_action,
+        "human_steps": human_steps_for(decision, run_id=decision.state.run_id),
         "rationale": list(decision.rationale),
         "repairs": [
             {
@@ -315,6 +398,7 @@ def _decision_payload(decision: Any, *, goal: str) -> dict[str, Any]:
             "total": decision.state.progress.total,
         },
         "tail_evidence": decision.tail_evidence,
+        "informed_retry": getattr(decision, "informed_retry", None),
         "contract": decision.contract.model_dump(mode="json"),
         "contract_text": render_contract(decision.contract),
         "report": decision.render(),
@@ -452,12 +536,16 @@ def _h_intercept_action(server: SidecarServer, params: dict[str, Any]) -> dict[s
     action_type = _require(params, "action_type")
     server._ensure_run(run_id)
     ledger = server._ledger(run_id)
+    from continuum.actions.grants import GrantDenied, normalize_grant
+
+    grant_clean = normalize_grant(params.get("grant"))
     try:
         outcome = ledger.claim(
             action_type,
             arguments=params.get("arguments"),
             key=params.get("key"),
             scoped_to_run=params.get("scoped_to_run", True),
+            grant=grant_clean,
         )
     except UnknownSideEffect as exc:
         return {
@@ -470,6 +558,20 @@ def _h_intercept_action(server: SidecarServer, params: dict[str, Any]) -> dict[s
                 "A previous attempt was interrupted and its outcome is unknown. "
                 "Do not retry. Verify with the external system, then report via "
                 "reconcile_action."
+            ),
+        }
+    except GrantDenied as exc:
+        return {
+            "run_id": run_id,
+            "action_type": action_type,
+            "proceed": False,
+            "reason_code": "grant_denied",
+            "grant_id": exc.grant_id,
+            "reason": str(exc),
+            "guidance": (
+                "This single-use authority was already consumed (recorded in the "
+                "ledger). It does not come back after a restore. Ask the operator "
+                "for a fresh grant."
             ),
         }
     if outcome.fresh:

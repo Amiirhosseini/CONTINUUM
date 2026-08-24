@@ -9,8 +9,8 @@ Two principles shape the surface:
 
 **Read-only by default.** ``inspect``, ``history``, ``validate``, ``diff`` and
 ``show-contract`` never write. They are safe against a live database while an
-agent is mid-run. Only ``init``, ``checkpoint`` and ``resume --repair`` mutate,
-and they say so.
+agent is mid-run. Only ``init``, ``start``, ``checkpoint``, ``confirm`` and
+``resume --repair`` mutate, and they say so.
 
 **Exit codes carry the verdict.** ``continuum resume $RUN && ./start-agent.sh``
 must not launch an agent onto stale state, so only a verified-safe run exits 0.
@@ -33,9 +33,32 @@ from continuum.actions import ActionLedger
 from continuum.checkpoint import CheckpointError, CheckpointManager
 from continuum.cli.colour import Palette
 from continuum.cli.exitcodes import ExitCode, exit_code_for
+from continuum.clienthooks import (
+    CLIENT_PROFILES,
+    install_client_hook,
+    observe_command,
+    observe_event_payload,
+    remove_claude_code_hook,
+)
 from continuum.environment import StaticProvider, capture
 from continuum.events import EventType
-from continuum.models import ActionStatus, EnvironmentSnapshot, EnvResource, Origin, RecoveryMode
+from continuum.gate import (
+    DEFAULT_GATE_CONFIG_PATH,
+    GateConfigError,
+    load_gate_config,
+)
+from continuum.gate import (
+    decide as gate_decide,
+)
+from continuum.models import (
+    ActionStatus,
+    EnvironmentSnapshot,
+    EnvResource,
+    Origin,
+    RecoveryMode,
+    Run,
+    RunStatus,
+)
 from continuum.observability import render_dashboard
 from continuum.provenance_map import summarize
 from continuum.recovery import RecoveryEngine, render_contract
@@ -50,6 +73,7 @@ from continuum.state.semantic import ProjectionError, project
 from continuum.state.versioning import state_fingerprint
 from continuum.storage import (
     CheckpointNotFound,
+    ConcurrentWriteError,
     CorruptedRecord,
     RunNotFound,
     Storage,
@@ -183,6 +207,54 @@ def cmd_init(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> 
         f"Initialised CONTINUUM storage at {args.db}",
         as_json=args.json,
         stream=out,
+    )
+    return ExitCode.OK
+
+
+def cmd_start(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Create a run with a goal, so the CLI can originate work.
+
+    Until now a run could only be created through the Python API or an MCP
+    client, which left the CLI's own "start one with ..." hint pointing at
+    nothing (issue #204). The run row and its RUN_STARTED event are one fact,
+    so they are written in a single transaction (a crash between two separate
+    writes would strand a run that can be neither projected nor resumed); the
+    goal is asserted by a human at the keyboard, so it is sourced Origin.HUMAN
+    rather than self-certified.
+    """
+    parent_id = getattr(args, "parent", None)
+    if parent_id:
+        try:
+            parent = storage.get_run(parent_id)
+        except RunNotFound:
+            print(f"error: parent run {parent_id!r} does not exist", file=err)
+            return ExitCode.NOT_FOUND
+        if parent.status.value == "completed":
+            print(f"error: parent run {parent_id!r} is completed; cannot attach children", file=err)
+            return ExitCode.ERROR
+
+    metadata_extra: dict[str, Any] = {}
+    a2a = getattr(args, "a2a_task", None)
+    if a2a:
+        metadata_extra["a2a_task_id"] = a2a
+
+    if parent_id or metadata_extra:
+        child_run = Run(
+            run_id=args.run_id, goal=args.goal, parent_run_id=parent_id, metadata=metadata_extra
+        )
+    else:
+        child_run = Run(run_id=args.run_id, goal=args.goal)
+    try:
+        run = storage.create_run_started(child_run, source=Origin.HUMAN)
+    except ConcurrentWriteError as exc:
+        print(f"error: {exc}", file=err)
+        return ExitCode.ERROR
+    _emit(
+        {"run_id": run.run_id, "goal": run.goal},
+        f"Started run {run.run_id}: {args.goal}",
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
     )
     return ExitCode.OK
 
@@ -406,6 +478,30 @@ def cmd_diff(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> 
     return ExitCode.OK
 
 
+def _human_steps(decision: Any, run_id: str) -> list[str]:
+    """Executable next steps for this decision, derived from live config.
+
+    Read-only: the reconciler registry and gate config are inspected, never
+    executed. Absent files simply mean fewer shortcuts to suggest.
+    """
+    from continuum.gate import DEFAULT_GATE_CONFIG_PATH
+    from continuum.reconcilers import DEFAULT_RECONCILERS_PATH, load_reconcilers
+    from continuum.recovery.guidance import human_steps_for
+
+    try:
+        probes = load_reconcilers(Path(DEFAULT_RECONCILERS_PATH))
+        probed: list[str] = list(probes)
+    except Exception:
+        probed = []
+    gate_configured = Path(DEFAULT_GATE_CONFIG_PATH).exists()
+    return human_steps_for(
+        decision,
+        run_id=run_id,
+        probed_types=probed,
+        gate_configured=gate_configured,
+    )
+
+
 def cmd_validate(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
     """Assess a run without touching it. Exit code carries the verdict."""
     decision = RecoveryEngine(storage, strict_unknown=not args.tolerate_unknown).assess(
@@ -417,6 +513,15 @@ def cmd_validate(args: argparse.Namespace, storage: Storage, out: Any, err: Any)
         out.write(render_dashboard(decision) + "\n")
         out.flush()
         return exit_code_for(decision.mode)
+    steps = _human_steps(decision, args.run_id)
+    if steps:
+        text = (
+            decision.render()
+            + "\n\nNext steps:\n"
+            + "\n".join(f"  {i}. {t}" for i, t in enumerate(steps, 1))
+        )
+    else:
+        text = decision.render()
     payload = {
         "run_id": decision.run_id,
         "mode": decision.mode.value,
@@ -424,10 +529,11 @@ def cmd_validate(args: argparse.Namespace, storage: Storage, out: Any, err: Any)
         "contract": decision.contract.model_dump(mode="json"),
         "rationale": list(decision.rationale),
         "repairs": [s.action_name for s in decision.plan.steps],
+        "human_steps": steps,
     }
     _emit(
         payload,
-        decision.render(),
+        text,
         as_json=args.json,
         stream=out,
         palette=getattr(args, "_palette", None),
@@ -442,7 +548,7 @@ def cmd_resume(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
         active = storage.get_active_run()
         if active is None:
             print(
-                "No active run to resume. Start one with: continuum checkpoint <run_id>",
+                'No active run to resume. Start one with: continuum start <run_id> --goal "..."',
                 file=err,
             )
             return 2
@@ -454,12 +560,71 @@ def cmd_resume(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
         expected_model=args.model,
     )
 
+    # Family aggregation (#243): a parent may not RESUME while any child is
+    # unsafe or blocked - the most cautious signal wins, house-style.
+    from continuum.recovery.family import roll_up_children
+
+    child_statuses, family_blocked = roll_up_children(storage, run_id)
+    family_rationale = [
+        f"child run {c.run_id} is {c.mode} (uncertain={c.uncertain_actions})"
+        for c in child_statuses
+        if not c.safe or c.mode != "resume"
+    ]
+    steps = _human_steps(decision, run_id)
+    text = decision.render()
+    if family_blocked and decision.mode.value == "resume":
+        # House rule: the most cautious signal wins (#243). A clean parent
+        # with an unsafe child is presented as request_human.
+        text += "\n\nFAMILY BLOCKED: children of this run are not resumable.\n" + "\n".join(
+            f"  !! {r}" for r in family_rationale
+        )
+    if steps:
+        text += "\n\nNext steps:\n" + "\n".join(f"  {i}. {t}" for i, t in enumerate(steps, 1))
+
+    # Informed retry (#265): prior-attempt account, derived from recovery-path
+    # events already in the chain. Absent history means no section at all.
+    if decision.informed_retry:
+        from continuum.recovery.summary import render_informed_retry
+
+        text += "\n\nWhat previous attempts changed (informed retry):\n" + "\n".join(
+            f"  {line}" for line in render_informed_retry(decision.informed_retry)
+        )
+
+    # Version pinning drift (issue #241): informational only.
+    drift_lines: list[str] = []
+    if args.pinning:
+        from continuum.pinning import latest_pinning, normalize_pinning
+        from continuum.pinning import pinning_drift as compute_drift
+
+        try:
+            current = normalize_pinning(json.loads(args.pinning))
+            recorded = latest_pinning(storage.read_events(run_id))
+            drift_lines = compute_drift(recorded, current)
+            if drift_lines:
+                text += "\n\nPinning drift (informational):\n" + "\n".join(
+                    f"  - {line}" for line in drift_lines
+                )
+        except ValueError as exc:
+            print(f"error: --pinning: {exc}", file=err)
+            return ExitCode.ERROR
+
+    presented_mode = (
+        "request_human"
+        if (family_blocked and decision.mode.value == "resume")
+        else decision.mode.value
+    )
+    presented_safe = decision.safe and not (family_blocked and decision.mode.value == "resume")
     payload = {
         "run_id": decision.run_id,
         "goal": storage.get_run(run_id).goal,
-        "mode": decision.mode.value,
-        "safe": decision.safe,
+        "mode": presented_mode,
+        "safe": presented_safe,
         "next_allowed_action": decision.next_allowed_action,
+        "human_steps": steps,
+        "family_rationale": family_rationale,
+        "children": [c.__dict__ for c in child_statuses],
+        "pinning_drift": drift_lines,
+        "informed_retry": decision.informed_retry,
         "contract": decision.contract.model_dump(mode="json"),
         "repairs": [s.action_name for s in decision.plan.steps],
         "progress": {
@@ -470,7 +635,7 @@ def cmd_resume(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
     }
     _emit(
         payload,
-        decision.render(),
+        text,
         as_json=args.json,
         stream=out,
         palette=getattr(args, "_palette", None),
@@ -540,8 +705,224 @@ def cmd_confirm(args: argparse.Namespace, storage: Storage, out: Any, err: Any) 
     return exit_code_for(decision.mode)
 
 
+def cmd_budget(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Report retry-budget usage per action type (issue #240). Read-only."""
+    from continuum.budgets import (
+        DEFAULT_BUDGETS_PATH,
+        attempts_for_type,
+        evaluate_budget,
+        load_budgets,
+    )
+
+    storage.get_run(args.run_id)
+    try:
+        raw = load_budgets(Path(args.config) if args.config else Path(DEFAULT_BUDGETS_PATH))
+    except Exception as exc:
+        print(f"error: budget registry invalid: {exc}", file=err)
+        return ExitCode.ERROR
+
+    events = storage.read_events(args.run_id)
+    types_seen = sorted(
+        {
+            e.payload.get("action", {}).get("action_type")
+            for e in events
+            if e.type is EventType.ACTION_RECORDED and isinstance(e.payload.get("action"), dict)
+        }
+        | set((raw.get("action_types") or {}).keys())
+    )
+    rows: list[dict[str, Any]] = []
+    for action_type in types_seen:
+        used = attempts_for_type(events, action_type)
+        allowed, _, maximum = evaluate_budget(raw, action_type, 0)
+        remaining = max(0, maximum - used)
+        rows.append(
+            {
+                "action_type": action_type,
+                "attempts": used,
+                "max_attempts": maximum,
+                "remaining": remaining,
+                "exhausted": remaining == 0,
+            }
+        )
+    payload = {"run_id": args.run_id, "budgets": rows}
+    lines = [f"{'ACTION TYPE':<28} {'ATTEMPTS':>8} {'MAX':>4} {'REMAINING':>10}"]
+    for r in rows:
+        lines.append(
+            f"{r['action_type']:<28} {r['attempts']:>8} {r['max_attempts']:>4} {r['remaining']:>10}"
+        )
+    _emit(
+        payload,
+        "\n".join(lines) or "No budgets configured.",
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
+    )
+    return ExitCode.OK
+
+
+def cmd_tree(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Show a parent run and its children with recovery states (issue #243)."""
+    from continuum.recovery.family import children_of
+
+    parent_id = args.run_id
+    storage.get_run(parent_id)
+    engine = RecoveryEngine(storage)
+    lines: list[str] = []
+    try:
+        parent_decision = engine.assess(parent_id)
+        lines.append(
+            f"{parent_id}  [{parent_decision.mode.value}, safe={parent_decision.safe}]"
+            f"  {storage.get_run(parent_id).goal[:50]}"
+        )
+    except Exception as exc:
+        lines.append(f"{parent_id}  [assess error: {exc}]")
+
+    children = children_of(storage, parent_id)
+    if not children:
+        lines.append("  (no children)")
+    for child in children:
+        fork_mark = "[fork] " if str(child.metadata.get("fork", "")) == "true" else ""
+        try:
+            d = engine.assess(child.run_id)
+            mark = "ok " if d.safe else "!! "
+            lines.append(
+                f"  {mark}{fork_mark}{child.run_id}  [{d.mode.value}, "
+                f"uncertain={len(d.uncertain_actions)}]  {child.goal[:44]}"
+            )
+        except Exception as exc:
+            lines.append(f"  !! {fork_mark}{child.run_id}  [assess error: {exc}]")
+    a2a = [
+        (c.run_id, c.metadata.get("a2a_task_id")) for c in children if c.metadata.get("a2a_task_id")
+    ]
+    for rid, task in a2a:
+        lines.append(f"  a2a: {rid} -> {task}")
+    _emit(
+        {
+            "parent": args.run_id,
+            "children": [{"run_id": c.run_id, "status": c.status.value} for c in children],
+        },
+        "\n".join(lines),
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
+    )
+    return ExitCode.OK
+
+
+def cmd_compact(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Archive the pre-anchor prefix of a run's event log (issue #239). Mutates."""
+    storage.get_run(args.run_id)
+    if not getattr(storage, "supports_compaction", False):
+        # Capability flag, not a caught NotImplementedError: a clear refusal
+        # beats a traceback from an engine that never had an archive table.
+        print(
+            f"this storage engine ({type(storage).__name__}) does not support "
+            "compaction; it maintains no events_archive table",
+            file=err,
+        )
+        return ExitCode.ERROR
+    if not args.force:
+        print(
+            "compact archives the pre-anchor event prefix and appends an "
+            "EVENT_LOG_ANCHORED marker to the live chain. Re-run with --force "
+            "to apply.",
+            file=err,
+        )
+        return ExitCode.ERROR
+    report = storage.compact_run(args.run_id)
+    payload = {"run_id": args.run_id, **report}
+    _emit(
+        payload,
+        f"Archived {report['archived']} event(s); the live log now starts at the anchor.",
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
+    )
+    return ExitCode.OK
+
+
+def cmd_complete(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Close a run as done, from the keyboard (the maintainer's escape hatch).
+
+    Found missing during live testing: MCP-driven runs close via
+    RUN_COMPLETED events from adapters, but there was no way to finish a run
+    from the CLI, so finished work kept surfacing as the active run and
+    hijacked every fresh session's resume. This appends REVIEW_CONFIRMED
+    plus RUN_COMPLETED (both Origin.HUMAN, so they clear self-certification
+    gates) and flips the run row to COMPLETED.
+    """
+    run = storage.get_run(args.run_id)  # raises RunNotFound -> NOT_FOUND
+    note = {"summary": args.summary} if args.summary else {}
+    storage.append_event(
+        args.run_id,
+        EventType.REVIEW_CONFIRMED,
+        {"components": ["goal", "progress"]},
+        source=Origin.HUMAN,
+    )
+    storage.append_event(
+        args.run_id,
+        EventType.RUN_COMPLETED,
+        {"closed_by": "cli", **note},
+        source=Origin.HUMAN,
+    )
+    updated = run.touch(status=RunStatus.COMPLETED)
+    storage.update_run(updated)
+    payload = {
+        "run_id": args.run_id,
+        "status": updated.status.value,
+        "summary": args.summary or "",
+    }
+    _emit(
+        payload,
+        f"Run {args.run_id} completed.",
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
+    )
+    return ExitCode.OK
+
+
+def cmd_fork(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Approve a divergent continuation of a run (issue #259).
+
+    The third outcome of replay-or-fork: when the gate surfaces fork
+    candidates on an unclaimed call, this records the human decision to
+    branch rather than block. Writes RUN_FORKED to the parent log
+    (Origin.HUMAN) and creates the linked child run.
+    """
+    from continuum.recovery.fork import approve_fork
+
+    storage.get_run(args.run_id)  # raises RunNotFound -> NOT_FOUND by the dispatcher
+    try:
+        child = approve_fork(
+            storage,
+            args.run_id,
+            reason=args.reason or "",
+            child_run_id=args.child,
+        )
+    except ValueError as exc:
+        print(f"error: {exc}", file=err)
+        return ExitCode.ERROR
+
+    _emit(
+        {"parent": args.run_id, "child": child.run_id, "reason": child.metadata["fork_reason"]},
+        f"Forked {args.run_id} into {child.run_id}.\n"
+        f"Resume it independently: continuum resume {child.run_id}\n"
+        f"Lineage: continuum tree {args.run_id}",
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
+    )
+    return ExitCode.OK
+
+
 def cmd_checkpoint(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
     """Force a checkpoint. Mutates the run."""
+    # Check existence before projecting: otherwise a typo'd run name surfaces
+    # as a ProjectionError about a missing RUN_STARTED event (exit 1) instead
+    # of the truth (exit 2), which is the same misdiagnosis issue #18 fixed
+    # for `events`. Every other mutating command checks first; this one does too.
+    storage.get_run(args.run_id)  # raises RunNotFound -> NOT_FOUND by the dispatcher
     manager = CheckpointManager(storage)
     checkpoint = manager.checkpoint(
         args.run_id,
@@ -566,11 +947,480 @@ def cmd_checkpoint(args: argparse.Namespace, storage: Storage, out: Any, err: An
     return ExitCode.OK
 
 
+def cmd_observe(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Record one observed tool completion as durable evidence (issue #207).
+
+    Reads a Claude Code PostToolUse hook payload (JSON on stdin, or from
+    ``--payload-file``) and appends a ``TOOL_COMPLETED`` event to the target
+    run: the explicit ``--run-id``, else the most recently active non-terminal
+    run. This is what closes part of the durability gap: the recording happens
+    in a host-side hook after every file-mutating tool call, outside the
+    model's control, so work that landed on disk is never invisible to
+    recovery even when no checkpoint was ever taken.
+
+    With no active run the observation is dropped with exit 0 rather than an
+    error: hooks fire for every Claude Code session in this directory,
+    including ones with nothing to do with CONTINUUM, and a wall of failures
+    would pressure the user into uninstalling the instrumentation. The note on
+    stderr keeps the drop visible.
+    """
+    if args.payload_file:
+        raw_text = Path(args.payload_file).read_text(encoding="utf-8")
+    else:
+        raw_text = sys.stdin.read()
+    try:
+        raw = json.loads(raw_text) if raw_text.strip() else None
+    except json.JSONDecodeError as exc:
+        print(f"error: observe payload is not valid JSON: {exc}", file=err)
+        return ExitCode.ERROR
+
+    run_id = args.run_id
+    if not run_id:
+        active = storage.get_active_run()
+        run_id = active.run_id if active else None
+    if not run_id:
+        print("No active CONTINUUM run; observation not recorded.", file=err)
+        return ExitCode.OK
+
+    storage.get_run(run_id)  # raises RunNotFound -> NOT_FOUND by the dispatcher
+
+    payload = observe_event_payload(raw if isinstance(raw, dict) else {})
+    event = storage.append_event(
+        run_id,
+        EventType.TOOL_COMPLETED,
+        payload,
+        source=Origin.EXTERNAL_AGENT,
+    )
+    _emit(
+        {
+            "run_id": run_id,
+            "sequence": event.sequence,
+            "event_id": event.event_id,
+            **payload,
+        },
+        f"Observed {payload.get('tool')} -> {run_id} (seq {event.sequence})",
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
+    )
+    return ExitCode.OK
+
+
+def cmd_briefing(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Session-start context injection (no CLAUDE.md required).
+
+    Wired as a SessionStart hook by `hooks install`. Prints, as
+    hook-consumable JSON plus human-readable text, everything a returning
+    agent needs: the active run's goal, progress, recovery verdict,
+    executable next steps, and disk-checked file observations. Read-only;
+    with no active run it says exactly how to create one.
+    """
+    run_id = args.run_id
+    if not run_id:
+        active = storage.get_active_run()
+        run_id = active.run_id if active else None
+
+    if not run_id:
+        text = (
+            "CONTINUUM: no active run. Create one before working durably: "
+            "`continuum start <run_id> --goal '...'`, or call "
+            "continuum_record_progress(run_id, completed, total, goal=...) via MCP."
+        )
+        context = "[CONTINUUM] " + text
+        _emit(
+            {"active_run": None, "context": context},
+            text,
+            as_json=args.json,
+            stream=out,
+            palette=getattr(args, "_palette", None),
+        )
+        return ExitCode.OK
+
+    decision = RecoveryEngine(storage).assess(run_id)
+    steps = _human_steps(decision, run_id)
+    contract = decision.contract
+    state = decision.state
+
+    lines = [
+        f"CONTINUUM active run: {run_id}",
+        f"goal: {state.goal.description}",
+        f"progress: {state.progress.completed}/{state.progress.total or '?'} completed"
+        + (f", {state.progress.failed} failed" if state.progress.failed else ""),
+        f"recovery: {decision.mode.value} (safe={decision.safe})",
+    ]
+    # Newest reasoning summary (#235): the resumed agent inherits the dead
+    # session's plan state, not just its progress counters.
+    summaries = [e for e in storage.read_events(run_id) if e.type is EventType.REASONING_SUMMARY]
+    if summaries:
+        summary = summaries[-1].payload.get("summary", {})
+        lines.append("where the last session left off (self-authored):")
+        for item in summary.get("plan_stack", [])[:3]:
+            lines.append(f"  plan: {item}")
+        for d in summary.get("decisions", [])[-3:]:
+            what = d.get("what", "")
+            why = d.get("why", "")
+            lines.append(f"  decision: {what}" + (f" ({why})" if why else ""))
+        for q in summary.get("open_questions", [])[:3]:
+            lines.append(f"  open: {q}")
+        ws = summary.get("working_set", [])
+        if ws:
+            lines.append(f"  working set: {', '.join(map(str, ws[:5]))}")
+
+    obs = contract.post_checkpoint_observations[:5]
+    if obs:
+        lines.append("files since checkpoint:")
+        lines += [
+            f"  [{o.get('status', '?')}] {o.get('path', '')}" for o in obs if not o.get("truncated")
+        ]
+    # Informed retry (#265): the engine's account of prior attempts, next to
+    # the agent's own summary above. Absent history means no section.
+    if decision.informed_retry:
+        from continuum.recovery.summary import render_informed_retry
+
+        lines.append("what previous attempts changed (engine-recorded):")
+        lines += [f"  {line}" for line in render_informed_retry(decision.informed_retry)]
+    if steps:
+        lines.append("next steps:")
+        lines += [f"  {i}. {t}" for i, t in enumerate(steps, 1)]
+
+    text = "\n".join(lines)
+    context = text
+    _emit(
+        {
+            "active_run": run_id,
+            "mode": decision.mode.value,
+            "safe": decision.safe,
+            "context": context,
+            "human_steps": steps,
+            "hookSpecificOutput": {
+                "hookEventName": args.hook_event_name,
+                "additionalContext": context,
+            },
+        },
+        text,
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
+    )
+    return ExitCode.OK
+
+
+def cmd_gateway(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Run the enforcing HTTP gateway (issue #213 seam 4). Long-running."""
+    from continuum.gateway import (
+        DEFAULT_GATEWAY_CONFIG_PATH,
+        GatewayConfigError,
+        GatewayServer,
+        load_gateway_config,
+    )
+
+    config_path = Path(args.config) if args.config else Path(DEFAULT_GATEWAY_CONFIG_PATH)
+    try:
+        routes = load_gateway_config(config_path)
+    except GatewayConfigError as exc:
+        print(f"error: {exc}", file=err)
+        return ExitCode.ERROR
+    if not routes:
+        print(
+            f"error: no upstreams registered in {config_path}; "
+            "the gateway refuses to start as an open relay",
+            file=err,
+        )
+        return ExitCode.ERROR
+
+    active = storage.get_active_run()
+    run_id = args.run_id or (active.run_id if active else None)
+    server = GatewayServer(lambda: open_storage(args.db), run_id, routes, port=args.port)
+    print(
+        f"CONTINUUM gateway listening on 127.0.0.1:{server.port} "
+        f"({len(routes)} upstream route(s), run={run_id or 'dynamic'})",
+        file=err,
+    )
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.shutdown()
+    return ExitCode.OK
+
+
+def cmd_hooks_install(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Wire a coding CLI's tool events into observe (and optionally gate).
+
+    Per-client wiring is data-driven (#209): the profile supplies the
+    settings-path default and the event/matcher names; the installed commands
+    are the same client-agnostic ``continuum observe`` / ``continuum gate``.
+    """
+    from continuum.clienthooks import CLIENT_PROFILES
+
+    profile = CLIENT_PROFILES[args.client]
+    settings_path = Path(args.settings or profile["settings"])
+    command = observe_command(db=args.db)
+    gate_command = command[: -len("observe")] + "gate"
+
+    briefing_command = command[: -len("observe")] + "briefing"
+    statuses = [
+        (
+            install_client_hook(
+                settings_path,
+                command,
+                event_name=profile["post_event"],
+                matcher=profile["write_matcher"],
+            ),
+            profile["write_matcher"],
+            "observe",
+            profile["post_event"],
+            command,
+        ),
+        (
+            install_client_hook(
+                settings_path,
+                briefing_command,
+                event_name=profile["start_event"],
+                matcher="",
+            ),
+            "",
+            "briefing",
+            profile["start_event"],
+            briefing_command,
+        ),
+    ]
+    if getattr(args, "with_gate", False):
+        statuses.append(
+            (
+                install_client_hook(
+                    settings_path,
+                    gate_command,
+                    event_name=profile["pre_event"],
+                    matcher=profile["any_matcher"],
+                ),
+                profile["any_matcher"],
+                "gate",
+                profile["pre_event"],
+                gate_command,
+            )
+        )
+
+    lines = [f"Hook configuration written to {settings_path}"]
+    for st, matcher, kind, event, cmd in statuses:
+        lines.append(f"  [{st}] {kind} on {event} (matcher {matcher})")
+        lines.append(f"    command: {cmd}")
+    payload: dict[str, Any] = {
+        "client": args.client,
+        "settings": str(settings_path),
+        "hooks": [
+            {"event": event, "matcher": m, "kind": k, "status": st, "command": cmd}
+            for st, m, k, event, cmd in statuses
+        ],
+    }
+    if args.client == "codex":
+        hint = _codex_feature_flag_hint()
+        if hint:
+            lines.append(hint)
+            payload["feature_flag_hint"] = hint
+    _emit(
+        payload,
+        "\n".join(lines),
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
+    )
+    return ExitCode.OK
+
+
+def _codex_feature_flag_hint() -> str:
+    """Codex gates its hook engine behind a config flag; without it hooks are
+    silent no-ops. We do not hand-edit TOML, so surface the exact line."""
+    config = Path.home() / ".codex" / "config.toml"
+    try:
+        text = config.read_text(encoding="utf-8")
+    except OSError:
+        return (
+            "note: Codex hooks are off by default. Add '[features]\\ncodex_hooks = true' "
+            f"to {config} (create it if needed), then restart Codex."
+        )
+    if "codex_hooks" not in text:
+        return (
+            f"note: 'codex_hooks' was not found in {config}; add "
+            "'[features]\\ncodex_hooks = true', then restart Codex."
+        )
+    return ""
+
+
+def cmd_hooks_remove(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Remove the observation hook previously installed for a coding CLI."""
+    settings_path = Path(args.settings)
+    removed = remove_claude_code_hook(settings_path)
+    text = (
+        f"Removed observation hook from {settings_path}"
+        if removed
+        else f"No observation hook found in {settings_path}"
+    )
+    _emit(
+        {"client": args.client, "settings": str(settings_path), "removed": removed},
+        text,
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
+    )
+    return ExitCode.OK
+
+
+def cmd_gate(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Decide whether one tool call may proceed (issue #217).
+
+    Designed as a pre-tool-use hook: exit 0 allows the call, exit 2 denies it
+    with an actionable reason on stderr that the harness feeds back to the
+    model. The decision is pure (:func:`continuum.gate.decide`); this command
+    only resolves the run, loads the ledger projection and renders the
+    verdict.
+
+    Exit codes deliberately reuse the CLI contract where they agree: OK
+    allows. Denial is reported as 2, which the CLI defines as NOT_FOUND but a
+    hook transport defines as "block this tool call"; in both readings the
+    caller must not proceed.
+    """
+    from continuum.actions.ledger import fold_action_events
+
+    if args.payload_file:
+        raw_text = Path(args.payload_file).read_text(encoding="utf-8")
+    else:
+        raw_text = sys.stdin.read()
+    try:
+        raw = json.loads(raw_text) if raw_text.strip() else None
+    except json.JSONDecodeError as exc:
+        # The payload cannot be matched against any pattern; there is nothing
+        # to enforce, and blocking every call over a protocol hiccup would
+        # make the harness unusable.
+        print(f"gate: payload is not valid JSON ({exc}); allowing", file=err)
+        return ExitCode.OK
+
+    run_id = args.run_id
+    if not run_id:
+        active = storage.get_active_run()
+        run_id = active.run_id if active else None
+
+    config_path = Path(args.config) if args.config else Path(DEFAULT_GATE_CONFIG_PATH)
+    try:
+        config = load_gate_config(config_path)
+    except GateConfigError as exc:
+        print(f"gate: {exc}; denying until it is fixed", file=err)
+        return 2
+
+    if not isinstance(raw, dict):
+        _emit(
+            {"allow": True, "reason": "no payload"},
+            "gate: no payload; allowing",
+            as_json=args.json,
+            stream=out,
+            palette=getattr(args, "_palette", None),
+        )
+        return ExitCode.OK
+
+    tool_name = str(raw.get("tool_name") or "")
+    tool_input_raw = raw.get("tool_input")
+    tool_input: dict[str, Any] = dict(tool_input_raw) if isinstance(tool_input_raw, dict) else {}
+
+    if config is not None and tool_name in config and run_id is None:
+        print(
+            f"gate: {tool_name} is gated but there is no active CONTINUUM run. "
+            f"Start or resume one (continuum start / continuum_record_progress) first.",
+            file=err,
+        )
+        return 2
+
+    actions_by_key = fold_action_events(storage.read_events(run_id)) if run_id is not None else {}
+    decision = gate_decide(
+        config,
+        tool_name,
+        tool_input,
+        run_id=run_id or "",
+        actions_by_key=actions_by_key,
+    )
+    if decision.allow:
+        _emit(
+            {"allow": True, "reason": decision.reason, "tool": tool_name},
+            f"[ok] allow: {decision.reason}",
+            as_json=args.json,
+            stream=out,
+            palette=getattr(args, "_palette", None),
+        )
+        return ExitCode.OK
+    # A hook transport feeds stderr back to the model on a blocking exit, so
+    # the actionable reason must live there; stdout keeps the machine view.
+    print(f"[!!] deny: {decision.reason}", file=err)
+    _emit(
+        {"allow": False, "reason": decision.reason, "tool": tool_name},
+        "",
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
+    )
+
+    return 2
+
+
+def cmd_reconcile_auto(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Settle uncertain actions with registered probes (issue #218).
+
+    Mutating by design (it appends ACTION_RECONCILED events through the
+    ledger), which is why it is its own command rather than something
+    `validate`/`resume` do implicitly: those stay read-only so the exit-code
+    safety contract holds. With no registered probe for an action's type,
+    that action is left exactly as the ledger holds it.
+    """
+    from continuum.actions.ledger import ActionLedger
+    from continuum.reconcilers import (
+        DEFAULT_RECONCILERS_PATH,
+        ReconcilerConfigError,
+        load_reconcilers,
+        settle_run,
+    )
+
+    storage.get_run(args.run_id)
+    try:
+        probes = load_reconcilers(
+            Path(args.config) if args.config else Path(DEFAULT_RECONCILERS_PATH)
+        )
+    except ReconcilerConfigError as exc:
+        print(f"error: {exc}", file=err)
+        return ExitCode.ERROR
+
+    pending = ActionLedger(storage, args.run_id).pending()
+    report = settle_run(storage, args.run_id, probes, dry_run=args.dry_run)
+    payload = {"run_id": args.run_id, "dry_run": args.dry_run, **report.as_dict()}
+    lines = [
+        f"pending actions: {len(pending)}, "
+        f"settled: {report.settled} "
+        f"(occurred {len(report.settled_true)}, not-occurred {len(report.settled_false)}), "
+        f"unresolved: {len(report.unresolved)}, "
+        f"no probe registered: {len(report.skipped_no_probe)}"
+    ]
+    for action_type, detail in report.unresolved:
+        lines.append(f"  [!!] {action_type}: {detail}")
+    if args.dry_run:
+        lines.append("dry run: nothing was written")
+    _emit(
+        payload,
+        "\n".join(lines),
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
+    )
+    remaining = len(pending) - report.settled
+    return ExitCode.OK if remaining <= 0 else ExitCode.REQUIRES_HUMAN
+
+
 def cmd_verify(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
     """Re-audit the event chain for tampering."""
     # A run that does not exist has an empty, trivially valid chain. Reporting
     # that as "verified" would let `continuum verify $TYPO && deploy` succeed on
     # a name nobody has ever written to.
+    if args.repair_index and not args.index:
+        print("error: --repair-index requires --index", file=err)
+        return ExitCode.ERROR
+
     storage.get_run(args.run_id)
     report = storage.verify_events(args.run_id)
     payload = report.model_dump(mode="json")
@@ -582,6 +1432,44 @@ def cmd_verify(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
         trusted = report.trusted_through.get(args.run_id, 0)
         lines.append(f"  trusted through sequence {trusted}")
         text = "\n".join(lines)
+
+    # Action index consistency (issue #216). The index is a projection of the
+    # ACTION_* events, so any disagreement is drift in the projection, never
+    # corruption of the truth, and repair is always safe.
+    index_lines: list[str] = []
+    if getattr(args, "index", False):
+        drift: int | None = None
+        has_index = hasattr(storage, "action_index_drift")
+        rebuild = getattr(storage, "rebuild_action_index", None)
+        if has_index:
+            # Repair only a projection whose source of truth verified: a
+            # tampered log must never be folded into the index (review 221).
+            if args.repair_index and not report.ok:
+                index_lines.append(
+                    "[!!] action index repair refused: the event chain failed "
+                    "verification; repair would launder tampered events"
+                )
+                payload["action_index_repair"] = "refused_chain_failed"
+            else:
+                drift = storage.action_index_drift()
+                if drift and args.repair_index and rebuild is not None:
+                    fixed = int(rebuild())
+                    index_lines.append(
+                        f"[ok] action index repaired from the log ({fixed} row(s) corrected)"
+                    )
+                    drift = storage.action_index_drift()
+                elif drift:
+                    index_lines.append(
+                        f"[!!] action index drifted from the log ({drift} row(s)); "
+                        f"run with --repair-index to rebuild it"
+                    )
+                else:
+                    index_lines.append("[ok] action index matches the log")
+        else:
+            index_lines.append("[auto] this engine maintains no action index")
+        text = text + "\n" + "\n".join(index_lines)
+        payload["action_index_drift"] = drift
+
     _emit(payload, text, as_json=args.json, stream=out, palette=getattr(args, "_palette", None))
     return ExitCode.OK if report.ok else ExitCode.CORRUPTED
 
@@ -646,6 +1534,58 @@ def cmd_replay(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
     # RUN_STARTED", which diagnoses the wrong problem entirely.
     storage.get_run(args.run_id)
     events = storage.read_events(args.run_id, upto=args.upto)
+
+    stored = storage.latest_version(args.run_id)
+    anchored = any(e.type is EventType.EVENT_LOG_ANCHORED for e in events) and stored is not None
+    if anchored and args.upto is None and stored is not None:
+        # Compacted run (#239): fold the restored checkpoint state forward
+        # over the post-anchor tail; the archived prefix lives in
+        # events_archive and is deep-audited by verify.
+        from continuum.state.semantic import project_incremental
+
+        base = CheckpointManager(storage).restore(args.run_id, replay=False).state
+        # The anchor event sits exactly at the base boundary; folding it would
+        # trip the monotonic-sequence check.
+        tail = [e for e in events if e.sequence > base.source_sequence]
+        state, _report = project_incremental(args.run_id, tail, base=base)
+        # Verify for real: re-fold only the stored version's own prefix and
+        # compare fingerprints, exactly as the plain path's
+        # _verify_against_stored does. A hardcoded pass here silently retired
+        # the corruption contract for every compacted run.
+        at_stored, _ = project_incremental(
+            args.run_id,
+            [e for e in tail if e.sequence <= stored.source_sequence],
+            base=base,
+        )
+        matches = state_fingerprint(at_stored) == state_fingerprint(stored)
+        where = f"checkpoint v{stored.version} at sequence {stored.source_sequence}"
+        verification = (
+            f"anchored run: {'matches' if matches else 'DOES NOT match'} stored {where}; "
+            f"{len(tail)} tail event(s) folded, prefix audited in events_archive"
+        )
+        payload = {
+            "run_id": args.run_id,
+            "events_replayed": len(events),
+            "completed": state.progress.completed,
+            "source_sequence": state.source_sequence,
+            "verified": matches,
+            "verification": verification,
+        }
+        _emit(
+            payload,
+            f"Anchored replay: folded {where} + {len(tail)} tail event(s)\n"
+            f"Verification: {verification}",
+            as_json=args.json,
+            stream=out,
+            palette=getattr(args, "_palette", None),
+        )
+        if not matches:
+            print(
+                f"replayed state does not match the stored version for run {args.run_id}",
+                file=err,
+            )
+            return ExitCode.CORRUPTED
+        return ExitCode.OK
 
     if args.upto is not None and not any(e.type == EventType.RUN_STARTED for e in events):
         raise ValueError(
@@ -901,6 +1841,16 @@ def build_parser() -> argparse.ArgumentParser:
     add("init", cmd_init, "Create storage.")
     add("runs", cmd_runs, "List runs.").add_argument("--limit", type=int, default=20)
 
+    start = with_run(add("start", cmd_start, "Create a run with a goal. Mutates storage."))
+    start.add_argument("--goal", required=True, help="what the run is trying to achieve")
+    start.add_argument("--parent", default=None, help="attach as a child of this run")
+    start.add_argument(
+        "--a2a-task",
+        dest="a2a_task",
+        default=None,
+        help="external A2A task id to record in metadata",
+    )
+
     inspect = with_run(add("inspect", cmd_inspect, "Show semantic state."))
     inspect.add_argument("--version", type=int, dest="version", help="inspect a past version")
 
@@ -938,6 +1888,11 @@ def build_parser() -> argparse.ArgumentParser:
     resume.add_argument("--model", help="model that will run the resumed agent")
     resume.add_argument("--tolerate-unknown", action="store_true")
     resume.add_argument("--repair", action="store_true", help="record the repair plan")
+    resume.add_argument(
+        "--pinning",
+        default=None,
+        help="JSON object of environment pins to diff against the run (issue #241)",
+    )
 
     confirm = with_env(
         with_run(add("confirm", cmd_confirm, "Confirm self-reported state so the run may resume."))
@@ -945,11 +1900,158 @@ def build_parser() -> argparse.ArgumentParser:
     confirm.add_argument("--model", help="model that will run the resumed agent")
     confirm.add_argument("--tolerate-unknown", action="store_true")
 
+    complete = with_run(add("complete", cmd_complete, "Close a run as done. Mutates storage."))
+    complete.add_argument("--summary", default=None, help="one-line closing note")
+
+    budget_cmd = with_run(add("budget", cmd_budget, "Retry-budget usage per action type."))
+    budget_cmd.add_argument(
+        "--config",
+        default=None,
+        help="budget registry path (default: .continuum/budgets.json)",
+    )
+
+    tree_parser = with_run(add("tree", cmd_tree, "Show a parent run and its children."))
+    tree_parser.add_argument("--limit", type=int, default=None, help=argparse.SUPPRESS)
+
+    fork_cmd = with_run(
+        add("fork", cmd_fork, "Approve a divergent continuation as a child run. Mutates storage.")
+    )
+    fork_cmd.add_argument("--reason", required=True, help="why this divergence is legitimate")
+    fork_cmd.add_argument("--child", default=None, help="run id for the fork (default: auto)")
+
+    compact = with_run(
+        add("compact", cmd_compact, "Archive the pre-anchor log prefix. Mutates storage.")
+    )
+    compact.add_argument("--force", action="store_true", help="apply without confirmation")
+
     checkpoint = with_env(with_run(add("checkpoint", cmd_checkpoint, "Force a checkpoint.")))
     checkpoint.add_argument("--trigger", default="manual")
     checkpoint.add_argument("--reason", default="")
 
-    with_run(add("verify", cmd_verify, "Re-audit the event chain."))
+    observe = add("observe", cmd_observe, "Record one observed tool completion. Mutates storage.")
+    observe.add_argument(
+        "--run-id",
+        default=None,
+        help="target run (default: the most recently active non-terminal run)",
+    )
+    observe.add_argument(
+        "--payload-file",
+        default=None,
+        help="read the hook payload from this file instead of stdin",
+    )
+
+    gateway_cmd = add(
+        "gateway",
+        cmd_gateway,
+        "Run the enforcing HTTP proxy for registered upstreams. Mutates storage.",
+    )
+    gateway_cmd.add_argument("--port", type=int, default=8765)
+    gateway_cmd.add_argument("--run-id", default=None)
+    gateway_cmd.add_argument(
+        "--config",
+        default=None,
+        help="route registry path (default: .continuum/gateway.json)",
+    )
+
+    briefing = add(
+        "briefing",
+        cmd_briefing,
+        "Session-start context: active run, progress, next steps. Read-only.",
+    )
+    briefing.add_argument(
+        "--run-id",
+        default=None,
+        help="run to brief on (default: the most recently active non-terminal run)",
+    )
+    briefing.add_argument(
+        "--hook-event-name",
+        dest="hook_event_name",
+        default="SessionStart",
+        help=argparse.SUPPRESS,
+    )
+
+    gate = add(
+        "gate",
+        cmd_gate,
+        "Decide whether a tool call may proceed (pre-tool-use hook). Read-only.",
+    )
+    gate.add_argument(
+        "--run-id",
+        default=None,
+        help="target run (default: the most recently active non-terminal run)",
+    )
+    gate.add_argument(
+        "--payload-file",
+        default=None,
+        help="read the hook payload from this file instead of stdin",
+    )
+    gate.add_argument(
+        "--config",
+        default=None,
+        help=f"gate registry path (default: {DEFAULT_GATE_CONFIG_PATH})",
+    )
+
+    hooks = add("hooks", cmd_hooks_install, "Manage host-side observation hooks.")
+    hooks_sub = hooks.add_subparsers(dest="hooks_command", metavar="ACTION CLIENT", required=True)
+
+    def hooks_client(p: argparse.ArgumentParser, func: Any) -> None:
+        p.add_argument(
+            "client",
+            choices=tuple(CLIENT_PROFILES),
+            help="which client to configure (claude-code, gemini, codex)",
+        )
+        p.add_argument(
+            "--settings",
+            default=None,
+            help="path to the client's settings file (default: per client profile)",
+        )
+        p.set_defaults(func=func)
+
+    install = hooks_sub.add_parser(
+        "install", help="Install the observation hook. Mutates settings."
+    )
+    install.add_argument(
+        "--db",
+        default=None,
+        help="bake a specific database path into the hook command",
+    )
+    install.add_argument(
+        "--with-gate",
+        action="store_true",
+        help="also install a PreToolUse gate that denies unclaimed side-effect calls",
+    )
+    hooks_client(install, cmd_hooks_install)
+
+    remove = hooks_sub.add_parser("remove", help="Remove the observation hook.")
+    hooks_client(remove, cmd_hooks_remove)
+
+    verify = with_run(add("verify", cmd_verify, "Re-audit the event chain."))
+    verify.add_argument(
+        "--index",
+        action="store_true",
+        help="also compare the derived action index against the log (issue #216)",
+    )
+    verify.add_argument(
+        "--repair-index",
+        action="store_true",
+        help="rebuild drifted index rows from the log (requires --index)",
+    )
+
+    reconcile_auto = with_run(
+        add(
+            "reconcile",
+            cmd_reconcile_auto,
+            "Settle uncertain actions with registered probes. Mutates storage.",
+        )
+    )
+    reconcile_auto.add_argument(
+        "--dry-run", action="store_true", help="report what probes would settle, write nothing"
+    )
+    reconcile_auto.add_argument(
+        "--config",
+        default=None,
+        help="probe registry path (default: .continuum/reconcilers.json)",
+    )
     with_run(add("actions", cmd_actions, "List external side effects."))
     with_env(with_run(add("show-contract", cmd_contract, "Print the recovery contract.")))
 
@@ -982,20 +2084,26 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument(
         "--transport",
         default="stdio",
-        choices=("stdio",),
-        help="wire transport (default: stdio)",
+        choices=("stdio", "http"),
+        help="wire transport (default: stdio; http serves POST /<method> JSON)",
     )
+    serve.add_argument("--port", type=int, default=8765, help="port for --transport http")
 
     def cmd_dashboard(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
         from continuum.dashboard import serve_dashboard as _serve
 
         print(f"Serving dashboard at http://localhost:{args.port}", file=out)
-        _serve(storage, port=args.port)
+        _serve(storage, port=args.port, host=args.host)
         return 0
 
     dashboard = add("dashboard", cmd_dashboard, "Serve the dashboard (presentation over run data).")
     dashboard.add_argument(
         "--port", type=int, default=8000, help="port to listen on (default: 8000)"
+    )
+    dashboard.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="bind address (default: 127.0.0.1; 0.0.0.0 exposes recovery data)",
     )
 
     return parser
@@ -1029,7 +2137,9 @@ def main(
         parser.print_help(file=out)
         return ExitCode.OK
 
-    if args.command in ("benchmark", "attest-keygen", "serve"):
+    # hooks never touches a run, so it must not create an empty database as a
+    # side effect of editing a settings file.
+    if args.command in ("benchmark", "attest-keygen", "serve", "hooks"):
         return int(args.func(args, None, out, err))
 
     try:

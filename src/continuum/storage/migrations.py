@@ -38,7 +38,7 @@ __all__ = [
 ]
 
 #: The schema version this build produces and understands.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 6
 
 #: The full, current schema applied to a brand-new database.
 BASELINE_SCHEMA = """
@@ -53,8 +53,11 @@ CREATE TABLE IF NOT EXISTS runs (
     status     TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    metadata   TEXT NOT NULL DEFAULT '{}'
+    metadata   TEXT NOT NULL DEFAULT '{}',
+    parent_run_id TEXT REFERENCES runs(run_id)
 );
+
+CREATE INDEX IF NOT EXISTS runs_parent ON runs(parent_run_id);
 
 CREATE TABLE IF NOT EXISTS events (
     run_id          TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
@@ -103,6 +106,58 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
     applied_at TEXT NOT NULL,
     PRIMARY KEY (version, name)
 );
+
+CREATE TABLE IF NOT EXISTS events_archive (
+    run_id       TEXT NOT NULL,
+    sequence     INTEGER NOT NULL,
+    event_id     TEXT NOT NULL,
+    type         TEXT NOT NULL,
+    timestamp    TEXT NOT NULL,
+    payload      TEXT NOT NULL,
+    causer_event_id TEXT,
+    source       TEXT NOT NULL,
+    prev_hash    TEXT,
+    hash         TEXT NOT NULL,
+    archived_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (run_id, sequence)
+);
+
+CREATE TABLE IF NOT EXISTS lg_checkpoints (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    thread_id     TEXT NOT NULL,
+    checkpoint_id TEXT NOT NULL,
+    parent_id     TEXT,
+    type          TEXT NOT NULL,
+    checkpoint    BLOB NOT NULL,
+    meta_type     TEXT NOT NULL DEFAULT 'json',
+    metadata      BLOB,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (thread_id, checkpoint_id)
+);
+
+CREATE INDEX IF NOT EXISTS lg_checkpoints_thread ON lg_checkpoints(thread_id, id DESC);
+
+CREATE TABLE IF NOT EXISTS lg_writes (
+    thread_id     TEXT NOT NULL,
+    checkpoint_id TEXT NOT NULL,
+    task_id       TEXT NOT NULL,
+    idx           INTEGER NOT NULL,
+    channel       TEXT NOT NULL,
+    type          TEXT NOT NULL,
+    blob          BLOB NOT NULL,
+    UNIQUE (thread_id, checkpoint_id, task_id, idx)
+);
+
+CREATE TABLE IF NOT EXISTS action_index (
+    key         TEXT PRIMARY KEY,
+    run_id      TEXT NOT NULL,
+    action_id   TEXT NOT NULL,
+    status      TEXT NOT NULL,
+    updated_seq INTEGER NOT NULL,
+    action_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS action_index_run ON action_index(run_id);
 """
 
 
@@ -146,9 +201,124 @@ def _up_v2() -> str:
     """
 
 
+def _up_v3() -> str:
+    """Introduce the ``action_index`` projection (issue #216).
+
+    Cross-run idempotency lookups previously folded every run's full event
+    log, O(total logged events) per unscoped claim miss. The index is a
+    derived projection of the ``ACTION_*`` events: one row per ledger key,
+    last write per key wins (matching the fold), maintained incrementally by
+    the storage engines and rebuildable at any time because the log remains
+    the source of truth. The backfill seeds it from existing events so a v2
+    database opens with correct lookups.
+    """
+    return """
+    CREATE TABLE IF NOT EXISTS action_index (
+        key         TEXT PRIMARY KEY,
+        run_id      TEXT NOT NULL,
+        action_id   TEXT NOT NULL,
+        status      TEXT NOT NULL,
+        updated_seq INTEGER NOT NULL,
+        action_json TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS action_index_run ON action_index(run_id);
+
+    INSERT OR REPLACE INTO action_index(key, run_id, action_id, status, updated_seq, action_json)
+    SELECT json_extract(e.payload, '$.key')                          AS key,
+           json_extract(e.payload, '$.action.run_id')                AS run_id,
+           json_extract(e.payload, '$.action.action_id')             AS action_id,
+           json_extract(e.payload, '$.action.status')                AS status,
+           e.rowid                                                   AS updated_seq,
+           json(json_extract(e.payload, '$.action'))                 AS action_json
+    FROM events e
+    WHERE e.type IN ('ACTION_RECORDED', 'ACTION_RECONCILED', 'ACTION_COMPENSATED')
+      AND json_extract(e.payload, '$.key') IS NOT NULL
+      AND json_extract(e.payload, '$.action') IS NOT NULL
+    ORDER BY e.rowid;
+    """
+
+
+def _up_v4() -> str:
+    """Add LangGraph checkpointer tables (issue #236).
+
+    CONTINUUM implements LangGraph's BaseCheckpointSaver over this store, so
+    production LangGraph apps keep their native persistence API while gaining
+    provenance-tagged events. Two tables: snapshot rows per checkpoint and
+    pending-write rows per task. Additive and empty on upgrade.
+    """
+    return """
+    CREATE TABLE IF NOT EXISTS lg_checkpoints (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        thread_id     TEXT NOT NULL,
+        checkpoint_id TEXT NOT NULL,
+        parent_id     TEXT,
+        type          TEXT NOT NULL,
+        checkpoint    BLOB NOT NULL,
+        meta_type     TEXT NOT NULL DEFAULT 'json',
+        metadata      BLOB,
+        created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE (thread_id, checkpoint_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS lg_checkpoints_thread ON lg_checkpoints(thread_id, id DESC);
+
+    CREATE TABLE IF NOT EXISTS lg_writes (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        thread_id     TEXT NOT NULL,
+        checkpoint_id TEXT NOT NULL,
+        task_id       TEXT NOT NULL,
+        idx           INTEGER NOT NULL,
+        channel       TEXT NOT NULL,
+        type          TEXT NOT NULL,
+        blob          BLOB NOT NULL,
+        UNIQUE (thread_id, checkpoint_id, task_id, idx)
+    );
+"""
+
+
+def _up_v5() -> str:
+    """Add the event-archive table for compaction (issue #239).
+
+    `continuum compact` moves the pre-anchor prefix of a run's event log into
+    ``events_archive`` verbatim (sequence numbers preserved) and appends an
+    EVENT_LOG_ANCHORED marker to the live chain. The live log stays
+    append-only; the archive is the historical record.
+    """
+    return """
+    CREATE TABLE IF NOT EXISTS events_archive (
+        run_id       TEXT NOT NULL,
+        sequence     INTEGER NOT NULL,
+        event_id     TEXT NOT NULL,
+        type         TEXT NOT NULL,
+        timestamp    TEXT NOT NULL,
+        payload      TEXT NOT NULL,
+        causer_event_id TEXT,
+        source       TEXT NOT NULL,
+        prev_hash    TEXT,
+        hash         TEXT NOT NULL,
+        archived_at  TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (run_id, sequence)
+    );
+"""
+
+
+def _up_v6() -> str:
+    """Add runs.parent_run_id for multi-agent hierarchies (issue #243)."""
+    return """
+    ALTER TABLE runs ADD COLUMN parent_run_id TEXT REFERENCES runs(run_id);
+
+    CREATE INDEX IF NOT EXISTS runs_parent ON runs(parent_run_id);
+"""
+
+
 #: Forward migrations, keyed by the version they *produce*.
 MIGRATIONS: dict[int, Migration] = {
     2: Migration(version=2, name="add_versions_table_and_event_provenance", up=_up_v2()),
+    3: Migration(version=3, name="add_action_index_projection", up=_up_v3()),
+    4: Migration(version=4, name="add_langgraph_checkpoint_tables", up=_up_v4()),
+    5: Migration(version=5, name="add_events_archive", up=_up_v5()),
+    6: Migration(version=6, name="add_runs_parent_column", up=_up_v6()),
 }
 
 

@@ -36,6 +36,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 from continuum.actions.ledger import ActionLedger
 from continuum.analysis.depends import DependencyGraph as SourceDependencyGraph
@@ -53,7 +54,9 @@ from continuum.models import (
     StateStatus,
 )
 from continuum.recovery.contract import build_contract
+from continuum.recovery.observations import collect_observations
 from continuum.recovery.planner import RepairPlan, plan_repairs
+from continuum.recovery.summary import build_informed_retry
 from continuum.state.validator import StateValidator, ValidationOutcome
 from continuum.storage.base import Storage
 
@@ -96,6 +99,10 @@ class RecoveryDecision:
     rationale: tuple[str, ...] = ()
     impacted_files: frozenset[str] = frozenset()
     tail_evidence: str | None = None
+    #: Informed-retry block (#265): a pure projection of prior recovery-path
+    #: events plus current failure signals, or None when there is no history.
+    #: Informational only; presence never changes mode or safety.
+    informed_retry: dict[str, Any] | None = None
 
     @property
     def state(self) -> SemanticState:
@@ -255,6 +262,15 @@ class RecoveryEngine:
         mode, rationale = self._decide(validation, uncertain, plan, restored, self.strict_unknown)
 
         reason = "; ".join(rationale) if rationale else validation.report.reason
+
+        # Post-checkpoint file observations (#208): informational evidence for
+        # the resuming agent, never a factor in the decision itself.
+        after_sequence = 0
+        latest_version = self.storage.latest_version(run_id)
+        if latest_version is not None:
+            after_sequence = latest_version.source_sequence
+        observations = collect_observations(self.storage, run_id, after_sequence=after_sequence)
+
         contract = build_contract(
             run_id=run_id,
             checkpoint_version=checkpoint_version,
@@ -263,6 +279,7 @@ class RecoveryEngine:
             plan=plan,
             reason=reason,
             scope=scope,
+            post_checkpoint_observations=observations,
         )
 
         tail_evidence: str | None = None
@@ -270,6 +287,16 @@ class RecoveryEngine:
             if ev.evidence_id.startswith("tail_"):
                 tail_evidence = ev.summary
                 break
+
+        # Informed retry (#265): derive the prior-attempt account from events
+        # already in the chain. Read-only, deterministic, None without history.
+        informed_retry = build_informed_retry(
+            self.storage,
+            run_id,
+            validation_report=validation.report,
+            uncertain_actions=uncertain,
+            plan=plan,
+        )
 
         return RecoveryDecision(
             run_id=run_id,
@@ -282,6 +309,7 @@ class RecoveryEngine:
             rationale=rationale,
             impacted_files=impacted_files,
             tail_evidence=tail_evidence,
+            informed_retry=informed_retry,
         )
 
     # -- the decision rule ------------------------------------------------ #

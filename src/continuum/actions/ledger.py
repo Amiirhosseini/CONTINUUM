@@ -44,8 +44,10 @@ from __future__ import annotations
 import os
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from heapq import merge
 from typing import Any
 
+from continuum.actions.grants import GrantDenied, normalize_grant, scan_grants
 from continuum.actions.idempotency import (
     IdempotencyKey,
     arguments_hash,
@@ -249,8 +251,25 @@ class ActionLedger:
     # -- reading ---------------------------------------------------------- #
 
     def _replay(self) -> dict[str, Action]:
-        """Rebuild the ledger by folding action events. Cheap and verifiable."""
-        return fold_action_events(self.storage.read_events(self.run_id))
+        """Rebuild the ledger by folding action events. Cheap and verifiable.
+
+        Archived events (compaction, issue #239) fold too: a claim settled
+        before compaction must keep protecting afterwards, or exactly-once
+        would quietly reset at the anchor boundary and a month-old side
+        effect could fire a second time. Both streams are already sequence-
+        sorted, so they merge linearly instead of paying a re-sort on this
+        hot path.
+        """
+        merged = merge(
+            self.storage.read_archived_events(self.run_id),
+            self.storage.read_events(self.run_id),
+            key=lambda e: e.sequence,
+        )
+        return fold_action_events(merged)
+
+    def folded(self) -> dict[str, Action]:
+        """Public view of the ``key -> newest action`` fold, archive included."""
+        return self._replay()
 
     def _foreign_action(self, key: str) -> Action | None:
         """Find ``key`` in another run's ledger, for unscoped claims.
@@ -260,10 +279,14 @@ class ActionLedger:
         run-global (``scoped_to_run=False``), honouring that promise requires
         looking at every other run in the store before opening a fresh slot,
         not just this run's log. Returns the most recent action recorded under
-        ``key`` outside this run, or None. The scan reads each run's events
-        once, so it costs O(total logged events) and is only paid on the
-        unscoped path after the local lookup missed.
+        ``key`` outside this run, or None.
+
+        Engines that maintain the action index (issue #216) answer this as an
+        indexed read; the rest pay the historical scan, O(total logged
+        events), only on the unscoped path after the local lookup missed.
         """
+        if getattr(self.storage, "supports_action_index", False):
+            return self.storage.foreign_action(key, exclude_run=self.run_id)
         found: Action | None = None
         for run in self.storage.list_runs():
             if run.run_id == self.run_id:
@@ -386,20 +409,32 @@ class ActionLedger:
     # -- writing ---------------------------------------------------------- #
 
     def _record(
-        self, key: str, action: Action, event_type: EventType = EventType.ACTION_RECORDED
+        self,
+        key: str,
+        action: Action,
+        event_type: EventType = EventType.ACTION_RECORDED,
+        pinning: dict[str, str] | None = None,
+        grant: dict[str, str] | None = None,
     ) -> Action:
-        self.storage.append_event(
-            self.run_id,
-            event_type,
-            {
-                "key": key,
-                "action_id": action.action_id,
-                "action_type": action.action_type,
-                "status": action.status.value,
-                "external_id": action.external_id,
-                "action": action.model_dump(mode="json"),
-            },
-        )
+        payload: dict[str, Any] = {
+            "key": key,
+            "action_id": action.action_id,
+            "action_type": action.action_type,
+            "status": action.status.value,
+            "external_id": action.external_id,
+            "action": action.model_dump(mode="json"),
+        }
+        if pinning:
+            # Issue #241: caller-asserted environment hashes ride on the
+            # STARTED record so drift is diffable per attempt. Settlements
+            # omit it; the fold keeps the newest non-empty anyway.
+            payload["pinning"] = dict(pinning)
+        if grant:
+            # Issue #269: single-use authority reference attached at claim
+            # time; terminal records inherit it via the shared payload keys,
+            # so scan_grants can mark consumption from either event type.
+            payload["grant"] = dict(grant)
+        self.storage.append_event(self.run_id, event_type, payload)
         return action
 
     def claim(
@@ -412,8 +447,22 @@ class ActionLedger:
         key: str | None = None,
         on_unknown: Callable[[Action], ActionOutcome | None] | None = None,
         dep_scope: str | None = None,
+        pinning: dict[str, str] | None = None,
+        grant: Mapping[str, str] | None = None,
     ) -> ActionOutcome:
         """Register intent to perform an action, or report it already happened.
+
+        ``pinning`` (issue #241) is an optional validated dict of environment
+        hashes/ids recorded verbatim in the ACTION_RECORDED payload so replay
+        correctness can diff the agent's moving parts across a run.
+
+        ``grant`` (issue #269) attaches a single-use authority reference,
+        ``{"id": ..., "scope": ...}``, to this attempt. A grant whose attempt
+        reached a terminal status counts as consumed: a later claim carrying
+        it is refused with GrantDenied and an audited GRANT_DENIED event,
+        which is what stops a restored agent from resurrecting spent
+        authority (the Authority Resurrection attack class). A live mid-flight
+        retry under the same key and grant is untouched.
 
         Returns ``fresh=True`` when the caller should go ahead. Returns
         ``fresh=False`` with the stored result when the action already
@@ -474,6 +523,34 @@ class ActionLedger:
                 # record we are deferring to, not the freshly-derived one.
                 key = matched[0]
 
+        # Single-use grants (#269): refuse resurrection of spent authority
+        # before anything fires. A live attempt carrying the same grant under
+        # the same key is an ordinary mid-flight retry and passes through.
+        grant_clean = normalize_grant(grant)
+        if grant_clean is not None:
+            spent, grants_by_key = scan_grants(self.storage.read_events(self.run_id))
+            prior = spent.get(grant_clean["id"])
+            live_match = (
+                existing is not None
+                and existing.status is ActionStatus.STARTED
+                and grants_by_key.get(key, {}).get("id") == grant_clean["id"]
+            )
+            if prior is not None and not live_match:
+                denied = GrantDenied(grant_clean["id"], prior, key)
+                self.storage.append_event(
+                    self.run_id,
+                    EventType.GRANT_DENIED,
+                    {
+                        "grant_id": grant_clean["id"],
+                        "scope": grant_clean["scope"],
+                        "prior_action_id": prior.action_id,
+                        "prior_status": prior.status,
+                        "attempted_key": key,
+                        "attempted_action_type": action_type,
+                    },
+                )
+                raise denied
+
         if existing is None:
             action = Action(
                 run_id=self.run_id,
@@ -484,7 +561,7 @@ class ActionLedger:
                 status=ActionStatus.STARTED,
                 started_at=utcnow(),
             )
-            self._record(key, action)
+            self._record(key, action, pinning=pinning, grant=grant_clean)
             return ActionOutcome(key=key, action=action, fresh=True)
 
         if existing.status is ActionStatus.COMPLETED:

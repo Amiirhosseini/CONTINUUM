@@ -573,6 +573,11 @@ class RecoveryContract(BaseModel):
     next_allowed_action: str | None = None
     evidence: list[str] = Field(default_factory=list)
     reason: str = ""
+    #: File observations recorded by host hooks (#210) after the latest
+    #: checkpoint, disk-checked at assess time (#208). Informational only:
+    #: never affects the recovery decision. Newest first; a trailing row with
+    #: ``truncated`` marks omitted older rows when the cap bites.
+    post_checkpoint_observations: list[dict[str, Any]] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=utcnow)
     integrity_hash: str | None = None
 
@@ -590,6 +595,9 @@ class Run(BaseModel):
     run_id: str = Field(default_factory=lambda: make_id("run"))
     goal: str
     status: RunStatus = RunStatus.STARTED
+    parent_run_id: str | None = None
+    """Set on child runs in a multi-agent hierarchy (issue #243). Children
+    aggregate into the parent's resume contract; siblings share nothing."""
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
     metadata: Mapping[str, Any] = Field(default_factory=dict)

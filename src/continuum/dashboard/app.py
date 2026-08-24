@@ -66,32 +66,155 @@ def render_run_detail_html(storage: Storage, run_id: str) -> str:
         for e in events[-20:]
     )
     events_html = f'<table border="1" cellpadding="4"><tr><th>Seq</th><th>Type</th><th>Payload</th></tr>{events_rows}</table>'
+
+    # Human-in-the-loop surface (issue #242): buttons only when there is
+    # something a person can actually settle.
+    hitl_html = ""
+    try:
+        from continuum.dashboard.hitl import pending_actions_with_keys
+
+        pending = pending_actions_with_keys(storage, run_id)
+        needs_confirm = decision.mode.value == "request_human"
+        if pending or needs_confirm:
+            rows = []
+            if needs_confirm:
+                rows.append(
+                    '<form method="post" action="/action/confirm">'
+                    f'<input type="hidden" name="run_id" value="{html.escape(run_id)}">'
+                    '<button type="submit">Confirm goal + progress (human review done)</button>'
+                    "</form>"
+                )
+            for key, action in pending:
+                esc_key = html.escape(key)
+                rows.append(
+                    f'<div style="margin:6px 0"><code>{esc_key}</code> '
+                    f"{html.escape(action.action_type)} is "
+                    f"<b>{html.escape(action.status.value)}</b><br>"
+                    '<form method="post" action="/action/reconcile" '
+                    'style="display:inline">'
+                    f'<input type="hidden" name="run_id" value="{html.escape(run_id)}">'
+                    f'<input type="hidden" name="ledger_key" value="{esc_key}">'
+                    '<input type="hidden" name="occurred" value="true">'
+                    '<button type="submit">Settle: it DID happen</button></form> '
+                    '<form method="post" action="/action/reconcile" '
+                    'style="display:inline">'
+                    f'<input type="hidden" name="run_id" value="{html.escape(run_id)}">'
+                    f'<input type="hidden" name="ledger_key" value="{esc_key}">'
+                    '<input type="hidden" name="occurred" value="false">'
+                    '<button type="submit">Settle: it did NOT happen</button></form>'
+                    "</div>"
+                )
+            hitl_html = "<h2>Human-in-the-loop</h2>" + "".join(rows)
+
+        complete_html = ""
+        if run.status.value != "completed":
+            complete_html = (
+                '<form method="post" action="/action/complete">'
+                f'<input type="hidden" name="run_id" value="{html.escape(run_id)}">'
+                '<input name="summary" placeholder="closing summary (optional)">'
+                '<button type="submit">Mark completed</button></form>'
+            )
+            hitl_html += complete_html
+    except Exception as exc:  # presentation must not crash the page
+        hitl_html = f"<p>[hitl unavailable: {html.escape(str(exc))}]</p>"
+
     return f"""<!doctype html>
 <html><head><meta charset=\"utf-8\"><title>Run {html.escape(run_id)}</title></head>
 <body><h1>Run {html.escape(run_id)}</h1>
 <p>Goal: {html.escape(run.goal)} | Status: {html.escape(run.status.value)}</p>
+{hitl_html}
 <h2>Contract</h2>{ledger_html}
 <h2>Validation</h2>{validation_html}
 <h2>Recent events</h2>{events_html}
 <p><a href=\"/\">Back to dashboard</a></p></body></html>"""
 
 
-def serve_dashboard(storage: Storage, port: int = 8000) -> None:
+def serve_dashboard(storage: Storage, port: int = 8000, host: str = "127.0.0.1") -> None:
+    import urllib.parse
+
+    from continuum.dashboard.hitl import (
+        HitlUnauthorized,
+        authorize_hitl,
+        complete_run,
+        confirm_run,
+        reconcile_action,
+    )
+
     class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
+            return
+
+        def _html(self, content: str, code: int = 200) -> None:
+            self.send_response(code)
+            self.send_header("Content-type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(content.encode("utf-8"))
+
         def do_GET(self) -> None:  # noqa: N802
             if self.path.startswith("/runs/"):
                 run_id = self.path.split("/runs/")[1].split("?")[0].split("/")[0]
                 content = render_run_detail_html(storage, run_id)
             else:
                 content = render_dashboard_html(storage)
-            self.send_response(200)
-            self.send_header("Content-type", "text/html; charset=utf-8")
-            self.end_headers()
-            self.wfile.write(content.encode("utf-8"))
+            self._html(content)
 
-        def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
-            return
+        def do_POST(self) -> None:  # noqa: N802
+            length = int(self.headers.get("Content-Length") or 0)
+            raw = self.rfile.read(length) if length else b""
+            form = dict(urllib.parse.parse_qsl(raw.decode("utf-8")))
+            token = form.get("token") or self.headers.get("X-Dashboard-Token")
 
-    with socketserver.TCPServer(("", port), Handler) as httpd:
-        print(f"Serving dashboard at http://localhost:{port}")
+            run_id = form.get("run_id", "")
+
+            def ok(msg: str) -> None:
+                detail = render_run_detail_html(storage, run_id) if run_id else ""
+                self._html(
+                    f"<p>[ok] {html.escape(msg)}</p>{detail}"
+                    '<p><a href="/">Back to dashboard</a></p>',
+                )
+
+            try:
+                authorize_hitl(token)
+            except HitlUnauthorized as exc:
+                self._html(
+                    f"<!doctype html><html><body><h1>403 Forbidden</h1>"
+                    f"<p>{html.escape(str(exc))}</p>"
+                    '<p><a href="/">Back</a></p></body></html>',
+                    code=403,
+                )
+                return
+
+            action = self.path.strip("/").split("?")[0]
+            try:
+                if action == "action/confirm":
+                    confirm_run(storage, run_id)
+                    ok("goal and progress confirmed (REVIEW_CONFIRMED)")
+                elif action == "action/reconcile":
+                    key = form.get("ledger_key", "")
+                    occurred = form.get("occurred") == "true"
+                    reconcile_action(
+                        storage,
+                        run_id,
+                        key,
+                        occurred=occurred,
+                        external_id=form.get("external_id") or None,
+                    )
+                    ok(f"reconciled {key[:16]}... occurred={occurred}")
+                elif action == "action/complete":
+                    complete_run(storage, run_id, summary=form.get("summary", ""))
+                    ok("run completed")
+                else:
+                    self._html("<h1>404 Not Found</h1>", code=404)
+            except Exception as exc:
+                self._html(
+                    f"<!doctype html><html><body><h1>400 Bad Request</h1>"
+                    f"<pre>{html.escape(str(exc))}</pre>"
+                    '<p><a href="/">Back</a></p></body></html>',
+                    code=400,
+                )
+
+    server_class = socketserver.ThreadingTCPServer
+    server_class.allow_reuse_address = True
+    with socketserver.ThreadingTCPServer((host, port), Handler) as httpd:
+        print(f"Serving dashboard at http://{host}:{port}")
         httpd.serve_forever()

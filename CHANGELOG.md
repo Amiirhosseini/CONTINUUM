@@ -8,6 +8,377 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Distribution without PyPI: Docker image, Codespaces, and git installs.**
+  A `Dockerfile` publishes a slim image whose default command runs the
+  crash-recovery demo end to end (`docker run --rm ghcr.io/cyrax321/continuum`)
+  and whose entrypoint override exposes the CLI; CI builds and pushes it to
+  GHCR on pushes to main and release tags (`.github/workflows/docker-publish.yml`,
+  with a `continuum --version` smoke test). A `.devcontainer/devcontainer.json`
+  gives one-click GitHub Codespaces with the dev toolchain preinstalled
+  (port 8765 forwarded for the dashboard). The README Quick Start gains a
+  zero-setup table: docker run, `uvx`/`pipx run` straight off the git URL,
+  and pip/uv installs from git or a release-attached wheel. The PyPI publish
+  job in the release workflow is now opt-in via the `PUBLISH_PYPI`
+  repository variable, so tagging no longer fails while trusted publishing
+  is unconfigured; wheels still land on the GitHub Release.
+
+- **Multi-agent hierarchies: parent/child runs, aggregated contracts,
+  A2A identity (#243).** `continuum start --parent <run_id>` attaches a
+  child run to its supervisor (validated: parent must exist and not be
+  completed; recorded in a new runs.parent_run_id column, schema v6 with
+  index). The parent's resume composes the family's worst state: no RESUME
+  while any non-terminal child holds uncertainty or requires review - the
+  most cautious signal wins, house-style. Resume JSON gains family_rationale
+  and children arrays naming exactly which child blocks and why.
+  `continuum tree <parent>` renders the hierarchy with per-child recovery
+  states. A2A task ids ride on run metadata via `start --a2a-task`, giving
+  external agent-to-agent handoffs durable identity without claiming full
+  protocol support. Siblings share nothing mutable: coordination stays in
+  the ledger and contracts.
+
+- **Citation audit for external-report references (#261).** An external
+  Gemini-generated survey pitching a "CONTINUUM paradigm" cited works absent
+  from our verified related-work list. Each candidate ID was resolved against
+  the arXiv API on 2026-08-24 and the verdicts recorded in
+  `references/citation-audit-2026-08-24.md`: Belayer (arXiv:2608.14635) is real
+  but RL-training-scoped, so out of scope here; the transactional sandboxing
+  paper (arXiv:2512.12806) is real with its 14.5% overhead figure confirmed;
+  ReliabilityBench (arXiv:2601.06112) is real and accurately described, and is
+  the model for the #258 stress surface; DAPH exists only as a self-published
+  Medium post and its "(ICLR Workshop)" attribution has no supporting record,
+  so it stays uncited. A full-text pass additionally proved the report's
+  "10.6% task completion" figure for the sandboxing paper appears nowhere in
+  that paper, and quoted ACRFence's own conclusion ("does not yet include an
+  implementation of ACRFence itself") against the report's inverted claim of
+  a 10/10 defence success rate. The report's unsourced statistics are documented as
+  corrections. Two verified-relevant papers joined the README related-work
+  list with abstract-backed descriptions.
+
+- **Human-in-the-loop surface on the dashboard (#242).** request_human
+  walls finally have a door with an audit row: the run page renders buttons
+  for confirm (REVIEW_CONFIRMED, Origin.HUMAN), reconcile
+  occurred=true/false through ActionLedger.reconcile, and complete (run row
+  flipped to COMPLETED) whenever a run is blocked or has uncertain actions.
+  Mutating POST endpoints are fail-closed - refused until
+  CONTINUUM_DASHBOARD_TOKEN is set - and every action maps 1:1 onto the
+  human CLI verb, landing identical event types and provenance. Reads stay
+  open; unknown routes 404.
+
+- **Version pinning on claims and summaries (#241).** Replay correctness
+  needs environment identity: which prompt version, tool schema and model
+  produced a decision (prompt-migration hazard, arXiv:2507.05573; Zylos
+  survey lists pinning as part of replay correctness). New closed-set
+  `pinning` dict - prompt_sha256, tool_schema_sha256, model_id,
+  policy_version - accepted by `continuum intercept_action` and
+  `continuum_record_summary`, stored verbatim with EXTERNAL_AGENT provenance
+  on the ACTION_RECORDED STARTED record / summary payload. Values are
+  validated (known keys only, 256-char cap: store the hash, not the
+  artefact). `continuum resume --pinning '<json>'` diffs caller-supplied
+  pins against the newest recorded set and surfaces drift as informational
+  lines in text and JSON (`pinning_drift`) - degrade, never block. Pure
+  helpers live in `continuum.pinning`.
+
+- **Run-level retry budgets (#240).** Agent loops invent retries: a failing
+  upstream gets hammered because the model re-plans after every failure, and
+  each attempt opens a fresh ledger slot. New `.continuum/budgets.json`
+  registry caps attempts per action type (with a default fallback); every
+  ACTION_RECORDED claim slot counts as one attempt, so retries under the
+  same key still consume budget. `continuum intercept_action` refuses claims
+  beyond the budget with an instructive error, and new read-only command
+  `continuum budget <run>` reports attempts/max/remaining per type.
+  `backoff_delay` ships as a pure helper (exponential + cap; jitter is the
+  caller's job) because CONTINUUM never performs retries itself - it counts
+  and gates them.
+
+- **Event-log compaction (#239).** `continuum compact <run>` bounds live-log
+  growth for month-long runs: it appends an EVENT_LOG_ANCHORED marker, moves
+  the pre-anchor prefix verbatim into a new `events_archive` table (schema
+  v5, SQLite + Postgres), and leaves the live chain append-only with the
+  anchor as its trusted genesis. verify walks anchored logs natively;
+  resume/replay fold from the restored checkpoint plus post-anchor tail; and
+  archived rows remain digest-auditable for deep checks. The anchor is
+  created fresh at compaction time (forced checkpoint) because anchoring at
+  an ancient version would leave almost everything in the live log. Payload
+  offloading to blob storage is split into follow-up work.
+
+- **Production server mode (#238).** Three pieces: (1) CI now runs a real
+  Postgres 16 service container against the Postgres contract tests, and the
+  contract tests themselves were rewritten against the modern surface: the
+  originals predated strict enum validation and Goal models, passing raw
+  strings that today's pydantic models rightly refuse - they had rotted in
+  skip-guaranteed obscurity. The gateway backfill SQL was also fixed to
+  Postgres jsonb operators (it previously used SQLite-only `json_extract`). (2) `continuum serve --transport http`
+  exposes the full sidecar dispatch over POST /<method> JSON for non-Python
+  agents: same handlers, same token auth (`CONTINUUM_SERVE_TOKEN`), errors
+  mapped to status codes (404 unknown method, 403 unauthorized, 400 bad
+  params, 500 storage failures) without killing the server. (3) Honest
+  scoping note: duplicate reconciliation between concurrent workers is
+  already impossible by construction (ledger claims commit inside IMMEDIATE
+  transactions); run-level exclusivity leases remain available to adapters
+  via LeaseCoordinator rather than being forced onto every surface.
+
+- **Replay-safety guard as a portable primitive (#237).** The gate's
+  decision table is extracted into `continuum.replayguard.evaluate`, a pure
+  core over the folded ledger that the gate now delegates to (single source
+  of truth). On top of it: `protected_call` executes a side effect at most
+  once per stable key and returns the journalled result on replay, raising
+  `ReplayBlocked` for uncertain or unclaimed states; and
+  `langgraph_protected_node` wraps LangGraph nodes so interrupt/crash
+  replays become cache hits instead of double-fired side effects - closing
+  the re-execution window LangGraph documents (issue #6208; ACRFence
+  arXiv:2603.20625). A chaos-matrix test encodes the crash points from the
+  durable-execution survey as executable assertions.
+
+- **Native LangGraph checkpointer (#236).** CONTINUUM now implements
+  LangGraph's BaseCheckpointSaver over its own storage
+  (`make_continuum_checkpointer(storage)`), so production LangGraph apps keep
+  their native persistence API while gaining the hash-chained event log,
+  provenance tagging, and everything else CONTINUUM provides. thread_id maps
+  deterministically to a run (`lg-<thread>`); every put lands a
+  STATE_CHECKPOINTED event with EXTERNAL_AGENT provenance; channel values
+  round-trip through LangGraph's JsonPlusSerializer (pydantic models,
+  datetimes). Schema v4 adds the two lg_* tables (additive migration plus
+  baseline DDL). Seven tests cover put/get round trips with typed values,
+  newest-first listing with limit/before/metadata-filter, parent chains and
+  point-in-time gets, pending writes, total thread deletion, per-put
+  provenance events, and a real StateGraph resuming across separately built
+  graph instances.
+
+- **Reasoning-context rehydration (#235).** Task-state recovery without
+  cognitive-state recovery produces sessions that are safe yet amnesiac.
+  New mutating MCP tool `continuum_record_summary` stores a bounded,
+  self-authored summary of where the agent's reasoning stands - plan stack,
+  decisions with rationale, open questions, working set - hard-capped at
+  4096 serialized characters so it can never become a transcript dump.
+  Summaries land as REASONING_SUMMARY events with EXTERNAL_AGENT provenance
+  and are strictly informational: they never move mode or safety. The
+  SessionStart briefing serves the newest summary verbatim ("where the last
+  session left off"), so a fresh session inherits the dead session's plan
+  instead of guessing from a progress bar.
+
+- **README refresh.** The README predated this week's work in every
+  direction users touch first: the Quick Start now leads with the two-minute
+  harness-wiring path (start a run, `hooks install`, no CLAUDE.md); the
+  Features table gains nine rows (gate, briefing, observations, reconciler
+  probes, executable guidance, gateway, OTel bridge, action index);
+  Framework Integration documents the CrewAI/AutoGen/Pydantic-AI thin hooks
+  and the gateway/OTel fallback seams; the Roadmap marks the dashboard and
+  the enforced-durability work complete; test counts are current (1224).
+
+- **Gateway hardening and docs refresh.** The enforcing proxy now refuses
+  request bodies above 10 MB with 413, draining (without buffering) up to a
+  256 MB sanity bound so clients finish sending and read the refusal instead
+  of dying on a broken pipe - a proxy that reads unbounded bodies into memory
+  is a denial-of-service surface against the agent it protects. The CLI
+  reference gains this week's commands plus an "executable configuration"
+  warning: the `.continuum` registries reference commands that run with your
+  user privileges and deserve the same scrutiny as cloned test scripts.
+
+- **`continuum complete <run>`: close a run from the keyboard.** Found
+  missing during live testing: MCP-driven runs close via adapter events, but
+  there was no CLI way to finish a run, so finished work kept surfacing as
+  the active run and hijacked every fresh session's resume. The command
+  appends `REVIEW_CONFIRMED` plus `RUN_COMPLETED` (both human-sourced, so
+  self-certification gates clear) and flips the run row to COMPLETED, with
+  an optional `--summary` note. Terminal runs can never be offered for
+  resume again; double-clicking is harmless; unknown runs exit NOT_FOUND.
+
+- **Enforcing HTTP gateway (seam 4 of the universality roadmap, #213).**
+  The last blind spot no harness hook can see: outbound HTTP calls made from
+  agent code in any language. `continuum gateway` runs a local enforcing
+  proxy; routes are registered in `.continuum/gateway.json` (host, methods,
+  path prefix, action type, key template over JSON body fields). Decision
+  semantics mirror the gate exactly: a matching request forwards to the real
+  upstream only when a live STARTED ledger claim exists for its derived key;
+  duplicates are refused because the effect already happened; unknown
+  outcomes demand reconciliation. After forwarding, the gateway settles the
+  claim itself - COMPLETED on 2xx/3xx with TOOL_COMPLETED evidence, FAILED-
+  certain on upstream 4xx, FAILED-uncertain on 5xx and network errors (the
+  effect may still have landed) - all inside the run's hash chain. Unknown
+  hosts are refused fail-closed: a proxy that silently forwards anywhere
+  would be an open relay wearing CONTINUUM's name.
+
+- **Thin adapters for CrewAI, AutoGen and Pydantic AI (seam 1 extension,
+  #213).** Three more production frameworks get the durability seam with
+  their own verified interception surfaces, all routed through one shared
+  `ContinuumToolGuard` over `ActionLedger`: CrewAI's global before/after
+  tool-call hook registry (with an action-type filter and a working
+  uninstaller), AutoGen's `FunctionTool.run_json` wrapped in place (agent
+  construction code unchanged; failures recorded then re-raised), and Pydantic
+  AI's async Hooks capability (`before_tool_call`/`after_tool_call` matching
+  the documented protocol) registered via `capabilities=[...]`. Keys follow
+  the MCP contract - resource identity via `key_fn`, argument-hash default -
+  so exactly-once survives model drift. Framework imports stay lazy; every
+  surface is tested against duck-typed stand-ins, no SDK required.
+
+- **OpenTelemetry bridge (seam 5 of the universality roadmap, #213).**
+  Production stacks already emit OTel; now those spans become CONTINUUM
+  evidence with zero framework cooperation. `make_span_processor(storage)`
+  returns a standard SpanProcessor to register on any TracerProvider: ended
+  spans carrying a recognised tool-name attribute (`gen_ai.tool.name` per the
+  GenAI semantic conventions plus common vendor spellings) are mirrored into
+  the active run's hash-chained log as `TOOL_COMPLETED`/`TOOL_FAILED`,
+  EXTERNAL_AGENT provenance, identical in shape to hook observations. The
+  pure core (`observation_from_span`, `record_span`) is duck-typed and
+  dependency-free; the SDK import is lazy with an actionable install hint,
+  and the bridge ships behind the new `otel` extra. This covers frameworks
+  CONTINUUM cannot wrap or hook - Rust/Go/TS agents, internal platforms -
+  wherever they emit traces.
+
+- **Session briefing: state without CLAUDE.md (#213 ergonomics follow-up).**
+  The last two voluntary behaviours depending on per-repo prose were
+  resume-on-start and knowing the active run at all. New read-only command
+  `continuum briefing` prints exactly what a returning agent needs - active
+  run, goal, progress, recovery verdict, executable next steps and recent
+  disk-checked observations - as SessionStart-compatible context JSON.
+  `hooks install` now wires it alongside observe on every supported client's
+  session-start event (Claude Code, Gemini CLI, Codex), so a fresh session
+  learns its durable state from deterministic injection instead of a prompt
+  file. With no active run it says how to create one.
+
+- **Actionable recovery guidance (`human_steps`).** The contract named what
+  was blocked but not what to do about it, leaving every resuming agent to
+  translate `reconcile_action:abc` into commands by hand. Resume and
+  validate now render executable next steps derived from the plan plus live
+  project automation: a reconcile step with a registered probe becomes one
+  `continuum reconcile <run>` command; without one it names the external
+  check and the exact `continuum_reconcile_action(...)` call, and says why
+  it is manual; human review points at `continuum confirm`; dependency
+  steps name the `--env` re-pin. Gate presence is surfaced as protocol
+  guidance. Steps flow through CLI text/JSON, MCP `continuum_resume`, and
+  the sidecar's mirrored payload. Guidance is rendering only: derived from
+  existing state and config, never executed by CONTINUUM itself.
+
+- **Client installers for Gemini CLI and Codex CLI (#209).** The observe and
+  gate commands were already client-agnostic; wiring them into new clients is
+  now data, not code. `CLIENT_PROFILES` describes each client's settings
+  path, hook event names and tool matchers, and `continuum hooks
+  install|remove` accepts all three clients: claude-code (PostToolUse/
+  PreToolUse on Write|Edit), gemini (AfterTool/BeforeTool on
+  write_file|replace, per the official hooks reference) and codex
+  (PostToolUse/PreToolUse, Bash-only today because Codex's documented hook
+  surface does not traverse apply_patch or MCP tools). Removal scans every
+  event list rather than hardcoded names, so it works across clients while
+  still touching only entries this tool installed. The installer surfaces
+  Codex's `[features].codex_hooks = true` requirement as an explicit hint
+  instead of hand-editing TOML. A regression test pins that each client's
+  default settings path comes from its profile, closing a gap found live:
+  every earlier test passed explicit paths, so a hardcoded CLI default was
+  silently writing all clients' hooks into Claude Code's settings file.
+
+- **Pre-action gate: host-enforced side-effect claims (#217).** The two-phase
+  action protocol was a convention the model was asked to follow; nothing
+  stopped an unclaimed side effect from firing, which degrades exactly-once
+  to at-least-once-with-nothing. `continuum gate` is a pre-tool-use hook that
+  makes the protocol physical: a call whose tool is registered in
+  `.continuum/gate.json` may proceed only when a live ledger claim already
+  exists for its derived key. Keys come from configuration templates
+  (`{"tools": {"send_invoice": {"key_template": "invoice:{customer}:{id}"}}}`
+  applied to the call's structured arguments), never from LLM-authored
+  strings. The decision table mirrors the ledger exactly: no claim denies
+  with instructions to route through `continuum_intercept_action`; a
+  COMPLETED record denies as a duplicate (the dedup verdict made physical);
+  UNKNOWN denies with reconcile instructions; closed attempts must be
+  reclaimed; only STARTED passes. Exit 2 feeds the reason back through the
+  harness so the model can comply on retry. `hooks install claude-code
+  --with-gate` wires PreToolUse alongside PostToolUse observe: claim before,
+  evidence after, both outside model control. Stated limitation: v1 gates
+  structured tool surfaces only, not shell commands run inside Bash.
+  Verified live over the real stdio MCP boundary: deny, claim via MCP,
+  allow, complete, duplicate denied, observation recorded in one hash chain.
+
+- **Lazy adapter imports (#214).** `continuum.adapters` sits on the critical
+  path of every entry point, but eagerly imported the optional SDK adapters,
+  so opening the MCP server cost roughly 3s before answering its first
+  request, and every `continuum observe` hook subprocess paid it again. The
+  dependency-free adapters stay eager; browser/container/kubernetes and the
+  langchain/langgraph/openai names now resolve through module
+  `__getattr__` (PEP 562) on first access, in both `continuum.adapters` and
+  the top-level `continuum` package. The public import surface is unchanged.
+  Measured on this machine: MCP server spawn-to-first-response drops from
+  about 3s to about 0.1s, and importing either package leaves none of
+  langgraph, langchain or openai in `sys.modules`. The full test suite also
+  gets faster for the same reason. Tests in `tests/test_adapters_lazy.py`
+  run their key assertions in subprocesses so earlier imports cannot mask a
+  regression.
+
+- **Action index: indexed cross-run idempotency lookups (#216).** Unscoped
+  claims folded every other run's complete event log on a local miss,
+  O(total logged events) per lookup. Schema v3 adds `action_index`, a derived
+  projection of the `ACTION_*` events (one row per ledger key), maintained
+  inside the same transaction as each event insert and backfilled from
+  existing events by the migration, so v2 databases gain correct lookups on
+  open. `ActionLedger` uses it whenever the engine provides one
+  (`Storage.supports_action_index`) and keeps the historical scan as the
+  fallback for engines without it; verdicts are identical because both read
+  the same log semantics. The log remains the source of truth:
+  `continuum verify --index` compares the projection against the fold and
+  reports drift, `--repair-index` rebuilds rows from events. Measured at 300
+  runs: foreign lookup ~19 ms scanning vs ~0.015 ms indexed, and the scan
+  cost grows linearly with store size while the index does not. Tests in
+  `tests/test_action_index.py` pin incremental maintenance across claims,
+  completions and reopens, equivalence with the scan for completed,
+  duplicate and uncertain-elsewhere cases, scoped-key isolation, drift
+  detection and repair, the engineless fallback path, and v2 backfill.
+
+- **Reconciler registry: probes settle uncertain side effects (#218).** An
+  uncertain action blocked resume until a person checked the external
+  system by hand, which does not scale past the first high-volume run.
+  Projects can now register one probe per action type in
+  `.continuum/reconcilers.json`; the probe receives the Action record as
+  JSON on stdin and prints a verdict (`occurred=true|false|unknown` or a
+  JSON object). `continuum reconcile <run>` runs the registered probes over
+  every pending action: definitive verdicts are applied through the ledger
+  and land as `ACTION_RECONCILED` events sourced `DETERMINISTIC` (local,
+  registered, auditable); probe errors, timeouts, unparseable output and
+  explicit unknowns leave actions untouched; types without a probe are
+  skipped. Auto-settlement therefore only shrinks the human queue, never
+  widens what an agent may certify itself. `--dry-run` reports without
+  writing. The command is deliberately separate from validate/resume so
+  those stay read-only under the exit-code safety contract. Verified live:
+  a claim committed then the MCP server killed leaves `REQUEST_HUMAN`;
+  after registering an outbox-checking probe, `reconcile` settles the
+  action and resume returns `RESUME`. Tests in `tests/test_reconcilers.py`
+  cover verdict parsing, the settle table, failure isolation, dry-run,
+  provenance and exit codes.
+
+- **Post-checkpoint observations surfaced in the recovery contract (#208).**
+  The observation hooks (#210) recorded what landed on disk, but a resuming
+  session had to know to inspect the raw event log to see it; the contract
+  reported self-reported progress alone. `RecoveryContract` now carries
+  `post_checkpoint_observations`: every file observation recorded after the
+  latest state version's source sequence, newest first and capped at 50 with
+  an explicit truncation marker, each disk-checked at assess time as
+  `verified`, `changed`, `missing` or `recorded`. The rows appear in
+  `continuum resume`/`validate` output and every rendered contract.
+  Deliberately informational: provenance stays conservative per #207, so
+  observations never move `mode`, `safe` or any required action; they tell
+  the resuming agent what is true about the workspace without certifying
+  anything. Verified live: an intact artifact shows `verified`, one modified
+  after its observation shows `changed`, and the decision fields are
+  byte-identical to a run without observations.
+
+- **Host-side observation hooks close part of the durability gap (#207).**
+  Recovery depends on the agent voluntarily calling the recording tools, so a
+  kill between performing work and reporting it left the next session a
+  contract that understated what had landed on disk (observed live with Claude
+  Code on 2026-08-22: an artifact fully written, progress still 0/1, zero
+  checkpoints). Two new CLI commands convert that voluntary recording into
+  mandatory interception for Claude Code: `continuum observe` reads one
+  PostToolUse hook payload from stdin (or `--payload-file`) and appends a
+  `TOOL_COMPLETED` event carrying the tool name, mutated path, byte count and
+  SHA-256 of the file as it exists right now; `continuum hooks install
+  claude-code` wires file-mutating tool completions to it by editing
+  `.claude/settings.json` in place (preserving unrelated settings,
+  self-healing a stale baked-in binary path, refusing to touch a settings file
+  that is not valid JSON), with `continuum hooks remove claude-code` to undo.
+  Observations target the explicit `--run-id`, else the most recently active
+  non-terminal run; with no run active they are dropped with exit 0 so hooks
+  never disturb unrelated sessions. Events are sourced `EXTERNAL_AGENT`: they
+  are evidence a resumed session can weigh, not a laundering path to trusted
+  state. Tests in `tests/test_cli_observe.py` include driving the exact
+  command string baked into settings.json through a real shell.
+
 - **`scoped_to_run=False` now enforces global uniqueness (#34).** An unscoped
   idempotency key claims store-global identity but the ledger only replayed its
   own run's log, so two runs could each open a fresh slot for the same
@@ -21,8 +392,6 @@ All notable changes to this project are documented here. The format follows
   identical semantics; it is paid only on the unscoped path after the local
   lookup missed. Regression tests cover cross-run dedup, the uncertain-elsewhere
   refusal, and the certain-failure pass-through.
-
-### Added
 
 - **Automatic durability for every harness (#191).** The file-derived progress
   hook and the policy-gated background checkpoint are now wired into
@@ -44,8 +413,6 @@ All notable changes to this project are documented here. The format follows
   adapter path, no log bloat over unchanged files, non-blocking auto progress
   after an intercepted action, and subclass forwarding.
 
-### Added
-
 - **Localized recovery is now dep_scope-aware and file-aware (#184).**
   `RecoveryEngine.assess` respects `Action.dep_scope` when a scope is given: an
   uncertain side effect tagged to a dependency outside the scope no longer
@@ -53,8 +420,6 @@ All notable changes to this project are documented here. The format follows
   source-level `DependencyGraph` to `assess`/`assess_scoped` surfaces every file
   importing a scoped dependency as `RecoveryDecision.impacted_files`. Phase 6
   gains an `out_of_scope_side_effect` scenario covering both paths.
-
-### Added
 
 - **Leftover issue sweep (Phases 2, 3, and provenance).** Closed the remaining
   open issues from the master plan with working, tested code:
@@ -81,8 +446,6 @@ All notable changes to this project are documented here. The format follows
     external-world claims.
   - CLI scoped-recovery smoke test and recovery-policy regression tests
     (#110, #104).
-
-### Added
 
 - **Recovery benchmarking and correctness scenarios (Phase 6).** The existing
   CONTINUUM-Bench (`src/continuum/benchmark/__init__.py`) already provides the
@@ -280,6 +643,32 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **MCP docs: the `CONNECTION_CLOSED` failure mode, and the eleventh tool.**
+  `docs/api/mcp.md` promised that with `.mcp.json` present "Claude Code registers
+  the server automatically". That holds only when the environment CONTINUUM was
+  installed into is on the `PATH` the client inherited. When it is not, the client
+  cannot spawn `continuum-mcp` at all and reports the failed spawn as
+  `CONNECTION_CLOSED` - a message that reads like a server that crashed but
+  describes an executable that was never found. No CONTINUUM code runs in that
+  state, so the server cannot detect, report, or recover from it, and the whole
+  diagnosis has to happen client-side. The registration section now states what a
+  bare command name actually requires, and a new Troubleshooting section carries
+  the diagnosis (`which` / `where.exe`, then `--help` through the full path) and
+  two remedies: launch the client from the activated environment, or pin the
+  absolute path with `claude mcp add --scope local`. The second also documents the
+  conflicting-scopes diagnostic it produces and warns against
+  `claude mcp remove continuum-mcp -s project`, which edits the committed
+  `.mcp.json` and unregisters the server for every other clone. Registration is no
+  longer described as instrumenting anything on its own: state is recorded when
+  the agent calls the tools, or when the `PostToolUse` hook records a write
+  outside the model's control.
+- **MCP tool count corrected to eleven.** `continuum_record_summary` (#235)
+  shipped with a CHANGELOG entry but never reached the reference docs. It is now
+  in the `docs/api/mcp.md` tool table, and the count is corrected from ten to
+  eleven - three read-only, eight mutating - in `README.md`, `docs/api/README.md`,
+  `docs/research/token_floor.md`, `references/mcp.md`,
+  `references/auto-resume-integration.md`, and `references/testing.md`.
+
 
 - **README.** `Contents` laid out as a horizontal wrapping nav; Security
   Extension added to the Features table and table of contents; website link
@@ -296,17 +685,74 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Anchored verification trusted the first live row of a compacted run
+  (PR #253 review, security).** After compaction, `verify_events` checked
+  whether an EVENT_LOG_ANCHORED event existed anywhere in the live log and,
+  if so, treated the first surviving row as a trusted genesis: its own
+  `prev_hash` and sequence became the walk's starting point. Deleting the
+  boundary events therefore left a "valid" chain, and verify returned success
+  for a run whose anchor era had been erased. Both engines now read the
+  newest `events_archive` row and require the live chain to continue it
+  exactly (its hash as the expected `prev_hash`, its sequence plus one as
+  the expected sequence), and SEQUENCE_GAP and BROKEN_CHAIN are enforced on
+  anchored logs like any other. The archive itself is deep-audited in the
+  same pass: every archived row is re-digested and chain-linked from sequence
+  1, so editing or truncating history in `events_archive` fails verify
+  instead of hiding behind a healthy live tail. Regression tests cover the
+  tampered row, deleted boundary event, truncated archive and emptied archive
+  cases through both `verify_events` and the CLI exit code.
+
+- **`continuum compact` committed the anchor marker separately from the
+  archive move (PR #253 review).** The marker append was one transaction and
+  the INSERT/DELETE into `events_archive` another, so a crash between them
+  left an anchored live log whose prefix never reached the archive, with
+  verify then trusting a genesis that was never earned. Both engines now
+  append EVENT_LOG_ANCHORED inside the same transaction as the archive move
+  (SQLite through the shared IMMEDIATE transaction via a conn-taking
+  `_append_chained` helper; Postgres through an explicit `transaction()`
+  block around the three statements, since the connection runs in autocommit
+  mode), and the docstrings document the real order: forced anchor checkpoint
+  first, then the atomic marker-plus-move.
+
+- **`replay` reported `verified: true` unconditionally for compacted runs
+  (PR #253 review).** The anchored branch folded the restored checkpoint
+  forward over the post-anchor tail but hardcoded the pass, so replay exited
+  0 even when the folded state disagreed with the stored version; the
+  corruption-detection contract was silently lost for every compacted run.
+  The branch now re-folds only the stored version's own prefix and compares
+  fingerprints exactly as the plain path's `_verify_against_stored` does,
+  returning CORRUPTED with `verified: false` on mismatch. A dead
+  `base is None` test (restore always returns a state) was removed along with
+  the hardcoded flag.
+
+- **Exactly-once reset at the compaction boundary (PR #253 review).** The
+  action ledger folded only live events, so after compaction every archived
+  ACTION_* claim vanished from the fold and a month-old completed side effect
+  could be claimed fresh and fired again. `ActionLedger` now folds archived
+  events too (`Storage.read_archived_events`, empty by default, implemented
+  by both engines), `protected_call` takes its decision fold from the ledger
+  rather than a raw event scan, and the old compaction test that exercised
+  the guard with an unrelated key was replaced by one asserting an archived
+  completed action is a cache hit that never re-runs the callback.
+
+- Smaller PR #253 review items: EVENT_LOG_ANCHORED joined `_NON_PROJECTING`
+  so anchored replays no longer count it under `ignored_types`; `compact`
+  gates on a new `supports_compaction` capability flag instead of surfacing
+  a raw NotImplementedError on engines without the archive table; and two
+  copy-paste artifacts (a duplicated `MIGRATIONS` comment line, an incomplete
+  clause in this changelog) were cleaned up.
+
 - **The `continuum serve` sidecar exported a `MUTATING` constant describing an
   authentication policy it does not implement, and no test pinned the real one
   (issue #95, reported by @abyyxhek).** `MUTATING` names seven of the ten
-  methods, and `_auth_check` gated the shared secret on membership in it — but
+  methods, and `_auth_check` gated the shared secret on membership in it, but
   `_auth_check` had no call sites anywhere in the tree, and `dispatch` calls
   `self.auth.verify` unconditionally, so `resume`, `validate` and `list_actions`
   do require a token despite being absent from the set. `SidecarAuth`'s docstring
   documented the same phantom rule ("every mutating call must present the
   matching `auth_token`"). The behaviour is the correct one and the description
-  was wrong: unlike the MCP server — whose mutating-only policy is deliberate and
-  pinned by `test_read_only_tools_stay_open_to_anyone` — the sidecar is reachable
+  was wrong: unlike the MCP server, whose mutating-only policy is deliberate and
+  pinned by `test_read_only_tools_stay_open_to_anyone`, the sidecar is reachable
   by any process that can speak to its pipe, and its reads are worth closing for
   what they return (`resume` hands back the goal string, `list_actions` the
   arguments and results of external side effects). Gating them costs nothing by
@@ -319,9 +765,9 @@ All notable changes to this project are documented here. The format follows
   consistent with *both* policies, and reinstating the mutating-only gate in
   `dispatch` opened all three read-only methods to unauthenticated callers
   without turning a single existing test red. `tests/test_serve.py` gains three
-  regression tests, twelve cases in all — every method in `list_methods()`
+  regression tests, twelve cases in all, every method in `list_methods()`
   refused without the secret, the read-only methods refused although `MUTATING`
-  omits them, and a read-only method still succeeding with it — verified red
+  omits them, and a read-only method still succeeding with it, verified red
   against that reintroduced gate.
 
 - **The `continuum serve` sidecar's `resume` had drifted from the MCP tool it
@@ -351,7 +797,7 @@ All notable changes to this project are documented here. The format follows
   not copy-pasteable (issue #94).** Both entry points formatted the failing path
   with `!r`, and `repr()` escapes each backslash, so
   `C:\Users\ASUS\no-such-dir\agent.db` came back as
-  `'C:\\Users\\ASUS\\no-such-dir\\agent.db'` — not the path the operator passed,
+  `'C:\\Users\\ASUS\\no-such-dir\\agent.db'`, not the path the operator passed,
   and useless pasted into a shell or a config file. POSIX paths were unaffected,
   having no backslashes to escape, which is also why the MCP server's
   `test_main_reports_an_unopenable_database_instead_of_a_traceback` was red on a
@@ -396,7 +842,7 @@ All notable changes to this project are documented here. The format follows
   `ModuleNotFoundError` traceback (issue #87).** The `mcp` extra is optional, but
   `[project.scripts]` installs the `continuum-mcp` console script
   unconditionally, so a plain `pip install continuum` produces an entry point
-  whose dependency is absent — and `mcp/server.py` imported `MCPServer`,
+  whose dependency is absent, and `mcp/server.py` imported `MCPServer`,
   `Context` and `ToolAnnotations` at module scope. The process therefore died
   during import, before the `initialize` handshake and before any handler in
   `main` could run, so the client reported only that the server never became
@@ -431,7 +877,7 @@ All notable changes to this project are documented here. The format follows
   - *Environment drift was detected but invalidated nothing.* `continuum_checkpoint`
     passed `env` to `capture_state` as an `EnvironmentSnapshot` only, and
     `StateValidator._apply_dependency_status` returns early for a state with no
-    `external_dependencies` — so a moved dataset was rendered in
+    `external_dependencies`, so a moved dataset was rendered in
     `environment_changes` while the verdict stayed `safe: true` with the reason
     "all components verified against the current environment". The core validator
     was never wrong: given a declared dependency it already yields `CONFLICTED`
@@ -439,7 +885,7 @@ All notable changes to this project are documented here. The format follows
     and the existing test appended `DEPENDENCY_DECLARED` straight to storage.
     Checkpointing now records each pinned resource as a `DEPENDENCY_DECLARED`
     event, so the declaration is durable across projections and restores, covered
-    by the hash chain, and carries `EXTERNAL_AGENT` provenance — which does not
+    by the hash chain, and carries `EXTERNAL_AGENT` provenance, which does not
     weaken the check, since a dependency's status comes from comparing two
     snapshots rather than from trusting the claim. Only new or re-pinned resources
     are appended, so checkpointing on a schedule does not grow the log. The
@@ -447,7 +893,7 @@ All notable changes to this project are documented here. The format follows
     surfaces must not disagree about whether drift is safe.
   - *`continuum_list_actions` under-reported an interrupted action.* A claim left
     `STARTED` by a crash reported `side_effect_uncertain: false` while
-    `continuum_resume` described the same action as an unknown outcome — the
+    `continuum_resume` described the same action as an unknown outcome, the
     aggregate `unresolved` count was right while the row a human reads said the
     opposite. `side_effect_uncertain` is only set on escalation to `UNKNOWN`,
     which has not happened yet for a fresh interruption. Each row now carries
@@ -461,7 +907,7 @@ All notable changes to this project are documented here. The format follows
     while the WAL held all 16 events, and deleting it lost everything *silently*,
     because an emptied database still verifies as an intact chain. Recovery is now
     staged least-destructive-first: discard the reconstructable `-shm` and retry,
-    and only if that fails move the `-wal` aside — never unlink it — restoring it
+    and only if that fails move the `-wal` aside, never unlink it, restoring it
     if the retry fails anyway, and warning on stderr with the quarantine path when
     it succeeds. Reachable only when the initial open raises, so latent rather
     than observed, but it is exactly the hard-kill path the feature advertises.
@@ -508,7 +954,7 @@ All notable changes to this project are documented here. The format follows
   `VALID` when the resume model was unknown (fail-open).** When
   `expected_model` is `None` (e.g. `continuum validate`/`resume` run without
   `--model`) or the state itself doesn't record which model produced it,
-  the validator has no way to verify recorded model-specific assumptions —
+  the validator has no way to verify recorded model-specific assumptions,
   but it reported them `VALID` and left `safe_to_resume=True` anyway,
   contradicting the module's own rule that it may say "I cannot tell" but
   must never guess in its own favour. `_check_model` now reports `UNKNOWN`
@@ -699,20 +1145,18 @@ All notable changes to this project are documented here. The format follows
    (PR #53).
 
 
-### Added
-
 - **Regression test for the checkpoint environment round-trip.** `tests/test_storage.py`
   exercises the checkpoint/reload path end to end: a checkpoint is written with a
   declared dependency and a captured `EnvironmentSnapshot`, the `SQLiteStorage` handle is
   closed, a *fresh* `SQLiteStorage` is opened on the same file, and the environment is
   asserted to survive the round-trip. The reloaded run is then assessed against an
-  unchanged environment and must resume as safe — proving `StateValidator.validate_dependency`
+  unchanged environment and must resume as safe, proving `StateValidator.validate_dependency`
   sees the dependency as unchanged rather than treating a missing baseline as
   *added/breaking*. This path (serialising `StateCheckpoint.environment` through the
   checkpoint `body` column and restoring it) had no coverage; this is added test
   coverage for an untested path, not a fix for a defect.
 
-### Added — Phase 12: CONTINUUM-Bench (minimal harness)
+### Added, Phase 12: CONTINUUM-Bench (minimal harness)
 
 - **`continuum benchmark` now runs a real benchmark instead of exiting 4.** The
   harness (`src/continuum/benchmark/__init__.py`) measures three scenarios that
@@ -732,7 +1176,7 @@ All notable changes to this project are documented here. The format follows
   strategy shows zero duplicate work, exactly one side effect, detects the
   dataset change while the naive strategy does not, and that replay wastes work.
 
-### Added — Phase 8: command-line interface
+### Added, Phase 8: command-line interface
 
 - `continuum` CLI covering `init`, `runs`, `inspect`, `history`, `events`, `diff`, `validate`,
   `resume`, `checkpoint`, `verify`, `actions`, `show-contract`, `replay` and `benchmark`.
@@ -747,7 +1191,7 @@ All notable changes to this project are documented here. The format follows
   count and version list around all nine of them.
 - `--json` on every command for machine consumption; text and JSON are never mixed on one stream.
 - `--env NAME=VERSION` declares the current environment. Omitting it yields `None`, which the
-  validator treats as *unverified* rather than *unchanged* — not checking must not resemble
+  validator treats as *unverified* rather than *unchanged*, not checking must not resemble
   checking and finding nothing wrong.
 - `benchmark` exits `4` and states plainly that no numbers are published because none have been
   measured.
@@ -758,14 +1202,14 @@ All notable changes to this project are documented here. The format follows
 
 - **`verify` and `actions` exited 0 for a run that does not exist.** An absent run has a trivially
   valid (empty) event chain and no recorded actions, so `continuum verify $TYPO && deploy` reported
-  a clean bill of health for a name nobody had ever written to — precisely the failure the
+  a clean bill of health for a name nobody had ever written to, precisely the failure the
   exit-code contract exists to prevent. All eight run-scoped commands now check existence first and
   report `NOT_FOUND` consistently. Found by driving the installed binary by hand; the test suite
   had not covered it.
 - `replay` on a missing run reported "the log never recorded RUN_STARTED", diagnosing the wrong
   problem.
 - `RunNotFound` and `CheckpointNotFound` inherit from `KeyError`, whose `__str__` applies `repr()`
-  to the message, so users saw `error: "no such run: 'ghost'"` — quoted twice.
+  to the message, so users saw `error: "no such run: 'ghost'"`, quoted twice.
 - CLI output was written to a block-buffered stdout while hints went to stderr, so when piped the
   hint could appear *before* the report it referred to. Output is now flushed at each emit.
 - `render_diff` duplicated the field name for progress counters (`completed: completed: 1 → 50`).
@@ -773,14 +1217,14 @@ All notable changes to this project are documented here. The format follows
   reached the unmapped-mode fallback it claimed to protect. Mutation testing caught that defaulting
   the fallback to `OK` went undetected; the replacement exercises an unclassified mode directly.
 
-### Added — Phase 7: recovery engine
+### Added, Phase 7: recovery engine
 
-- `RecoveryEngine` (`continuum.recovery.engine`) reducing three independent signals — validation
-  statuses, action-ledger state and checkpoint integrity — to one `RecoveryMode`.
+- `RecoveryEngine` (`continuum.recovery.engine`) reducing three independent signals, validation
+  statuses, action-ledger state and checkpoint integrity, to one `RecoveryMode`.
 - **The most cautious applicable signal wins.** Each signal proposes a mode and the engine takes the
   maximum on an explicit severity ordering (`RESUME < REPAIR_AND_RESUME < REPLAN < WAIT <
-  REQUEST_HUMAN < ROLLBACK < ABORT`). These signals genuinely co-occur — a run can have a stale
-  dataset *and* an uncertain side effect — and returning whichever was noticed first would let the
+  REQUEST_HUMAN < ROLLBACK < ABORT`). These signals genuinely co-occur, a run can have a stale
+  dataset *and* an uncertain side effect, and returning whichever was noticed first would let the
   unsafe answer win roughly half the time.
 - `plan_repairs` (`continuum.recovery.planner`) producing an ordered, deduplicated, deterministic
   repair plan. Reconciling an uncertain side effect always sorts first: nothing else is safe while
@@ -792,7 +1236,7 @@ All notable changes to this project are documented here. The format follows
 - `RecoveryContract` (`continuum.recovery.contract`) naming exactly **one** next permitted action.
   Listing everything currently allowed would let an agent pick the convenient step and skip the
   reconciliation it was supposed to do first. Contracts are deterministic and sealed with an
-  integrity hash — a contract editable between issue and enforcement would gate nothing.
+  integrity hash, a contract editable between issue and enforcement would gate nothing.
 - The engine is read-only: it computes and explains a decision without mutating the run, which is
   what makes assessment safe to perform against a live database.
 - 49 new tests (424 total), including a precedence matrix and five mutation checks confirming the
@@ -811,12 +1255,12 @@ All notable changes to this project are documented here. The format follows
   empty-proposal fallback). `restore()` raises before the first can be reached and the second cannot
   fire; both were verified dead rather than left as untestable code.
 
-### Added — Phase 6: action ledger and idempotency
+### Added, Phase 6: action ledger and idempotency
 
 - Idempotency keys (`continuum.actions.idempotency`) derived from action type plus canonically
   hashed arguments, so argument order never matters but a changed value always does. `scope`
   separates runs; `volatile` excludes fields like retry counters that would otherwise make every
-  retry look like a new action. Nothing is excluded by default — collapsing two genuinely different
+  retry look like a new action. Nothing is excluded by default, collapsing two genuinely different
   operations into one would silently skip real work.
 - `ActionLedger` (`continuum.actions.ledger`) implementing claim -> perform -> complete, stored as
   events so it inherits the log's ordering, durability and tamper-evidence. A repeat claim for a
@@ -828,7 +1272,7 @@ All notable changes to this project are documented here. The format follows
 - A timeout is treated as uncertainty, not absence: `fail(..., certain=False)` records `UNKNOWN`
   rather than `FAILED`, because a request that timed out may still have been processed.
 - Reconciliation strategies (`continuum.actions.reconciliation`): `ProbeReconciler` (ask the
-  external system — the only strategy producing evidence), `AssumeNotOccurredReconciler` (requires
+  external system, the only strategy producing evidence), `AssumeNotOccurredReconciler` (requires
   explicitly asserting `idempotent=True`), and `ManualReconciler` (escalates). A probe that raises
   is treated as "could not determine", never as evidence of absence. There is deliberately no
   `AssumeOccurred` strategy: assuming success without evidence silently drops work, and a dropped
@@ -842,11 +1286,11 @@ All notable changes to this project are documented here. The format follows
 - `SQLiteStorage` now closes its connection on finalisation, so a dropped handle does not leak a
   file descriptor. Documented as a safety net, not a substitute for `close()`.
 
-### Added — Phase 5: state validation
+### Added, Phase 5: state validation
 
 - Environment capture (`continuum.environment.snapshot`): pluggable `EnvironmentProvider` with
   `StaticProvider`, `FileProvider` (content hashes, so touching a file does not invalidate work),
-  `ValueProvider` and `CallableProvider`. Providers never raise — a resource that cannot be
+  `ValueProvider` and `CallableProvider`. Providers never raise, a resource that cannot be
   inspected is recorded as `UNKNOWN_VERSION`, because an environment check that fails open defeats
   the purpose of checking.
 - Environment diffing (`continuum.environment.diff`) distinguishing `UNCHANGED`, `CHANGED`, `ADDED`,
@@ -868,7 +1312,7 @@ All notable changes to this project are documented here. The format follows
 ### Fixed
 
 - `SemanticState.dangling_evidence()` reported a false alarm for any decision citing a *finding*
-  rather than raw evidence — which is legitimate provenance and occurs in every well-formed
+  rather than raw evidence, which is legitimate provenance and occurs in every well-formed
   reasoning chain. Findings now count as citable support. False alarms are how real ones get
   ignored.
 
@@ -878,12 +1322,12 @@ All notable changes to this project are documented here. The format follows
   already enforces on construction and deserialization. Verified unreachable rather than left as
   untestable code; the invariant is tested at the model level.
 
-### Added — Phase 4: checkpoint creation
+### Added, Phase 4: checkpoint creation
 
 - Checkpoint policies (`continuum.checkpoint.policy`): `ManualPolicy`, `IntervalPolicy`,
   `EventPolicy`, `SemanticPolicy`, `ContextPressurePolicy` and `HybridPolicy`, plus a
   `default_policy()` that checks explicit requests, side effects and meaning before falling back to
-  time — so a checkpoint reports the real reason it was taken rather than "the timer went off".
+  time, so a checkpoint reports the real reason it was taken rather than "the timer went off".
   Policies are pure functions of an explicit `PolicyContext`, including the clock, which makes
   checkpoint timing testable instead of flaky.
 - `SemanticPolicy` fires on meaning, not volume: structural changes (a decision recorded or
@@ -897,7 +1341,7 @@ All notable changes to this project are documented here. The format follows
   does not discard the work in between. `replay=False` returns the checkpoint on its own terms for
   validators that must judge it before trusting anything newer.
 - Bounded recovery context (`continuum.checkpoint.context`): renders the minimum sufficient briefing
-  — goal, verified progress, stale state, items requiring review, valid decisions, pending work,
+ , goal, verified progress, stale state, items requiring review, valid decisions, pending work,
   findings ranked by confidence, dependencies. Sections drop from the least important end under a
   token budget, but goal, progress and stale state are never dropped: an agent that resumes without
   knowing what to distrust is worse than one that does not resume.
@@ -912,7 +1356,7 @@ All notable changes to this project are documented here. The format follows
   now advances the cursor past its own annotation, with a fallback for the crash interleaving where
   the annotation was never written.
 
-### Added — Phase 3: SQLite persistence
+### Added, Phase 3: SQLite persistence
 
 - `Storage` interface (`continuum.storage.base`) covering runs, events, state versions and
   checkpoints, with its guarantees and non-guarantees documented in the module itself: append-only
@@ -938,11 +1382,11 @@ All notable changes to this project are documented here. The format follows
 
 - Event payloads are now validated as JSON-native at construction. A `datetime` in a payload hashed
   one way in memory and another way after being read back, which would have made a valid event fail
-  reload — phantom corruption caused by storage, not by tampering.
+  reload, phantom corruption caused by storage, not by tampering.
 - `sqlite://` URL parsing no longer strips the leading slash of an absolute path, which had caused
   the database to be created in the working directory instead of the requested location.
 
-### Added — Phase 2: semantic state representation
+### Added, Phase 2: semantic state representation
 
 - Deterministic projection (`continuum.state.semantic`): folds an event prefix into `SemanticState`.
   Guarantees reproducibility (no wall-clock dependence) and prefix-closure, so a run can be recovered
@@ -952,7 +1396,7 @@ All notable changes to this project are documented here. The format follows
   produced it, and `reproducible` distinguishes re-derivable state from asserted or inferred state.
 - Pluggable extraction (`continuum.state.extractor`): `StateExtractor` protocol,
   `DeterministicExtractor` (no model, no network), optional `LLMExtractor` that may only add
-  components — never modify or delete recorded facts — tagging everything `Origin.LLM` and
+  components, never modify or delete recorded facts, tagging everything `Origin.LLM` and
   `REQUIRES_REVIEW`, and degrading to the deterministic result if the callable raises.
   `CompositeExtractor` chains extractors without double-applying events.
 - Content-addressed version chain (`continuum.state.versioning`): linked, verifiable history that
@@ -964,7 +1408,7 @@ All notable changes to this project are documented here. The format follows
   detecting state that cites support it cannot produce.
 - 84 additional tests (141 total), 100% line coverage of `src/continuum`.
 
-### Added — Phase 1: data models and event system
+### Added, Phase 1: data models and event system
 
 - Durable data model (`continuum.models`): semantic state tree (goal, plan, progress, decisions,
   findings, evidence, pending work, approvals, external dependencies, model state), action ledger

@@ -32,10 +32,10 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Mapping, Sequence
 from types import TracebackType
-from typing import Any
+from typing import Any, ClassVar
 
 from continuum.events import Event, EventType, IntegrityReport
-from continuum.models import Origin, Run, SemanticState, StateCheckpoint
+from continuum.models import Action, Origin, Run, SemanticState, StateCheckpoint
 
 __all__ = [
     "Storage",
@@ -101,6 +101,62 @@ class SchemaVersionError(StorageError):
 class Storage(ABC):
     """Durable backing store for runs, events, versions and checkpoints."""
 
+    #: True when the engine maintains the derived action index (issue #216)
+    #: and implements :meth:`foreign_action`. Callers fall back to event-scan
+    #: lookups when False, so the flag must reflect real capability.
+    supports_action_index: ClassVar[bool] = False
+
+    #: True when the engine maintains ``events_archive`` and implements
+    #: :meth:`compact_run` (issue #239). Callers gate on this flag rather than
+    #: catching NotImplementedError, mirroring :attr:`supports_action_index`.
+    supports_compaction: ClassVar[bool] = False
+
+    def compact_run(self, run_id: str, *, through_sequence: int | None = None) -> dict[str, int]:
+        """Archive the pre-anchor prefix of a run's log (issue #239).
+
+        Only meaningful on engines with ``events_archive``; callers check
+        :attr:`supports_compaction` first, which is the capability contract.
+        """
+        raise NotImplementedError
+
+    def read_archived_events(self, run_id: str) -> Sequence[Event]:
+        """Read events moved into ``events_archive``, oldest first.
+
+        Engines without an archive return an empty sequence, so a caller that
+        wants "the whole recorded history" can concatenate this with
+        :meth:`read_events` unconditionally. This is what keeps exactly-once
+        action claims (and any other fold over history) intact across
+        compaction: an archived fact is still a recorded fact.
+        """
+        del run_id
+        return []
+
+    def foreign_action(self, key: str, *, exclude_run: str) -> Action | None:
+        """Newest action recorded under ``key`` outside ``exclude_run``.
+
+        Only meaningful when ``supports_action_index`` is True; engines
+        without an index leave the default, and callers scan event logs
+        instead. Returns None both for "not found" and "no index", which is
+        why callers must check the flag first.
+        """
+        del key, exclude_run
+        return None
+
+    def action_index_drift(self) -> int:
+        """Count index rows disagreeing with the log. Index engines only.
+
+        Callers must check :attr:`supports_action_index` first; engines
+        without an index deliberately have no meaningful answer.
+        """
+        raise NotImplementedError
+
+    def rebuild_action_index(self) -> int:
+        """Recompute the index from the log; returns corrected rows.
+
+        Same capability contract as :meth:`action_index_drift`.
+        """
+        raise NotImplementedError
+
     # -- lifecycle -------------------------------------------------------- #
 
     @abstractmethod
@@ -121,6 +177,17 @@ class Storage(ABC):
 
     @abstractmethod
     def create_run(self, run: Run) -> Run: ...
+
+    @abstractmethod
+    def create_run_started(self, run: Run, *, source: Origin = Origin.DETERMINISTIC) -> Run:
+        """Create a run and its ``RUN_STARTED`` event as one atomic write.
+
+        The run row and its first event are two inserts but one fact: without
+        the event the run cannot be projected, and without the row the event
+        violates its foreign key. Writing them separately admits a half-created
+        run that can be neither resumed nor deleted whenever the process dies
+        between the two statements. Engines must commit both or neither.
+        """
 
     @abstractmethod
     def get_run(self, run_id: str) -> Run: ...
@@ -180,7 +247,7 @@ class Storage(ABC):
     # -- state versions --------------------------------------------------- #
 
     @abstractmethod
-    def put_version(self, state: SemanticState, *, reason: str = "") -> int:
+    def put_version(self, state: SemanticState, *, reason: str = "", force: bool = False) -> int:
         """Persist a state version. Returns the assigned version number."""
 
     @abstractmethod

@@ -19,6 +19,7 @@ enforcement would gate nothing.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import Any
 
 from continuum.models import (
     Component,
@@ -73,6 +74,7 @@ def build_contract(
     reason: str | None = None,
     evidence: list[str] | None = None,
     scope: Iterable[str] | None = None,
+    post_checkpoint_observations: list[dict[str, Any]] | None = None,
 ) -> RecoveryContract:
     """Assemble a sealed, deterministic contract.
 
@@ -123,6 +125,7 @@ def build_contract(
         next_allowed_action=next_action,
         evidence=evidence,
         reason=reason,
+        post_checkpoint_observations=post_checkpoint_observations or [],
         created_at=utcnow(),
     )
     return seal_contract(contract)
@@ -161,4 +164,13 @@ def render_contract(contract: RecoveryContract) -> str:
     if contract.evidence:
         lines.append("evidence:")
         lines += [f"  - {e}" for e in contract.evidence]
+    if contract.post_checkpoint_observations:
+        lines.append("files changed since last checkpoint:")
+        for entry in contract.post_checkpoint_observations:
+            if entry.get("truncated"):
+                lines.append(f"  ... {entry['omitted']} earlier observation(s) omitted")
+            else:
+                lines.append(
+                    f"  [{entry['status']}] {entry['path']} ({entry['tool']}, seq {entry['sequence']})"
+                )
     return "\n".join(lines)
