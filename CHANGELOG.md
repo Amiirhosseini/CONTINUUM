@@ -651,7 +651,19 @@ All notable changes to this project are documented here. The format follows
   file modification, permission change, stale decision) remain follow-up work
   that needs deeper harness modelling of side effects and model or decision state.
 
+- **Dashboard bind testability (#270).** Server construction is split into
+  `make_dashboard_server(storage, port, host)` so the bind address is a
+  plain function of its arguments; `serve_dashboard` closes the listening
+  socket on shutdown. Three new tests pin the loopback default, honour an
+  explicit `0.0.0.0`, and smoke GET / over a real socket.
+
 ### Changed
+
+- **`continuum dashboard` binds 127.0.0.1 by default** (#270); pass
+  `--host 0.0.0.0` to opt into network exposure. The previous
+  all-interfaces bind exposed recovery contracts (goals, side-effect
+  arguments and results, event payloads) unauthenticated to the local
+  network.
 
 - **MCP docs: the `CONNECTION_CLOSED` failure mode, and the eleventh tool.**
   `docs/api/mcp.md` promised that with `.mcp.json` present "Claude Code registers

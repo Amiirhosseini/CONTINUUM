@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 from continuum.actions import ActionLedger
-from continuum.dashboard.app import serve_dashboard
+from continuum.dashboard.app import make_dashboard_server
 from continuum.events import EventType
 from continuum.models import Origin, Run
 from continuum.storage import SQLiteStorage
@@ -47,7 +47,12 @@ def addr(db: str):
 
 
 class _ServerThread:
-    """Runs serve_dashboard in a thread on an OS-assigned port."""
+    """Runs the dashboard in a thread on an OS-assigned port.
+
+    Built on make_dashboard_server so shutdown() can actually stop the
+    server: a leaked listener held its port for the whole session and made
+    later tests' port probes collide (Connection refused under load).
+    """
 
     def __init__(self, db: str) -> None:
         import socket
@@ -55,16 +60,18 @@ class _ServerThread:
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             self.port = int(sock.getsockname()[1])
-        self.thread = threading.Thread(
-            target=serve_dashboard, args=(SQLiteStorage(db), self.port), daemon=True
-        )
+        self.server = make_dashboard_server(SQLiteStorage(db), port=self.port)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.addr = f"127.0.0.1:{self.port}"
 
     def start(self) -> None:
         self.thread.start()
 
     def shutdown(self) -> None:
-        pass
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=5)
+        assert not self.thread.is_alive()
 
 
 _ports = {"n": 8940}
