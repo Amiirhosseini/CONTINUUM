@@ -63,16 +63,22 @@ def load_reconcilers(path: Path) -> dict[str, dict[str, Any]]:
     """Read the registry. Empty dict when absent; raise when malformed."""
     if not path.exists():
         return {}
+    # Absolute, so the message names a file the operator can open: the
+    # relative form depends on the cwd of whatever loaded the registry
+    # (a hook, the sidecar, a CI step). Matches gate.py per #333.
+    location = path.resolve()
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        raise ReconcilerConfigError(f"{path} is not valid JSON ({exc})") from exc
+        raise ReconcilerConfigError(f"{location} is not valid JSON ({exc})") from exc
     if not isinstance(raw, dict) or not isinstance(raw.get("probes", {}), dict):
-        raise ReconcilerConfigError(f"{path}: expected {{'probes': {{...}}}}")
+        raise ReconcilerConfigError(f"{location}: expected {{'probes': {{...}}}}")
     probes: dict[str, dict[str, Any]] = {}
     for action_type, spec in (raw.get("probes") or {}).items():
         if not isinstance(spec, dict) or not isinstance(spec.get("command"), str):
-            raise ReconcilerConfigError(f"{path}: probe {action_type!r} needs a string 'command'")
+            raise ReconcilerConfigError(
+                f"{location}: probe {action_type!r} needs a string 'command'"
+            )
         timeout = spec.get("timeout", _DEFAULT_TIMEOUT)
         if not isinstance(timeout, (int, float)) or timeout <= 0:
             raise ReconcilerConfigError(

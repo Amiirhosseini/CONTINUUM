@@ -92,14 +92,18 @@ def load_gateway_config(path: Path) -> list[Route]:
     """Read upstream routes. Empty list when absent; raise when malformed."""
     if not path.exists():
         return []
+    # Absolute, so the message names a file the operator can open: the
+    # relative form depends on the cwd of whatever loaded the registry
+    # (a hook, the sidecar, a CI step). Matches gate.py per #333.
+    location = path.resolve()
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        raise GatewayConfigError(f"{path} is not valid JSON ({exc})") from exc
+        raise GatewayConfigError(f"{location} is not valid JSON ({exc})") from exc
     routes: list[Route] = []
     entries = raw.get("upstreams", []) if isinstance(raw, dict) else None
     if not isinstance(entries, list):
-        raise GatewayConfigError(f"{path}: expected {{'upstreams': [...]}}")
+        raise GatewayConfigError(f"{location}: expected {{'upstreams': [...]}}")
     for entry in entries:
         try:
             routes.append(
@@ -112,7 +116,7 @@ def load_gateway_config(path: Path) -> list[Route]:
                 )
             )
         except KeyError as exc:
-            raise GatewayConfigError(f"{path}: upstream missing required field {exc}") from exc
+            raise GatewayConfigError(f"{location}: upstream missing required field {exc}") from exc
     return routes
 
 

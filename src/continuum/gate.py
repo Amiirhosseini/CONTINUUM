@@ -76,18 +76,24 @@ def load_gate_config(path: Path) -> dict[str, dict[str, Any]] | None:
     """
     if not path.exists():
         return None
+    # Resolved once, and used by every message below. The point of #333 is that
+    # an operator debugging a gate refusal needs to know which file to open, and
+    # the relative form depends on the cwd of whatever invoked the hook. Two of
+    # these four messages were still relative, so the same error could name the
+    # file two different ways depending on which validation tripped.
+    location = path.resolve()
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        raise GateConfigError(f"{path.resolve()} is not valid JSON ({exc})") from exc
+        raise GateConfigError(f"{location} is not valid JSON ({exc})") from exc
     if not isinstance(raw, dict) or not isinstance(raw.get("tools", {}), dict):
-        raise GateConfigError(f"{path.resolve()}: expected {{'tools': {{...}}}}")
+        raise GateConfigError(f"{location}: expected {{'tools': {{...}}}}")
     tools = raw.get("tools") or {}
     for tool, spec in tools.items():
         if not isinstance(spec, dict) or not isinstance(spec.get("key_template"), str):
-            raise GateConfigError(f"{path}: tool {tool!r} needs a string 'key_template'")
+            raise GateConfigError(f"{location}: tool {tool!r} needs a string 'key_template'")
         if spec.get("action_type") is not None and not isinstance(spec.get("action_type"), str):
-            raise GateConfigError(f"{path}: tool {tool!r} 'action_type' must be a string")
+            raise GateConfigError(f"{location}: tool {tool!r} 'action_type' must be a string")
     return tools
 
 
