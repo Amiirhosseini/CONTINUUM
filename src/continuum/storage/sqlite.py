@@ -139,7 +139,16 @@ class SQLiteStorage(Storage):
 
     def close(self) -> None:
         with self._lock:
-            self._connection.close()
+            conn = getattr(self, "_connection", None)
+            if conn is None:
+                return
+            try:
+                conn.close()
+            except sqlite3.ProgrammingError:
+                # Already closed — safe to call close() more than once.
+                pass
+            finally:
+                self._connection = None  # type: ignore[assignment]
 
     def __del__(self) -> None:
         """Release the connection if the owner never closed it.
