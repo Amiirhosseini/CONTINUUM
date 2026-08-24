@@ -52,7 +52,7 @@ import json
 import os
 import sqlite3
 import sys
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -199,6 +199,38 @@ def _open_server_storage(database: str) -> SQLiteStorage:
     # Nothing was clearable, so the error was something else entirely. Retrying
     # an identical open would fail identically.
     raise error
+
+
+@contextlib.contextmanager
+def _refusal_reaches_the_caller() -> Iterator[None]:
+    """Re-raise a deliberate refusal as ``ToolError`` so its reason survives.
+
+    Refusing a call is part of this server's contract, not a crash: an
+    unauthorized caller, a progress counter that violates its own arithmetic, a
+    run that does not exist, a log that never recorded RUN_STARTED. Each answer
+    is only useful if the caller is told which one it was.
+
+    The SDK draws that line by exception type. From mcp 2.1.0 a handler
+    exception it does not recognise becomes ``UnexpectedToolError`` whose message
+    is just ``"Error executing tool <name>"``, with the cause left on
+    ``__cause__``, while a ``ToolError`` keeps its text. Every refusal here is
+    raised as a domain exception (``PermissionError`` for authz, ``ValueError``
+    for validation, ``RunNotFound``, ``MalformedRunLog``), so under 2.1.0 the
+    caller was told nothing at all: not that it was a permissions problem, not
+    which counter was wrong, and not the CONTINUUM_MCP_MUTATING_CLIENTS setting
+    that fixes the first case. Converting here restores the guidance and states
+    the intent, that these outcomes are expected rather than faults.
+
+    Genuinely unexpected exceptions are deliberately not converted. Those should
+    keep surfacing as unexpected, because a bug in this server is not a message
+    to act on.
+    """
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    try:
+        yield
+    except (PermissionError, ValueError, RunNotFound, MalformedRunLog) as exc:
+        raise ToolError(str(exc)) from exc
 
 
 def _environment(run_id: str, env: Mapping[str, str] | None) -> EnvironmentSnapshot | None:
@@ -422,9 +454,10 @@ def build_server(
             # Authenticate before authorize: a caller proves the shared secret
             # first, then its declared name is checked against the allowlist.
             # Both must pass; either failure refuses the call before any write.
-            auth.verify(caller, token_from(ctx))
-            policy.require(caller, fn.__name__)
-            return fn(*args, **kwargs)
+            with _refusal_reaches_the_caller():
+                auth.verify(caller, token_from(ctx))
+                policy.require(caller, fn.__name__)
+                return fn(*args, **kwargs)
 
         # The SDK locates the context parameter via get_type_hints(), and
         # functools.wraps copies the *wrapped* function's annotations — which
@@ -462,8 +495,9 @@ def build_server(
             # a caller that cannot present the confirmation secret must not
             # be able to probe the allowlist, or receive its contents in the
             # refusal, by sending requests without a token.
-            confirm_auth.verify(token_from(ctx))
-            policy.require(caller, fn.__name__)
+            with _refusal_reaches_the_caller():
+                confirm_auth.verify(token_from(ctx))
+                policy.require(caller, fn.__name__)
             return fn(*args, **kwargs)
 
         # Same fix-up as ``guard``: re-advertise the context parameter or the
