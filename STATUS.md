@@ -19,13 +19,17 @@ believed, and what is neither.
 
 ## Full-gate audit (2026-08-24)
 
-Ran against `main` at `4659693` (merge of #275) in a clean worktree, Python 3.13:
+Ran against `main` at `8013f6a` in a clean worktree, Python 3.13
+(104 source files, 99 test files):
 
-- `pytest`: **1327 passed, 23 skipped, 0 failed** (31s). The suite is green.
-- `ruff check src/ tests/ examples/`: pass. `mypy src/continuum`: pass (102 files).
-- `ruff format --check`: **red**. The informed retry block added in #275
-  (`src/continuum/cli/main.py`, inside `cmd_resume`) is not formatter-canonical,
-  so the `Lint & Type-check` CI job fails on main (run for 4659693). Fix: PR #298.
+- `pytest`: **1345 passed, 24 skipped, 0 failed** (35s). The suite is green.
+- `ruff check src/ tests/ examples/`: pass.
+- `ruff format --check`: pass (216 files). The gate had gone red after #275
+  landed a non-canonical block in `cmd_resume`; it was repaired directly on
+  main (`11905e3`, `7fe38d3`) before the open fix PR could land, which left
+  #298 without anything to fix.
+- `mypy src/continuum`: pass, evidenced by the `Lint & Type-check` CI job on
+  recent main runs rather than a local interpreter (local mypy versions skew).
 - Distribution surfaces verified live: #277 merged, and the GHCR publish
   workflow ran green on both the #275 and #277 merges, so
   `docker run --rm ghcr.io/cyrax321/continuum` serves the crash-recovery demo
