@@ -158,6 +158,13 @@ The detailed explanation, the projection model, and the recovery context are in 
 | Enforcing HTTP gateway | Outbound calls in any language require claims; responses settle them from reality |
 | OpenTelemetry bridge | Tool-call spans from production tracing become evidence with zero code changes |
 | Action index | Cross-run idempotency lookups are indexed reads, not full-log scans |
+| Version pinning | Caller-asserted prompt/tool/model hashes stored per claim; drift surfaced on resume |
+| Retry budgets | Per-action-type attempt caps enforced at claim time; agents see remaining attempts |
+| Multi-agent parent/child | Parent resume composes family worst state; uncertain child blocks parent |
+| Informed retry | Engine-authored failure summaries injected into post-recovery resumes |
+| Fork semantics | Divergent continuations branch into child runs with fresh authority |
+| Log compaction | Pre-anchor prefix archived verbatim; live log bounded for month-long runs |
+| HITL dashboard surface | Confirm/reconcile/complete buttons with audit parity to the CLI |
 
 ## Security Extension
 
@@ -176,7 +183,7 @@ CONTINUUM is verified against real LLM agents, live protocol boundaries, and har
 - **Third-party clients**: Gemini CLI and Kilo Code connected over stdio JSON-RPC against the live SQLite store, validating multi-agent co-existence and authorization isolation.
 - **Protocol compliance**: driven end to end with `@modelcontextprotocol/inspector --cli` across process deaths; mutating tools deny by default behind `CONTINUUM_MCP_MUTATING_CLIENTS`; external claims degrade to `REQUIRES_REVIEW` (`safe: false`).
 - **Self-healing**: hard-killed servers recover from orphaned SQLite `-wal`/`-shm` sidecars via single-retry cleanup at startup.
-- **Scale**: roughly 1,345 tests passing on Python 3.11, 3.12, and 3.13 (unit, `hypothesis` property-based, concurrency, adversarial); CONTINUUM-Bench runs five crash scenarios proving 0 duplicate work and 0 duplicate side effects.
+- **Scale**: roughly 1,348 tests passing on Python 3.11, 3.12, and 3.13 (unit, `hypothesis` property-based, concurrency, adversarial); CONTINUUM-Bench runs five crash scenarios proving 0 duplicate work and 0 duplicate side effects.
 - **Adversarial audit**: the full MCP surface was audited over the live protocol; three defects were found and fixed. Method and reproduction steps in [test.md](test.md).
 
 ## MCP Integration
@@ -370,7 +377,9 @@ continuum actions <run_id>                       # external side effects
 continuum reconcile <run_id>                     # settle uncertain effects with probes
 continuum complete <run_id>                      # close a run as done, from the keyboard
 continuum verify <run_id>                        # re-audit the event hash chain
-```
+continuum budget <run_id>                        # retry-budget usage per action type
+continuum compact <run_id>                       # archive pre-anchor log prefix
+continuum tree <parent_run_id>                   # show parent + children with recovery states
 
 All wiring is host-side; the model's cooperation is optional:
 
@@ -379,6 +388,9 @@ continuum hooks install claude-code --with-gate   # coding CLIs: evidence, brief
 continuum gateway --port 8765                     # enforcing HTTP proxy for everything else
 provider.add_span_processor(continuum.otel.make_span_processor(storage))  # OTel to evidence
 continuum-mcp                                     # anything MCP-capable: the eleven-tool server
+continuum briefing                                # session-start context injection
+continuum budget <run_id>                         # retry-budget usage report
+continuum tree <parent_run_id>                    # multi-agent hierarchy view
 ```
 
 Optional registries live beside your code and are data, not code: `.continuum/gate.json` (side-effect tools + stable-key templates), `.continuum/reconcilers.json` (probes that check external systems), `.continuum/gateway.json` (upstream routes).
@@ -393,7 +405,7 @@ Every command accepts `--json`, and read-only commands never write, so they are 
 | 12 | Benchmark suite (CONTINUUM-Bench) | Complete (minimal harness) |
 | 13 | Cloud API (FastAPI + PostgreSQL) | Planned |
 | 14 | Dashboard | Complete (`continuum dashboard`) |
-| 15+ | Enforced durability: observation hooks, gate, session briefing, reconciler probes, enforcing gateway, OTel bridge, action index, executable guidance, multi-client installers | Complete (see issue #213) |
+| 15+ | Enforced durability: observation hooks, gate, session briefing, reconciler probes, enforcing gateway, OTel bridge, action index, executable guidance, multi-client installers, semantic replay detection, version pinning, retry budgets, log compaction, HITL surface, fork semantics, informed retry, multi-agent aggregation | Complete (see issue #213) |
 
 Beyond the original plan: the MCP server, MCP authorization layer, provenance and anti-self-certification, community files, schema versioning, and a bounded recovery context are shipped. See [STATUS.md](STATUS.md) for the verified-vs-believed breakdown and open correctness bugs.
 
@@ -415,11 +427,12 @@ CONTINUUM sits at the overlap of durable execution, idempotent side-effect track
 
 ## Status and limitations
 
-- **Tested**: 1,345 passed + 24 skipped on Python 3.13 at the 2026-08-24 audit of `main` (see [STATUS.md](STATUS.md)); counts vary by platform and optional services such as Postgres. The MCP surface has also been audited adversarially over the live protocol; see [test.md](test.md).
+- **Tested**: 1,348 passed + 24 skipped on Python 3.13 at the 2026-08-24 audit of `main` (see [STATUS.md](STATUS.md)); counts vary by platform and optional services such as Postgres. The MCP surface has also been audited adversarially over the live protocol; see [test.md](test.md).
 - **Not on PyPI.** Install from a clone, a git URL, a release wheel, or Docker (see Quick Start).
 - **MCP caller authentication is opt-in per deployment.** When `CONTINUUM_MCP_TOKEN` is set, the server refuses every mutating tool unless the caller presents that shared secret in the `initialize` handshake's `_meta.authToken`. Without it, authorization is by declared identity only (the historical default, preserved for local single-user use).
 - **Confirming self-reported state over MCP requires a separate secret.** `continuum_confirm` refuses every caller until the operator sets `CONTINUUM_MCP_CONFIRM_TOKEN`, because an agent allowed to record progress must not also be able to confirm it. The default path stays human-driven: run `continuum confirm <run_id>` on the host.
 - **Unbuilt components**: Cloud API (Phase 13).
+- **Shell command enforcement gap**: the gate enforces claims for structured tool calls but cannot see inside Bash/curl commands. Documented as v1 scope refusal.
 - **Framework adapters are experimental.** The OpenAI Agents SDK and LangGraph adapters do not yet carry the same crash-and-resume verification coverage as the generic facade. Prefer `GenericAgentAdapter` for production recovery.
 - **Agent/MCP runs need an explicit confirm before auto-resume.** Externally-reported state is `REQUIRES_REVIEW`, so `continuum resume` returns `request_human` until a human confirms. By design, not a bug; see [Framework Integration](#framework-integration).
 - **e2e autonomy test series** (issue [#6](https://github.com/Cyrax321/CONTINUUM/issues/6)): three full Claude Code runs scored 7/7 mechanics with unprompted recovery behavior observed. Further iterations across diverse prompt styles remain open.
