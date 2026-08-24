@@ -8,6 +8,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Semantic replay-or-fork at the tool boundary (#291).** Exact key
+  matching fails when an LLM renders the same intent with different argument
+  text. New `replay_similarity` module adds three comparison backends (exact,
+  fuzzy token-set Jaccard, pluggable embeddings) and a `classify_call`
+  function that classifies post-restore calls against prior completed actions
+  of the same type. Above the replay threshold: return cached result.
+  Between thresholds: divergent, require fork. Below: fresh claim. Cross-type
+  matching is never performed. This implements ACRFence's proposed-but-unbuilt
+  defence (arXiv:2603.20625) on top of CONTINUUM's existing gate + ledger.
+
 - **Distribution without PyPI: Docker image, Codespaces, and git installs.**
   A `Dockerfile` publishes a slim image whose default command runs the
   crash-recovery demo end to end (`docker run --rm ghcr.io/cyrax321/continuum`)
