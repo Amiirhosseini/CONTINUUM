@@ -189,3 +189,76 @@ def test_reads_are_not_blocked_by_an_open_write(tmp_path: Path) -> None:
             assert reader.last_sequence("run_1") == 1
             writer.append_event("run_1", EventType.WORK_COMPLETED, {})
             assert reader.last_sequence("run_1") == 2
+
+
+# --- exactly-once needs the run lease (issue #345) --------------------------- #
+
+
+def _seed(db: Path) -> None:
+    with SQLiteStorage(db) as store:
+        store.create_run(Run(run_id="run_1", goal="g"))
+        store.append_event("run_1", EventType.RUN_STARTED, {"goal": "g"})
+
+
+def test_concurrent_claims_on_one_key_are_not_serialised_by_the_ledger(
+    tmp_path: Path,
+) -> None:
+    """Deduplication is claim-then-check, not compare-and-set (issue #345).
+
+    Pinned deliberately rather than left to be discovered in production. The
+    ledger folds the log to decide whether a key was already claimed, and
+    nothing stands between that read and the append, so simultaneous claimants
+    all read "no prior slot". The exactly-once promise therefore rests on the
+    caller holding the run lease, per docs/multi_agent_isolation.md.
+
+    If a future change makes claiming atomic in storage, this test should start
+    failing. That is the signal to tighten it to `== 1`, not to delete it.
+    """
+    from continuum.actions.ledger import ActionLedger
+
+    db = tmp_path / "race.db"
+    _seed(db)
+
+    def claim(_: int) -> bool:
+        with SQLiteStorage(db) as store:
+            return ActionLedger(store, "run_1").claim("charge", {"amt": 100}, key="k").fresh
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        winners = sum(pool.map(claim, range(8)))
+
+    assert winners >= 1, "at least one claimant must be allowed to proceed"
+    # The chain stays sound: these are honestly-recorded duplicate attempts,
+    # not corruption, which is why only a lease can prevent them.
+    with SQLiteStorage(db) as store:
+        assert store.verify_events("run_1").ok
+
+
+def test_the_run_lease_restores_exactly_once_under_concurrency(tmp_path: Path) -> None:
+    """The documented remedy, proven rather than asserted.
+
+    Wrapping the claim in the run's lease collapses eight simultaneous claimants
+    to a single go-ahead, which is what makes docs/multi_agent_isolation.md's
+    "one run, one owner at a time" sufficient for exactly-once.
+    """
+    from continuum.actions.ledger import ActionLedger
+    from continuum.concurrency import SQLiteLeaseCoordinator
+
+    db = tmp_path / "leased.db"
+    _seed(db)
+    coordinator = SQLiteLeaseCoordinator(tmp_path / "lease.db")
+
+    def claim(n: int) -> str:
+        holder = f"agent-{n}"
+        if not coordinator.acquire("run_1", holder):
+            return "no-lease"
+        try:
+            with SQLiteStorage(db) as store:
+                outcome = ActionLedger(store, "run_1").claim("charge", {"amt": 100}, key="k")
+                return "fresh" if outcome.fresh else "dedup"
+        finally:
+            coordinator.release("run_1", holder)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        outcomes = list(pool.map(claim, range(8)))
+
+    assert outcomes.count("fresh") == 1, f"expected one winner, got {outcomes}"

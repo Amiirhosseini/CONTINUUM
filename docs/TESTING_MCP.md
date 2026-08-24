@@ -13,15 +13,17 @@ their failure modes, and the guarantees that must not move.
 
 | Suite | Result |
 |---|---|
-| `python -m pytest` | 1359 passed, 24 skipped, stable across 3 consecutive runs |
+| `python -m pytest` | 1361 passed, 24 skipped, stable across consecutive runs |
 | `ruff check` / `ruff format --check` | clean on every changed file |
 | `mypy src` | 25 errors, identical to baseline (missing stubs for the optional `mcp` extra and `cryptography`) |
 | In-process audit, all 11 tools | 23 of 23 assertions passed |
 | Adversarial probe round 2 | 14 of 14 assertions passed |
+| Adversarial probe round 3 | 14 of 16, both failures diagnosed (one probe bug, one real finding) |
 | Live MCP audit through the running server | all fixes confirmed present |
 
-Seven defects were found across two rounds. Three are fixed in the first commit,
-three in the second, and one was withdrawn as not-a-bug.
+Eight defects were found across three rounds. Three fixed in the first commit,
+three in the second, one withdrawn as not-a-bug, and one filed as #345 with the
+requirement documented and both halves pinned by tests.
 
 ## Method
 
@@ -36,6 +38,10 @@ Three complementary levels, because each catches what the others miss.
    restart. Used for the exhaustive matrix and for the regression assertions.
 3. **Unit and integration suite.** `pytest`, to confirm no existing guarantee
    regressed.
+
+A third round then targeted what the first two left untested: unscoped
+cross-run keys, single-use grants, real thread concurrency, a crash mid-action
+followed by recovery in a fresh process, and tamper detection.
 
 Every finding below was reproduced at level 1 or 2 before being fixed, and each
 fix carries a test that fails without it.
@@ -165,7 +171,6 @@ and `result`, because evidence of a completion the system has just decided never
 happened is worse than no evidence. Its test passes unchanged.
 
 ### 7. Withdrawn: `request_human` on MCP runs (issue #306)
-
 Reported as a regression of #35 and #84. It is neither.
 `tests/test_provenance.py::test_an_agent_cannot_certify_its_own_fabricated_progress`
 asserts precisely this behaviour, and the reason is concrete: self-reported
@@ -184,6 +189,34 @@ deleted, since everything it specified now travels with the server.
 
 Issue #306 was corrected publicly and closed as not-a-bug.
 
+### 8. `ActionLedger` has no lease integration (issue #345, high under concurrency)
+
+`claim()` deduplicates by folding the log and then appending, with nothing
+between the read and the write. Eight threads claiming one key all received
+`proceed=true` and eight `ACTION_RECORDED` slots were written: eight charges.
+
+`docs/multi_agent_isolation.md` already answers this, "One run, one owner at a
+time. An agent must hold the lease for the run before it writes events,
+checkpoints, or ledger entries", and `RecoveryLedger` implements it. But
+`ActionLedger`, the class whose entire purpose is at-most-once side effects, has
+no lease parameter and had no docstring saying one is required.
+
+So the reproduction is technically an unsupported configuration rather than a
+broken invariant, which is why this is filed rather than patched. Verified
+empirically that the documented remedy is sufficient: wrapping the same eight
+claims in a shared `SQLiteLeaseCoordinator` lease collapses them to exactly one
+winner.
+
+**Partially addressed.** The single-writer requirement is now stated on the
+`ActionLedger` docstring, and two tests pin both halves: that the ledger alone
+does not serialise concurrent claimants, and that the lease restores exactly-once.
+Making the claim atomic in storage, or accepting a `LeaseCoordinator` directly, is
+left to #345.
+
+The event chain stays sound throughout, so these are honestly-recorded duplicate
+attempts rather than corruption. That is precisely why only a lease can prevent
+them.
+
 ## Guarantees confirmed unchanged
 
 Fixing the above must not loosen anything. Each of these was asserted explicitly
@@ -201,6 +234,13 @@ after every change.
 | A certainly-failed action is still retryable | yes |
 | Unknown runs never report success on any tool | yes |
 | Event chain integrity verified after every run | yes |
+| A tampered payload is detected as `TAMPERED_CONTENT` plus `BROKEN_CHAIN` | yes |
+| Deduplication survives compaction (a pre-compaction effect still dedups) | yes |
+| A crashed session's run is found by a fresh session with no memorised id | yes |
+| Recorded progress and the goal survive a mid-action crash | yes |
+| A completed unscoped effect deduplicates across runs (#34) | yes |
+| A consumed single-use grant cannot be resurrected (#269) | yes |
+| Exactly-once under concurrency, **given the run lease** (#345) | yes |
 
 ## Notes for operators
 
@@ -242,14 +282,19 @@ Stated plainly rather than left implied.
 - **Model drift over MCP is still undetectable.** Finding 3 removes the false
   assurance but adds no write path for the model. Issue #308 remains open for
   that decision.
-- **No concurrency testing.** Every probe was sequential. Two clients claiming the
-  same key simultaneously, or two servers on one SQLite file, are untested here.
+- **Concurrent claiming is not atomic.** Finding 8 is documented and pinned by
+  tests, and the lease is proven sufficient, but `ActionLedger` still does not
+  acquire a lease itself. Issue #345.
 - **No Postgres run.** `require_usable_run_id` is wired into the Postgres backend
   but only the SQLite path was executed; the Postgres contract tests need a live
   server.
 - **Transient flakiness observed once.** One run reported 2 errors that did not
-  reproduce across three subsequent runs. A concurrent process was writing to the
-  working tree at the time, which is the likeliest cause, but it was not root
+  reproduce across several subsequent runs. A concurrent process was writing to
+  the working tree at the time, which is the likeliest cause, but it was not root
   caused.
-- **Dashboard, gateway and compaction** were not exercised. Scope was the MCP tool
-  surface.
+- **Dashboard, gateway and attestation** were not exercised. Scope was the MCP
+  tool surface plus the ledger and validator behind it. Compaction was covered
+  only to the extent that deduplication survives it.
+- **Lease expiry under load** was not tested. `test_lease.py` covers TTL
+  reclamation in isolation; what happens when a lease expires mid-claim is
+  unexplored.

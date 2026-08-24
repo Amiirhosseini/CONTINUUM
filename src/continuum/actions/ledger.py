@@ -242,6 +242,16 @@ class ActionLedger:
 
     Actions are stored as events, so the ledger inherits the event log's
     ordering, durability and tamper-evidence rather than inventing its own.
+
+    Single-writer per run. Deduplication is a claim-then-check against the
+    folded log, not an atomic compare-and-set, so two processes claiming the
+    same key at the same instant both read "no prior slot" and both open one.
+    The `docs/multi_agent_isolation.md` ownership model applies: a caller must
+    hold the run's lease (`continuum.concurrency.LeaseCoordinator`) before
+    claiming, exactly as `RecoveryLedger` does. Absent a lease, concurrent
+    claims on one key can each proceed and the exactly-once guarantee is only as
+    strong as the caller's own serialization. This class does not acquire the
+    lease itself yet; see issue tracking for lease-aware claiming.
     """
 
     def __init__(self, storage: Storage, run_id: str) -> None:
