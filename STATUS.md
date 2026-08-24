@@ -1369,6 +1369,20 @@ with `git stash drop` after a glance. It is harmless where it sits.
 
 ---
 
+## 2026-08-24: months-scale synthesis and filed issues
+
+Live arXiv sweep on 2026-08-24 plus review of all 9 research notes produced a consolidated synthesis for running agents for weeks and months:
+
+* New doc: `docs/research/months_web_synthesis_2026-08-24.md` links every claim. Live pulls: HORIZON 2604.11978 (3100 trajectories, subplanning dominates), AgentRewind 2608.14380 (env rewind is top ablation, MettleBench), ACRFence 2603.20625v1 (10 of 10 duplicate commits, Action Replay and Authority Resurrection), Weighted Memory Tree 2608.20631 (retention-scored hierarchy), Beyond Suspicious Steps 2608.17718 (RGE trust), MileGPO 2608.19803, FM-Bench 2608.18423 (20 years, 340 to 400 decisions).
+* Maps onto existing coverage and the 4 open gaps from `docs/research/long_horizon_gaps.md` (curated resume context, structured attempt memory, milestone-anchored plan, env rewind alignment via issue 292) plus the three tax notes (`instant_detection.md`, `confirm_tax.md`, `token_floor.md`).
+* Six additive novelty layers ordered by falsifiable tests: Layer 1 PLAN_UPSERT milestone plan, Layer 2 structured AttemptLesson, Layer 3 instant detection with scoped confirm plus token floor, Layer 4 dual-state rewind, Layer 5 sleep-time consolidation, Layer 6 prefix trust monitor (advisory).
+* Two professional feature requests filed with the `feature_request.yml` template, no em dashes, TensorFlow-level detail:
+  * #312 `feat(state): durable structured plan via PLAN_UPSERT for long-horizon recovery` (Layer 1)
+  * #313 `feat(recovery): structured attempt memory with falsification lessons for cross-session resume` (Layer 2)
+  Next session should continue with Layer 3 (hook plus scoped confirm) and extend `benchmark/phase6` toward HORIZON judge and FM-Bench horizon for the metrics listed in `ARCHITECTURE_EVOLUTION.md` section 9 (unsafe resume rate 0, recovery decision accuracy, repair precision, duplicate effects).
+
+---
+
 ## Codebase snapshot (2026-08-20)
 
 Captured while preparing the README project-structure section. The tree is 204
