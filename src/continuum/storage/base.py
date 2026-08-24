@@ -175,6 +175,28 @@ class Storage(ABC):
 
     # -- runs ------------------------------------------------------------- #
 
+    @staticmethod
+    def require_usable_run_id(run: Run) -> None:
+        """Refuse a blank run id where work enters storage.
+
+        Enforced on the write path rather than on :class:`Run` itself, because a
+        model-level constraint also runs on deserialization: one bad legacy row
+        would then make ``list_runs`` and ``get_active_run`` raise, leaving an
+        operator unable to even see the row in order to clean it up. Guarding the
+        entry point stops new bad data without bricking existing databases.
+
+        A blank id is not cosmetic. It is indistinguishable from "no run" at every
+        boundary that takes one, it wins ``get_active_run`` and so silently
+        becomes the run a fresh session is told to resume, and it renders guidance
+        like ``continuum confirm `` with nothing after it.
+        """
+        if not run.run_id.strip():
+            raise ValueError(
+                "run_id must not be blank: a blank id is indistinguishable from "
+                "'no run', and it wins get_active_run so a fresh session would be "
+                "told to resume it instead of real work"
+            )
+
     @abstractmethod
     def create_run(self, run: Run) -> Run: ...
 

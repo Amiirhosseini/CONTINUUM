@@ -1607,3 +1607,161 @@ async def test_backfill_is_not_repeated_on_later_calls(
 
     starts = [e for e in ctx.storage.read_events("run_1") if e.type is EventType.RUN_STARTED]
     assert len(starts) == 1
+
+
+# --- the retry budget must not defeat idempotency (issue #309) ---------------- #
+
+
+@pytest.mark.asyncio
+async def test_many_successful_actions_of_one_type_are_not_blocked(
+    server_ctx: tuple[Any, Any],
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Distinct successes are not retries, so the default budget of 3 must not
+    refuse the fourth invoice a run legitimately sends."""
+    monkeypatch.chdir(tmp_path)  # no .continuum/budgets.json here: defaults apply
+    server, _ = server_ctx
+    await seed_run(server)
+
+    for n in range(5):
+        claim = await call(
+            server,
+            "continuum_intercept_action",
+            run_id="run_1",
+            action_type="send_invoice",
+            key=f"invoice:{n}",
+        )
+        assert claim["proceed"] is True, f"claim {n} was refused: {claim}"
+        await call(
+            server,
+            "continuum_complete_action",
+            run_id="run_1",
+            action_key=claim["action_key"],
+            external_id=f"ext-{n}",
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_completed_action_still_deduplicates_at_budget(
+    server_ctx: tuple[Any, Any],
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The regression that let an exhausted budget cause a duplicate effect.
+
+    Re-claiming an action that already completed is a lookup, not an attempt. If
+    the budget gate runs first it raises instead of answering, and an agent that
+    gets an error where it expected "already done" has every reason to perform
+    the side effect again out of band.
+    """
+    monkeypatch.chdir(tmp_path)
+    server, _ = server_ctx
+    await seed_run(server)
+
+    done = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="charge",
+        key="charge:once",
+    )
+    await call(
+        server,
+        "continuum_complete_action",
+        run_id="run_1",
+        action_key=done["action_key"],
+        external_id="receipt-1",
+        result={"cents": 500},
+    )
+
+    # Exhaust the default budget of 3 with genuinely unsettled attempts.
+    for n in range(3):
+        await call(
+            server,
+            "continuum_intercept_action",
+            run_id="run_1",
+            action_type="charge",
+            key=f"charge:stuck-{n}",
+        )
+
+    # A fresh identity is now correctly refused.
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    with pytest.raises(ToolError, match="retry budget exhausted"):
+        await server.call_tool(
+            "continuum_intercept_action",
+            {"run_id": "run_1", "action_type": "charge", "key": "charge:new"},
+            context=_ctx(TEST_CLIENT),
+        )
+
+    # The completed one still answers, which is the whole point of the ledger.
+    again = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="charge",
+        key="charge:once",
+    )
+    assert again["proceed"] is False
+    assert again["status"] == ActionStatus.COMPLETED.value
+    assert again["external_id"] == "receipt-1"
+    assert again["previous_result"] == {"cents": 500}
+
+
+@pytest.mark.asyncio
+async def test_an_uncertain_action_still_refuses_at_budget(
+    server_ctx: tuple[Any, Any],
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An exhausted budget must not mask the reconciliation path either."""
+    monkeypatch.chdir(tmp_path)
+    server, _ = server_ctx
+    await seed_run(server)
+
+    claim = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="charge",
+        key="charge:maybe",
+    )
+    await call(
+        server,
+        "continuum_fail_action",
+        run_id="run_1",
+        action_key=claim["action_key"],
+        error="timeout after send",
+        certain=False,
+    )
+    # The unresolved charge:maybe is itself one unsettled attempt, so two more
+    # reach the default budget of 3.
+    for n in range(2):
+        await call(
+            server,
+            "continuum_intercept_action",
+            run_id="run_1",
+            action_type="charge",
+            key=f"charge:stuck-{n}",
+        )
+
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    with pytest.raises(ToolError, match="retry budget exhausted"):
+        await server.call_tool(
+            "continuum_intercept_action",
+            {"run_id": "run_1", "action_type": "charge", "key": "charge:new"},
+            context=_ctx(TEST_CLIENT),
+        )
+
+    again = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="charge",
+        key="charge:maybe",
+    )
+    assert again["proceed"] is False
+    assert again["status"] == ActionStatus.UNKNOWN.value
+    assert "reconcile" in again["guidance"].lower()

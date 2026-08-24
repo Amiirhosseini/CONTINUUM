@@ -130,8 +130,16 @@ class StateValidator:
 
         broken = self._broken_resources(environment_diff)
 
+        # diff_environments returns an empty diff when *either* snapshot is
+        # absent, so the diff alone cannot distinguish "the caller supplied no
+        # observation" from "the caller supplied one that omits this resource".
+        # Only this frame knows which it was, so the distinction is passed down.
+        observed = current_environment is not None
+
         if scope is None:
-            state = self._apply_dependency_status(state, environment_diff, entries)
+            state = self._apply_dependency_status(
+                state, environment_diff, entries, observed=observed
+            )
             state = self._propagate(state, broken, entries)
             self._check_goal(state, entries)
             self._check_progress(state, entries)
@@ -146,7 +154,9 @@ class StateValidator:
             # responsible for.
             scope_set = set(scope)
             broken = {r: c for r, c in broken.items() if r in scope_set}
-            state = self._apply_dependency_status(state, environment_diff, entries, scope=scope_set)
+            state = self._apply_dependency_status(
+                state, environment_diff, entries, scope=scope_set, observed=observed
+            )
             state = self._propagate(state, broken, entries)
 
         blocking = [
@@ -187,6 +197,7 @@ class StateValidator:
         diff: EnvironmentDiff,
         entries: list[ComponentValidationEntry],
         scope: set[str] | None = None,
+        observed: bool = True,
     ) -> SemanticState:
         if not state.external_dependencies:
             return state
@@ -206,7 +217,20 @@ class StateValidator:
                     status = StateStatus.UNKNOWN
                     detail = "not present in the current environment snapshot"
                 else:
-                    detail = "no environment snapshot to compare against"
+                    # A checkpoint snapshot may well exist; what is absent is the
+                    # caller's *current* observation, so name that rather than
+                    # blaming the stored side, which is the one thing definitely
+                    # present (issue #307). The status still degrades to UNKNOWN:
+                    # never validated is not the same as validated clean, and
+                    # strict_unknown is how a caller opts out of that.
+                    detail = (
+                        (
+                            "no current version supplied for comparison; pass "
+                            f'env={{"{dependency.resource}": "<version>"}}'
+                        )
+                        if not observed
+                        else "no environment snapshot to compare against"
+                    )
                     status = StateStatus.UNKNOWN if self.strict_unknown else dependency.status
             elif delta.change is ResourceChange.CHANGED:
                 status = StateStatus.CONFLICTED
@@ -423,6 +447,26 @@ class StateValidator:
                             if assumptions
                             else ""
                         )
+                    ),
+                )
+            )
+            return
+
+        if expected_model is not None and recorded is None:
+            # The caller asked for a drift check the state cannot answer: no
+            # writer ever recorded which model produced this run. Returning
+            # silently here reads as "no drift" and is indistinguishable from a
+            # clean comparison, so a caller passing expected_model believes it
+            # got an assurance it never received (issue #308). Report the gap
+            # instead. Note no MCP tool records a model today, so this is the
+            # normal outcome for MCP-originated runs.
+            entries.append(
+                ComponentValidationEntry(
+                    component=Component.MODEL,
+                    component_id=None,
+                    status=StateStatus.UNKNOWN,
+                    detail=(
+                        f"no model recorded for this run, cannot compare against {expected_model!r}"
                     ),
                 )
             )

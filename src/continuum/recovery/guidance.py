@@ -22,15 +22,59 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from continuum.models import RecoveryMode
+from continuum.models import Component, RecoveryMode, StateStatus
 from continuum.recovery.engine import RecoveryDecision
 from continuum.recovery.planner import RepairKind
 
-__all__ = ["human_steps_for"]
+__all__ = ["human_steps_for", "self_report_guidance"]
 
 _RECONCILE_HINT = (
     "call continuum_reconcile_action(run_id={run}, action_key={key}, occurred=true|false)"
 )
+
+
+def self_report_guidance(decision: RecoveryDecision) -> dict[str, str]:
+    """Explain a ``request_human`` that is only about unverified self-reports.
+
+    A run driven by an agent (over MCP or the sidecar) is self-certified, so its
+    goal and progress validate as REQUIRES_REVIEW and the mode becomes
+    ``request_human`` even when nothing is wrong. That is deliberate:
+    self-reported progress decides what work a resumed session skips, so it must
+    never read as verified. But the bare status looks like a hard stop, and the
+    obvious next move -- calling ``continuum_confirm`` -- is refused by design,
+    which strands the caller with no legal way forward.
+
+    So when self-report is the *only* thing blocking, say what it means and what
+    is still permitted. When anything else is also wrong (a conflicted
+    dependency, an unresolved action) the caller has a real problem to fix and
+    this note would only dilute it, so it is omitted.
+
+    Returns a mapping to splice into a payload, empty when not applicable, so a
+    caller adds the key only when there is something to say.
+    """
+    if decision.mode is not RecoveryMode.REQUEST_HUMAN:
+        return {}
+    blocking = [e for e in decision.validation.report.statuses if e.status is not StateStatus.VALID]
+    only_self_report = bool(blocking) and all(
+        e.component in (Component.GOAL, Component.PROGRESS)
+        and e.status is StateStatus.REQUIRES_REVIEW
+        for e in blocking
+    )
+    if not only_self_report:
+        return {}
+    return {
+        "self_report_guidance": (
+            "Nothing is wrong with this run. request_human here means only that its "
+            "goal and progress were reported by an agent and nothing independent "
+            "corroborates them. Work is not blocked: recording progress, "
+            "checkpointing and the action tools all still function. Do not call "
+            "continuum_confirm, which is refused over MCP because an agent must not "
+            "vouch for its own claims; only a human running "
+            f"'continuum confirm {decision.run_id}' clears it. Say that once and "
+            "carry on. Before skipping units the counter calls complete, check the "
+            "work actually happened rather than trusting the number."
+        )
+    }
 
 
 def human_steps_for(
