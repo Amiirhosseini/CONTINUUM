@@ -79,9 +79,9 @@ def load_gate_config(path: Path) -> dict[str, dict[str, Any]] | None:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        raise GateConfigError(f"{path} is not valid JSON ({exc})") from exc
+        raise GateConfigError(f"{path.resolve()} is not valid JSON ({exc})") from exc
     if not isinstance(raw, dict) or not isinstance(raw.get("tools", {}), dict):
-        raise GateConfigError(f"{path}: expected {{'tools': {{...}}}}")
+        raise GateConfigError(f"{path.resolve()}: expected {{'tools': {{...}}}}")
     tools = raw.get("tools") or {}
     for tool, spec in tools.items():
         if not isinstance(spec, dict) or not isinstance(spec.get("key_template"), str):
