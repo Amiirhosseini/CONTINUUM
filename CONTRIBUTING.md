@@ -79,7 +79,7 @@ Create a `.pre-commit-config.yaml` in the repo root with:
 ```yaml
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.6.9
+    rev: v0.16.3
     hooks:
       - id: ruff
         args: [--fix]
