@@ -80,7 +80,7 @@ Verify:
 ```bash
 continuum --help                 # CLI entrypoint
 continuum-mcp --help             # MCP server entrypoint (needs [mcp] or [dev])
-pytest -q                        # ~1,370 collected (exact count and skips vary by environment)
+pytest -q                        # ~1,380 collected (exact count and skips vary by environment)
 ruff check src/ tests/ examples/ && ruff format --check src/ tests/ examples/
 mypy src/continuum               # the three gates CI enforces
 ```
@@ -149,10 +149,10 @@ The detailed explanation, the projection model, and the recovery context are in 
 | Framework adapters | Generic Python, OpenAI Agents SDK, LangGraph, and LangChain integrations |
 | Secure planning loop | Two-signal observation verification escalates high-risk branches to REQUIRES_REVIEW |
 | Periodic revalidation | Environment re-checked on a schedule, catching mid-run drift within one cycle |
-| Tamper-evident log | Hash-chained event log (34 event types) with integrity verification |
+| Tamper-evident log | Hash-chained event log (36 event types) with integrity verification |
 | Enforcing gate | Unclaimed side-effect calls are refused before they fire; deny messages teach the claim protocol |
 | Observation hooks | Every file a coding CLI writes becomes digest-verified evidence, outside model control |
-| Session briefing | Fresh sessions learn run state deterministically at start, no prompt file |
+| Session briefing | Fresh sessions learn run state deterministically at start, including the last session's reasoning summary |
 | Reconciler probes | Registered commands settle uncertain side effects automatically; humans see only the rest |
 | Executable guidance | Resume/validate render next steps as runnable commands, not statuses |
 | Enforcing HTTP gateway | Outbound calls in any language require claims; responses settle them from reality |
@@ -164,6 +164,8 @@ The detailed explanation, the projection model, and the recovery context are in 
 | Informed retry | Engine-authored failure summaries injected into post-recovery resumes |
 | Fork semantics | Divergent continuations branch into child runs with fresh authority |
 | Log compaction | Pre-anchor prefix archived verbatim; live log bounded for month-long runs |
+| Consumed-grant tracking | Single-use authority references are marked spent at terminal status; reuse after restore is refused (`GRANT_DENIED`), defending the checkpoint-restore path against Authority Resurrection |
+| Chain attestation | `continuum attest` signs a run's chain head with Ed25519 so an external verifier can prove history was unaltered as of a known key |
 | HITL dashboard surface | Confirm/reconcile/complete buttons with audit parity to the CLI |
 
 ## Security Extension
@@ -183,7 +185,7 @@ CONTINUUM is verified against real LLM agents, live protocol boundaries, and har
 - **Third-party clients**: Gemini CLI and Kilo Code connected over stdio JSON-RPC against the live SQLite store, validating multi-agent co-existence and authorization isolation.
 - **Protocol compliance**: driven end to end with `@modelcontextprotocol/inspector --cli` across process deaths; mutating tools deny by default behind `CONTINUUM_MCP_MUTATING_CLIENTS`; external claims degrade to `REQUIRES_REVIEW` (`safe: false`).
 - **Self-healing**: hard-killed servers recover from orphaned SQLite `-wal`/`-shm` sidecars via single-retry cleanup at startup.
-- **Scale**: roughly 1,348 tests passing on Python 3.11, 3.12, and 3.13 (unit, `hypothesis` property-based, concurrency, adversarial); CONTINUUM-Bench runs five crash scenarios proving 0 duplicate work and 0 duplicate side effects.
+- **Scale**: roughly 1,380 tests collected (~1,360 passing; the rest skip without optional services) on Python 3.11, 3.12, and 3.13 (unit, `hypothesis` property-based, concurrency, adversarial). CONTINUUM-Bench runs five crash scenarios plus a dedicated argument-drift scenario, measuring 0 duplicate work and 0 duplicate side effects for CONTINUUM against full duplication for naive replay; a separate 12-scenario recovery-correctness suite (`continuum.benchmark.phase6`) encodes the crash points from the durable-execution survey as executable assertions.
 - **Adversarial audit**: the full MCP surface was audited over the live protocol; three defects were found and fixed. Method and reproduction steps in [test.md](test.md).
 
 ## MCP Integration
@@ -215,7 +217,9 @@ Nine adapters ship in `src/continuum/adapters/` (one in-process facade plus eigh
 | LangGraph | `LangGraphAgentAdapter` | Experimental. Wraps a `StateGraph`; optional `langgraph`. |
 | LangChain | `LangChainAgentAdapter` | Experimental. Drops `checkpoint_node` into an LCEL `Runnable` pipeline and the `create_agent` tool-calling loop; optional `langchain`. |
 
-Each adapter records progress through the ledger and routes external effects through the two-phase intercept/complete protocol. All three framework adapters have end-to-end integration tests and have been driven against a **live OpenRouter model**, where the runs surfaced and then closed an LLM argument-drift dedup gap and two OpenAI-adapter bugs. Full usage, live-model results, and runnable examples for every adapter are in [references/adapters.md](references/adapters.md).
+Each adapter records progress through the ledger and routes external effects through the two-phase intercept/complete protocol. All three framework adapters have end-to-end integration tests and have been driven against a **live OpenRouter model**, where the runs surfaced and then closed an LLM argument-drift dedup gap and two OpenAI-adapter bugs, including a live hard-crash (`os._exit(137)` mid-side-effect) proof per adapter. Full usage, live-model results, and runnable examples for every adapter are in [references/adapters.md](references/adapters.md).
+
+Production LangGraph apps can also keep their native persistence API: `make_continuum_checkpointer(storage)` implements LangGraph's `BaseCheckpointSaver` over CONTINUUM's storage, so every put lands in the same hash-chained, provenance-tagged event log (see [references/adapters.md](references/adapters.md)).
 
 Three further production frameworks are covered by thin, SDK-free hook surfaces in [`adapters/thin.py`](src/continuum/adapters/thin.py):
 
@@ -225,7 +229,7 @@ Three further production frameworks are covered by thin, SDK-free hook surfaces 
 | AutoGen core | `FunctionTool.run_json` wrapped in place | `wrap_autogen_tool(tool, storage, run_id)` |
 | Pydantic AI | async Hooks capability | `Agent(capabilities=[wrap_pydantic_ai_hooks(storage, run_id)])` |
 
-For stacks none of these reach: `continuum gateway` enforces claims on outbound HTTP from any language, and `continuum.otel.make_span_processor(storage)` turns existing OpenTelemetry tool spans into evidence.
+For stacks none of these reach: `continuum gateway` enforces claims on outbound HTTP from any language, `continuum.otel.make_span_processor(storage)` turns existing OpenTelemetry tool spans into evidence, and `continuum serve` exposes the same operations as the MCP tools over a language-agnostic JSON wire protocol (stdio, or HTTP via `--transport http` with `CONTINUUM_SERVE_TOKEN` auth).
 
 ### Resuming agent- or MCP-reported runs
 
@@ -263,9 +267,9 @@ CONTINUUM is organised around one invariant: **every fact carries its origin, an
 Any agent harness connects through exactly one of these; no framework cooperation is required.
 
 ```
-Seam 1: In-process adapters     GenericAgentAdapter.wrap_tool(key_fn=...)
-         Python frameworks       LangChain, LangGraph, OpenAI SDK,
-                                 CrewAI, AutoGen, Pydantic AI
+Seam 1: In-process adapters     GenericAgentAdapter.intercept_action(...);
+         Python frameworks       wrap_tool(key_fn=...) on LangChain/LangGraph,
+                                 OpenAI Agents SDK hooks
 Seam 2: MCP server              continuum-mcp (11 tools over stdio)
          MCP-capable clients
 Seam 3: CLI lifecycle hooks     continuum hooks install <client> [--with-gate]
@@ -317,7 +321,7 @@ Schema v6. SQLite is primary; Postgres is CI-verified.
 
 | Table | Purpose |
 |:--|:--|
-| `events` | Hash-chained append-only log (32 event types) |
+| `events` | Hash-chained append-only log (36 event types) |
 | `runs` | Run metadata with parent_run_id for multi-agent |
 | `versions` | SemanticState snapshots per checkpoint |
 | `checkpoints` | Sealed checkpoint records |
@@ -327,14 +331,14 @@ Schema v6. SQLite is primary; Postgres is CI-verified.
 
 ### Module map
 
-CONTINUUM is one library (`src/continuum`, 104 modules) plus a large test suite (101 files, 1,348 passing tests). All modules append to and replay one hash-chained event log:
+CONTINUUM is one library (`src/continuum`, 104 modules) plus a large test suite (98 test files, ~1,380 tests). All modules append to and replay one hash-chained event log:
 
 | Module | Role |
 |:--|:--|
 | `events.py` | Append-only, hash-chained event log and `verify()` |
 | `state/` | Projection, validation, extraction |
 | `storage/` | SQLiteStorage (v6 schema), postgres.py, migrations.py, actionindex.py |
-| `actions/` | Idempotent action ledger, reconciliation, claim/complete |
+| `actions/` | Idempotent action ledger, reconciliation, claim/complete, consumed-grant tracking |
 | `checkpoint/` | Policy-driven checkpoints with forced anchoring |
 | `recovery/` | Engine, planner, sealed contract, guidance, observations, family rollup, fork semantics, informed retry summaries |
 | `gate.py` | Pre-tool-use enforcement: allow/deny against ledger claims |
@@ -350,7 +354,7 @@ CONTINUUM is one library (`src/continuum`, 104 modules) plus a large test suite 
 | `mcp/` | 11 stdio tools plus authz (token auth, allowlist, confirmation token) |
 | `serve/` | Sidecar (stdio JSON wire + HTTP transport) |
 | `dashboard/` | Web dashboard with HITL buttons (confirm/reconcile/complete) |
-| `cli/` | 25+ argparse commands, exit codes as verdict |
+| `cli/` | 33 argparse commands, exit codes as verdict |
 | `otel.py` | OpenTelemetry span processor bridge |
 
 ### Honest limitations
@@ -380,6 +384,8 @@ continuum verify <run_id>                        # re-audit the event hash chain
 continuum budget <run_id>                        # retry-budget usage per action type
 continuum compact <run_id>                       # archive pre-anchor log prefix
 continuum tree <parent_run_id>                   # show parent + children with recovery states
+continuum attest <run_id> --key signer.pem       # sign the chain head for an external verifier
+```
 
 All wiring is host-side; the model's cooperation is optional:
 
@@ -403,11 +409,12 @@ Every command accepts `--json`, and read-only commands never write, so they are 
 |:-----:|:--|:--|
 | 1-11 | Data models, semantic state, persistence, checkpointing, validation, action ledger, recovery engine, CLI, crash-recovery examples, environment snapshots/diffs, framework adapters | Complete |
 | 12 | Benchmark suite (CONTINUUM-Bench) | Complete (minimal harness) |
-| 13 | Cloud API (FastAPI + PostgreSQL) | Planned |
+| 13 | Cloud API (FastAPI + PostgreSQL) | Partial: the PostgreSQL storage backend and the HTTP sidecar transport (`continuum serve --transport http`) are shipped and CI-tested; the hosted multi-tenant service is not started |
 | 14 | Dashboard | Complete (`continuum dashboard`) |
 | 15+ | Enforced durability: observation hooks, gate, session briefing, reconciler probes, enforcing gateway, OTel bridge, action index, executable guidance, multi-client installers, semantic replay detection, version pinning, retry budgets, log compaction, HITL surface, fork semantics, informed retry, multi-agent aggregation | Complete (see issue #213) |
+| Next | Months-scale durability plane: milestone-anchored plans (#312), structured attempt memory (#313), atomic dual-state rewind (#292), public recovery-correctness benchmark (#293), webhook-out notifications (#305) | Planned (draft spec in [docs/UPGRADE_SPEC.md](docs/UPGRADE_SPEC.md)) |
 
-Beyond the original plan: the MCP server, MCP authorization layer, provenance and anti-self-certification, community files, schema versioning, and a bounded recovery context are shipped. See [STATUS.md](STATUS.md) for the verified-vs-believed breakdown and open correctness bugs.
+Beyond the original plan: the MCP server, MCP authorization and caller-authentication layers, provenance and anti-self-certification, community files, schema versioning with forward migrations, a bounded recovery context, consumed-grant tracking, Ed25519 event-chain attestation, the native LangGraph checkpointer, and wheel artifacts on every push to `main` are shipped. See [STATUS.md](STATUS.md) for the verified-vs-believed breakdown and open correctness bugs.
 
 ## What CONTINUUM Is Not
 
@@ -427,13 +434,13 @@ CONTINUUM sits at the overlap of durable execution, idempotent side-effect track
 
 ## Status and limitations
 
-- **Tested**: 1,348 passed + 24 skipped on Python 3.13 at the 2026-08-24 audit of `main` (see [STATUS.md](STATUS.md)); counts vary by platform and optional services such as Postgres. The MCP surface has also been audited adversarially over the live protocol; see [test.md](test.md).
+- **Tested**: 1,360 passed + 23 skipped in a full run at the 2026-08-24 audit of this tree; CI enforces the suite on Python 3.11, 3.12, and 3.13, and counts vary by platform and optional services such as Postgres (see [STATUS.md](STATUS.md)). The MCP surface has also been audited adversarially over the live protocol; see [test.md](test.md).
 - **Not on PyPI.** Install from a clone, a git URL, a release wheel, or Docker (see Quick Start).
-- **MCP caller authentication is opt-in per deployment.** When `CONTINUUM_MCP_TOKEN` is set, the server refuses every mutating tool unless the caller presents that shared secret in the `initialize` handshake's `_meta.authToken`. Without it, authorization is by declared identity only (the historical default, preserved for local single-user use).
+- **MCP caller authentication is opt-in per deployment.** When `CONTINUUM_MCP_TOKEN` is set, the server refuses every mutating tool unless the caller presents that shared secret in the `initialize` handshake's `_meta.authToken`; per-caller secrets are available via `CONTINUUM_MCP_CLIENT_TOKENS` (`name:secret` pairs). Without any token configured, authorization is by declared identity only (the historical default, preserved for local single-user use).
 - **Confirming self-reported state over MCP requires a separate secret.** `continuum_confirm` refuses every caller until the operator sets `CONTINUUM_MCP_CONFIRM_TOKEN`, because an agent allowed to record progress must not also be able to confirm it. The default path stays human-driven: run `continuum confirm <run_id>` on the host.
 - **Unbuilt components**: Cloud API (Phase 13).
 - **Shell command enforcement gap**: the gate enforces claims for structured tool calls but cannot see inside Bash/curl commands. Documented as v1 scope refusal.
-- **Framework adapters are experimental.** The OpenAI Agents SDK and LangGraph adapters do not yet carry the same crash-and-resume verification coverage as the generic facade. Prefer `GenericAgentAdapter` for production recovery.
+- **Framework adapters remain experimental.** All three framework adapters now carry live-model soft-resume and hard-crash proofs (OpenRouter, `gpt-4o-mini`), including the crash contract that blocks resume on an uncertain side effect, but their integration coverage is younger than the generic facade's. Prefer `GenericAgentAdapter` for production recovery.
 - **Agent/MCP runs need an explicit confirm before auto-resume.** Externally-reported state is `REQUIRES_REVIEW`, so `continuum resume` returns `request_human` until a human confirms. By design, not a bug; see [Framework Integration](#framework-integration).
 - **e2e autonomy test series** (issue [#6](https://github.com/Cyrax321/CONTINUUM/issues/6)): three full Claude Code runs scored 7/7 mechanics with unprompted recovery behavior observed. Further iterations across diverse prompt styles remain open.
 
@@ -451,6 +458,8 @@ Open an issue before submitting large PRs. See [CONTRIBUTING.md](CONTRIBUTING.md
   <a href="https://github.com/as950118"><img src="docs/contributors/as950118.png" width="60" alt="heonjinjeong" /></a>
   <a href="https://github.com/abyyxhek"><img src="docs/contributors/abyyxhek.png" width="60" alt="Abishek" /></a>
   <a href="https://github.com/Parthipashok04"><img src="docs/contributors/parthipashok04.png" width="60" alt="Parthipashok04" /></a>
+
+Also with merged contributions: [Adhi1-2](https://github.com/Adhi1-2), [yuki-fuyutsuki](https://github.com/yuki-fuyutsuki), and [okestroHjJeong](https://github.com/okestroHjJeong).
 
 ## License
 
