@@ -242,6 +242,16 @@ class ActionLedger:
 
     Actions are stored as events, so the ledger inherits the event log's
     ordering, durability and tamper-evidence rather than inventing its own.
+
+    Single-writer per run. Deduplication is a claim-then-check against the
+    folded log, not an atomic compare-and-set, so two processes claiming the
+    same key at the same instant both read "no prior slot" and both open one.
+    The `docs/multi_agent_isolation.md` ownership model applies: a caller must
+    hold the run's lease (`continuum.concurrency.LeaseCoordinator`) before
+    claiming, exactly as `RecoveryLedger` does. Absent a lease, concurrent
+    claims on one key can each proceed and the exactly-once guarantee is only as
+    strong as the caller's own serialization. This class does not acquire the
+    lease itself yet; see issue tracking for lease-aware claiming.
     """
 
     def __init__(self, storage: Storage, run_id: str) -> None:
@@ -662,16 +672,36 @@ class ActionLedger:
         ``occurred=True`` means a check confirmed the effect exists; the action
         becomes ``COMPLETED`` and will never be repeated. ``occurred=False``
         means it confirmed absence; the action becomes ``FAILED`` and may be
-        retried.
+        retried, and its now-falsified ``external_id`` and ``result`` are
+        cleared (issue #29) so no reader trusts evidence of a completion the
+        system has just decided never happened.
+
+        Reconciling an already-COMPLETED action is deliberately permitted: an
+        agent that optimistically called :meth:`complete` may be contradicted by
+        a later probe, and correcting that record is the point of this method.
+        The caller is trusted to have real evidence, because nothing here can
+        check the outside world on its behalf.
+
+        What is *not* permitted is losing evidence by omission. ``occurred=True``
+        keeps any ``external_id`` and ``result`` already on record when the
+        caller does not supply replacements, so confirming an effect happened can
+        never erase the receipt proving it did.
         """
         existing = self._require(key)
         if occurred:
+            # Fall back to what is already recorded rather than overwriting with
+            # None. Confirming an effect occurred must never be the reason its
+            # receipt disappears; a caller replacing the evidence passes it.
+            settled_external = external_id if external_id is not None else existing.external_id
+            settled_result = dict(result) if result is not None else existing.result
             action = existing.model_copy(
                 update={
                     "status": ActionStatus.COMPLETED,
-                    "external_id": external_id,
-                    "result": dict(result) if result is not None else None,
-                    "result_hash": stable_hash(dict(result)) if result is not None else None,
+                    "external_id": settled_external,
+                    "result": dict(settled_result) if settled_result is not None else None,
+                    "result_hash": (
+                        stable_hash(dict(settled_result)) if settled_result is not None else None
+                    ),
                     "completed_at": utcnow(),
                     "side_effect_uncertain": False,
                     "last_error": note or existing.last_error,

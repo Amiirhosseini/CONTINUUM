@@ -765,3 +765,54 @@ def test_file_extension_shape_still_deduplicates(ledger: ActionLedger) -> None:
 
     second = ledger.claim("export.report", {"dataset": "report.csv"})
     assert not second.fresh, "report.csv is a known-suffix rendering of report"
+
+
+# --- confirming an effect must not erase the proof of it --------------------- #
+
+
+def test_reconciling_as_occurred_keeps_an_existing_receipt(ledger: ActionLedger) -> None:
+    """Omitting external_id used to overwrite it with None.
+
+    Issue #29 established that occurred=False clears now-falsified evidence.
+    occurred=True is the opposite claim, so it must never be the reason a receipt
+    disappears. A caller that confirms an effect happened without capturing its
+    id should leave the recorded id standing, not destroy it.
+    """
+    claim = ledger.claim("charge", {"cents": 999}, key="invoice:2")
+    ledger.complete(claim.key, external_id="receipt-2", result={"cents": 999})
+
+    ledger.reconcile(claim.key, occurred=True, note="probe confirmed it exists")
+
+    settled = ledger.get(claim.key)
+    assert settled is not None
+    assert settled.status is ActionStatus.COMPLETED
+    assert settled.external_id == "receipt-2"
+    assert settled.result == {"cents": 999}
+
+
+def test_reconciling_as_occurred_still_accepts_new_evidence(ledger: ActionLedger) -> None:
+    """Preserving on omission must not stop a caller replacing the evidence."""
+    claim = ledger.claim("charge", {}, key="invoice:3")
+    ledger.complete(claim.key, external_id="stale", result={"v": 1})
+
+    ledger.reconcile(claim.key, occurred=True, external_id="corrected", result={"v": 2})
+
+    settled = ledger.get(claim.key)
+    assert settled is not None
+    assert settled.external_id == "corrected"
+    assert settled.result == {"v": 2}
+
+
+def test_reconciling_an_unknown_outcome_as_occurred_needs_no_prior_receipt(
+    ledger: ActionLedger,
+) -> None:
+    """The ordinary path: nothing was recorded, so there is nothing to keep."""
+    claim = ledger.claim("pay", {}, key="u:1")
+    ledger.fail(claim.key, "timeout after send", certain=False)
+
+    ledger.reconcile(claim.key, occurred=True, external_id="found-it")
+
+    settled = ledger.get(claim.key)
+    assert settled is not None
+    assert settled.status is ActionStatus.COMPLETED
+    assert settled.external_id == "found-it"

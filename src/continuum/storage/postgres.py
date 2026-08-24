@@ -267,6 +267,7 @@ class PostgresStorage(Storage):
     # -- runs ------------------------------------------------------------- #
 
     def create_run(self, run: Run) -> Run:
+        self.require_usable_run_id(run)
         with self._write():
             try:
                 self._connection.execute(
@@ -291,6 +292,7 @@ class PostgresStorage(Storage):
         The connection runs autocommit, so an explicit ``transaction()`` block
         is what makes the two inserts atomic here.
         """
+        self.require_usable_run_id(run)
         with self._write(), self._connection.transaction():
             try:
                 self._connection.execute(

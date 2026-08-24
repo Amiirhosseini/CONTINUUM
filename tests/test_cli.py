@@ -574,9 +574,18 @@ def test_tolerating_unknown_is_opt_in(db: str) -> None:
 
 
 def test_a_model_switch_can_be_declared(db: str) -> None:
+    # No model was ever recorded for this run, so the requested comparison
+    # cannot be made. Reporting OK would mean "no drift", which is
+    # indistinguishable from a clean check: the fail-open pattern #49 closed for
+    # model-specific assumptions, and #308 closes for the model itself. The gap
+    # is reported instead, so a caller that explicitly asked for a drift check
+    # does not receive a false clean bill of health.
     code, out, _ = run("--db", db, "validate", "run_1", "--env", "dataset=v3", "--model", "model-b")
-    assert code == ExitCode.OK  # no model recorded, so nothing to invalidate
+    # REQUIRES_REPAIR, not REQUIRES_HUMAN: the remedy is to record which model
+    # produced the state, which is mechanical rather than a judgement call.
+    assert code == ExitCode.REQUIRES_REPAIR
     assert "Run: run_1" in out
+    assert "no model recorded" in out
 
 
 # --- invoked as a real process ---------------------------------------------- #

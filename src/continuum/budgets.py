@@ -85,22 +85,42 @@ def _max_for(action_type: str, raw: Mapping[str, Any]) -> int:
 
 
 def attempts_for_type(events: Any, action_type: str) -> int:
-    """Count claim slots opened for ``action_type`` from raw events.
+    """Count unsettled claim slots opened for ``action_type`` from raw events.
 
     A claim slot (an ACTION_RECORDED whose action status is STARTED) is one
     attempt. Settlement events (completed/failed/unknown) are updates, not
     new attempts - so retries count but their bookkeeping does not.
+
+    Slots whose action went on to COMPLETE are excluded. This is a *retry*
+    budget: an operation that succeeded was never retried, and counting it caps
+    how much distinct work a run may do rather than how hard it may hammer a
+    failing upstream (issue #309). Failures, unknowns and in-flight attempts
+    all still count, which is what the amplification guard actually needs.
     """
     from continuum.events import EventType
     from continuum.models import ActionStatus
 
+    # The claim slot and its settlement are separate events describing the same
+    # action, so fold to the final status per action id before counting: only
+    # that tells us whether the attempt ultimately succeeded.
+    slots: dict[str, int] = {}
+    final: dict[str, str] = {}
+    for event in events:
+        if event.type is not EventType.ACTION_RECORDED:
+            continue
+        action = event.payload.get("action")
+        if not isinstance(action, Mapping) or action.get("action_type") != action_type:
+            continue
+        action_id = str(action.get("action_id"))
+        status = str(action.get("status"))
+        if status == ActionStatus.STARTED.value:
+            slots[action_id] = slots.get(action_id, 0) + 1
+        final[action_id] = status
+
     return sum(
-        1
-        for e in events
-        if e.type is EventType.ACTION_RECORDED
-        and isinstance(e.payload.get("action"), Mapping)
-        and e.payload["action"].get("action_type") == action_type
-        and e.payload["action"].get("status") == ActionStatus.STARTED.value
+        count
+        for action_id, count in slots.items()
+        if final.get(action_id) != ActionStatus.COMPLETED.value
     )
 
 
