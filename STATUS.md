@@ -63,7 +63,8 @@ notices.
 
 ### Interfaces
 
-- **CLI** (`cli/`), 14 commands, stdlib `argparse` only. Exit codes are a
+- **CLI** (`cli/`), 33 commands at `main` (`4453c72`, recounted by enumerating
+  the built parser on 2026-08-24), stdlib `argparse` only. Exit codes are a
   safety contract: only a verified-safe run exits `0`, so
   `continuum resume "$RUN" && ./start-agent.sh` cannot launch onto stale state.
   Colour is TTY-aware and respects `NO_COLOR`; piped output is byte-identical
@@ -73,8 +74,11 @@ notices.
   integration, optional `langgraph` dependency.
 - **`OpenAIAgentAdapter`** (`adapters/openai.py`), OpenAI Agents SDK
   integration, optional `openai-agents` dependency.
-- **MCP server** (`mcp/server.py`), 10 tools over stdio (`continuum_confirm`
-  was added alongside the `REVIEW_CONFIRMED` event in the launch fixes).
+- **MCP server** (`mcp/server.py`), 11 tools over stdio: 3 read-only by
+  `read_only_hint` annotation (`continuum_validate`, `continuum_resume`,
+  `continuum_list_actions`) and 8 mutating, recounted from the tool
+  registrations on 2026-08-24. `continuum_confirm` was added alongside the
+  `REVIEW_CONFIRMED` event in the launch fixes.
 
 ### MCP two-phase action interception
 
@@ -661,12 +665,16 @@ changed.
   in-process via `GenericAgentAdapter` (DETERMINISTIC origin) and confirming it
   resumes through MCP.
 
-### Known limitation: startup latency
+### Resolved: startup latency (#214)
 
-Opening the server imports `continuum.adapters`, which eagerly imports `langgraph`
-(about 0.6s) and `openai` (about 0.9s); spawn to first response is about 3s. This
-is within Claude Code's health-check tolerance today, but deferring the adapter
-imports until first use would be a worthwhile follow-up.
+This section previously recorded spawn-to-first-response of about 3s, caused by
+`continuum.adapters` eagerly importing `langgraph` (about 0.6s) and `openai`
+(about 0.9s). Closed by issue #214: optional SDK adapter names now resolve
+lazily through module `__getattr__` (PEP 562) in
+`src/continuum/adapters/__init__.py`, so processes that never touch a framework
+adapter (the MCP server, each `continuum observe` hook subprocess) no longer
+pay for them, while `from continuum.adapters import X` keeps working for every
+public name. The dependency-free adapters stay eager.
 
 ### Resolved: startup self-heal for orphaned WAL sidecars
 
