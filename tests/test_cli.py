@@ -11,6 +11,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -803,6 +804,66 @@ def test_attest_verify_reports_altered_after_new_event(db: str, tmp_path: Path) 
     code, out, _ = run("--db", db, "attest-verify", "run_1", "--attest", str(attest_file))
     assert code == ExitCode.CORRUPTED
     assert "ALTERED" in out
+
+
+def test_attest_verify_detects_an_in_place_payload_edit(db: str, tmp_path: Path) -> None:
+    """An attestation must not pass on content that was rewritten under it.
+
+    The verdict used to compare the signed ``chain_hash`` against the digest
+    *stored* in the head row. Editing an event's payload straight through the
+    database changes the payload and leaves every ``hash`` column untouched, so
+    the head still matched and the verdict read SIGNED, "chain matches", on a run
+    whose goal had been rewritten. `continuum verify` caught it in the same
+    breath, because it recomputes; attest-verify did not, because it did not.
+
+    This is the attack the signature exists to stop, so it gets its own test:
+    appending an event (covered above) moves the head and is easy to notice,
+    while an in-place edit is silent and is what an attacker with database access
+    would actually do.
+    """
+    from continuum.security.attestation import generate_keypair
+
+    priv_pem, _ = generate_keypair()
+    key_file = tmp_path / "signer.pem"
+    key_file.write_text(priv_pem)
+
+    attest_file = tmp_path / "run_1.attest.json"
+    code, _, _ = run(
+        "--db",
+        db,
+        "attest",
+        "run_1",
+        "--key",
+        str(key_file),
+        "--signer",
+        "ci-bot",
+        "--out",
+        str(attest_file),
+    )
+    assert code == ExitCode.OK
+
+    head_before = _head_hash(db)
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "UPDATE events SET payload = ? WHERE run_id = 'run_1' AND sequence = 1",
+            (json.dumps({"goal": "rewritten", "total": 100}),),
+        )
+    # The premise of the bug: the stored head digest is byte-identical, so any
+    # check that trusts it cannot see the edit.
+    assert _head_hash(db) == head_before
+
+    code, out, _ = run("--db", db, "attest-verify", "run_1", "--attest", str(attest_file))
+    assert code == ExitCode.CORRUPTED, f"a tampered chain must not verify: {out}"
+    assert "ALTERED" in out
+    assert "no longer verifies" in out
+
+
+def _head_hash(db: str) -> str:
+    with sqlite3.connect(db) as conn:
+        row = conn.execute(
+            "SELECT hash FROM events WHERE run_id = 'run_1' ORDER BY sequence DESC LIMIT 1"
+        ).fetchone()
+    return str(row[0])
 
 
 # --- provenance view (issue #148) ------------------------------------------- #
