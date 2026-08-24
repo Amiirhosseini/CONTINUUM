@@ -272,3 +272,55 @@ def test_gate_tolerates_an_unparseable_payload(db: str, tmp_path: Path) -> None:
     )
     assert code == ExitCode.OK
     assert "allowing" in err
+
+
+# --- config errors name a file the operator can open (issue #333) ------------- #
+
+
+@pytest.mark.parametrize(
+    "filename,module,loader,error",
+    [
+        ("gate.json", "continuum.gate", "load_gate_config", "GateConfigError"),
+        ("budgets.json", "continuum.budgets", "load_budgets", "BudgetConfigError"),
+        ("reconcilers.json", "continuum.reconcilers", "load_reconcilers", "ReconcilerConfigError"),
+        ("gateway.json", "continuum.gateway", "load_gateway_config", "GatewayConfigError"),
+    ],
+)
+def test_a_registry_error_names_an_absolute_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    filename: str,
+    module: str,
+    loader: str,
+    error: str,
+) -> None:
+    """Every registry loader, not just the gate.
+
+    #333 fixed this for two of the gate's four messages. The rationale is that a
+    relative path depends on the cwd of whatever loaded the registry, which for a
+    hook or the sidecar is not the operator's shell, so the message names a file
+    they cannot find. That reasoning is identical for the budget, reconciler and
+    gateway registries, which all load from `.continuum/` by relative default, so
+    this covers the class rather than the one instance.
+
+    Parameterised deliberately: a fifth registry added later without resolving
+    its path shows up here as a missing case rather than as a support question.
+    """
+    import importlib
+
+    monkeypatch.chdir(tmp_path)
+    relative = Path(".continuum") / filename
+    relative.parent.mkdir(exist_ok=True)
+    relative.write_text("{ this is not valid json")
+
+    mod = importlib.import_module(module)
+    with pytest.raises(getattr(mod, error)) as caught:
+        getattr(mod, loader)(relative)
+
+    message = str(caught.value)
+    # The reported path must be absolute. Asserting the relative form is absent
+    # would be unsound, since the absolute path legitimately ends with it.
+    reported = Path(message.split(" is not valid JSON")[0])
+    assert reported.is_absolute(), message
+    assert reported.name == filename, message
+    assert reported == relative.resolve(), message

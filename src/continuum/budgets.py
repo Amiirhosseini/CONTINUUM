@@ -48,15 +48,19 @@ def load_budgets(path: Path) -> dict[str, Any]:
     """Read the budget registry. ``{}`` when absent; raise when malformed."""
     if not path.exists():
         return {}
+    # Absolute, so the message names a file the operator can open: the
+    # relative form depends on the cwd of whatever loaded the registry
+    # (a hook, the sidecar, a CI step). Matches gate.py per #333.
+    location = path.resolve()
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        raise BudgetConfigError(f"{path} is not valid JSON ({exc})") from exc
+        raise BudgetConfigError(f"{location} is not valid JSON ({exc})") from exc
     if not isinstance(raw, dict):
-        raise BudgetConfigError(f"{path}: expected a JSON object")
+        raise BudgetConfigError(f"{location}: expected a JSON object")
     action_types = raw.get("action_types", {})
     if not isinstance(action_types, dict):
-        raise BudgetConfigError(f"{path}: 'action_types' must be an object")
+        raise BudgetConfigError(f"{location}: 'action_types' must be an object")
     for name, spec in action_types.items():
         entry = (
             spec
@@ -69,7 +73,7 @@ def load_budgets(path: Path) -> dict[str, Any]:
             )
     default_max = raw.get("default_max_attempts")
     if default_max is not None and (not isinstance(default_max, int) or default_max < 1):
-        raise BudgetConfigError(f"{path}: 'default_max_attempts' must be >= 1")
+        raise BudgetConfigError(f"{location}: 'default_max_attempts' must be >= 1")
     return raw
 
 
