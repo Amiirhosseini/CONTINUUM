@@ -320,7 +320,7 @@ Schema v6. SQLite is primary; Postgres is CI-verified.
 
 ### Module map
 
-CONTINUUM is one library (`src/continuum`, 104 modules) plus a large test suite (99 files, roughly 1,345 passing tests). All modules append to and replay one hash-chained event log:
+CONTINUUM is one library (`src/continuum`, 104 modules) plus a large test suite (101 files, 1,348 passing tests). All modules append to and replay one hash-chained event log:
 
 | Module | Role |
 |:--|:--|
@@ -329,8 +329,11 @@ CONTINUUM is one library (`src/continuum`, 104 modules) plus a large test suite 
 | `storage/` | SQLiteStorage (v6 schema), postgres.py, migrations.py, actionindex.py |
 | `actions/` | Idempotent action ledger, reconciliation, claim/complete |
 | `checkpoint/` | Policy-driven checkpoints with forced anchoring |
-| `recovery/` | Engine, planner, sealed contract, guidance, observations, family rollup, fork semantics |
+| `recovery/` | Engine, planner, sealed contract, guidance, observations, family rollup, fork semantics, informed retry summaries |
 | `gate.py` | Pre-tool-use enforcement: allow/deny against ledger claims |
+| `gateway.py` | Enforcing HTTP proxy: claim-before-fire for outbound requests |
+| `replayguard.py` | Portable replay-safety guard: evaluate/protected_call/langgraph_protected_node |
+| `hooks.py` | Shared checkpoint hooks (auto-checkpoint, file-derived progress) |
 | `clienthooks.py` | Client installer profiles and hook command management |
 | `budgets.py` | Retry budget registry and evaluation |
 | `pinning.py` | Version pinning normalisation and drift detection |
