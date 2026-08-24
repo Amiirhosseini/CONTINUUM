@@ -147,7 +147,18 @@ def approve_fork(
             "fork_parent_sequence": divergence,
         },
     )
-    storage.create_run(child)
+    # create_run_started, not create_run: the child needs its own RUN_STARTED or
+    # it has a row and an empty log, which nothing downstream can read. project()
+    # refuses a log that never recorded RUN_STARTED, so `resume`, `tree`,
+    # `replay` and `inspect` all fail on the child -- including the exact command
+    # this function's own caller prints as the next step. Same defect class as
+    # #47, which fixed it for the OpenAI adapter. The row and its first event are
+    # one fact, so they are written in one transaction.
+    #
+    # Origin.HUMAN matches the RUN_FORKED event below: a person approved this
+    # branch, and the child's goal is inherited from a run a human already
+    # stated, so it is not an agent self-report.
+    storage.create_run_started(child, source=Origin.HUMAN)
     storage.append_event(
         parent_run_id,
         EventType.RUN_FORKED,
