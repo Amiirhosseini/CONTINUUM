@@ -36,6 +36,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 from continuum.actions.ledger import ActionLedger
 from continuum.analysis.depends import DependencyGraph as SourceDependencyGraph
@@ -55,6 +56,7 @@ from continuum.models import (
 from continuum.recovery.contract import build_contract
 from continuum.recovery.observations import collect_observations
 from continuum.recovery.planner import RepairPlan, plan_repairs
+from continuum.recovery.summary import build_informed_retry
 from continuum.state.validator import StateValidator, ValidationOutcome
 from continuum.storage.base import Storage
 
@@ -97,6 +99,10 @@ class RecoveryDecision:
     rationale: tuple[str, ...] = ()
     impacted_files: frozenset[str] = frozenset()
     tail_evidence: str | None = None
+    #: Informed-retry block (#265): a pure projection of prior recovery-path
+    #: events plus current failure signals, or None when there is no history.
+    #: Informational only; presence never changes mode or safety.
+    informed_retry: dict[str, Any] | None = None
 
     @property
     def state(self) -> SemanticState:
@@ -282,6 +288,16 @@ class RecoveryEngine:
                 tail_evidence = ev.summary
                 break
 
+        # Informed retry (#265): derive the prior-attempt account from events
+        # already in the chain. Read-only, deterministic, None without history.
+        informed_retry = build_informed_retry(
+            self.storage,
+            run_id,
+            validation_report=validation.report,
+            uncertain_actions=uncertain,
+            plan=plan,
+        )
+
         return RecoveryDecision(
             run_id=run_id,
             mode=mode,
@@ -293,6 +309,7 @@ class RecoveryEngine:
             rationale=rationale,
             impacted_files=impacted_files,
             tail_evidence=tail_evidence,
+            informed_retry=informed_retry,
         )
 
     # -- the decision rule ------------------------------------------------ #

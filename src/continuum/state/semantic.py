@@ -452,6 +452,7 @@ _NON_PROJECTING = frozenset(
     {
         EventType.RUN_COMPLETED,
         EventType.RUN_ABORTED,
+        EventType.RUN_FORKED,
         EventType.TOOL_CALLED,
         EventType.TOOL_COMPLETED,
         EventType.TOOL_FAILED,

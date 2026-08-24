@@ -752,6 +752,7 @@ def build_server(
                     "total": decision.state.progress.total,
                 },
                 "tail_evidence": tail_evidence,
+                "informed_retry": decision.informed_retry,
                 "contract": decision.contract.model_dump(mode="json"),
                 "contract_text": render_contract(decision.contract),
                 "report": decision.render(),

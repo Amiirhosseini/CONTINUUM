@@ -580,8 +580,16 @@ def cmd_resume(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
         )
     if steps:
         text += "\n\nNext steps:\n" + "\n".join(f"  {i}. {t}" for i, t in enumerate(steps, 1))
-    if steps:
-        text += "\n\nNext steps:\n" + "\n".join(f"  {i}. {t}" for i, t in enumerate(steps, 1))
+
+    # Informed retry (#265): prior-attempt account, derived from recovery-path
+    # events already in the chain. Absent history means no section at all.
+    if decision.informed_retry:
+        from continuum.recovery.summary import render_informed_retry
+
+        text += (
+            "\n\nWhat previous attempts changed (informed retry):\n"
+            + "\n".join(f"  {line}" for line in render_informed_retry(decision.informed_retry))
+        )
 
     # Version pinning drift (issue #241): informational only.
     drift_lines: list[str] = []
@@ -617,6 +625,7 @@ def cmd_resume(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
         "family_rationale": family_rationale,
         "children": [c.__dict__ for c in child_statuses],
         "pinning_drift": drift_lines,
+        "informed_retry": decision.informed_retry,
         "contract": decision.contract.model_dump(mode="json"),
         "repairs": [s.action_name for s in decision.plan.steps],
         "progress": {
@@ -773,15 +782,16 @@ def cmd_tree(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> 
     if not children:
         lines.append("  (no children)")
     for child in children:
+        fork_mark = "[fork] " if str(child.metadata.get("fork", "")) == "true" else ""
         try:
             d = engine.assess(child.run_id)
             mark = "ok " if d.safe else "!! "
             lines.append(
-                f"  {mark}{child.run_id}  [{d.mode.value}, "
+                f"  {mark}{fork_mark}{child.run_id}  [{d.mode.value}, "
                 f"uncertain={len(d.uncertain_actions)}]  {child.goal[:44]}"
             )
         except Exception as exc:
-            lines.append(f"  !! {child.run_id}  [assess error: {exc}]")
+            lines.append(f"  !! {fork_mark}{child.run_id}  [assess error: {exc}]")
     a2a = [
         (c.run_id, c.metadata.get("a2a_task_id")) for c in children if c.metadata.get("a2a_task_id")
     ]
@@ -866,6 +876,40 @@ def cmd_complete(args: argparse.Namespace, storage: Storage, out: Any, err: Any)
     _emit(
         payload,
         f"Run {args.run_id} completed.",
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
+    )
+    return ExitCode.OK
+
+
+def cmd_fork(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Approve a divergent continuation of a run (issue #259).
+
+    The third outcome of replay-or-fork: when the gate surfaces fork
+    candidates on an unclaimed call, this records the human decision to
+    branch rather than block. Writes RUN_FORKED to the parent log
+    (Origin.HUMAN) and creates the linked child run.
+    """
+    from continuum.recovery.fork import approve_fork
+
+    storage.get_run(args.run_id)  # raises RunNotFound -> NOT_FOUND by the dispatcher
+    try:
+        child = approve_fork(
+            storage,
+            args.run_id,
+            reason=args.reason or "",
+            child_run_id=args.child,
+        )
+    except ValueError as exc:
+        print(f"error: {exc}", file=err)
+        return ExitCode.ERROR
+
+    _emit(
+        {"parent": args.run_id, "child": child.run_id, "reason": child.metadata["fork_reason"]},
+        f"Forked {args.run_id} into {child.run_id}.\n"
+        f"Resume it independently: continuum resume {child.run_id}\n"
+        f"Lineage: continuum tree {args.run_id}",
         as_json=args.json,
         stream=out,
         palette=getattr(args, "_palette", None),
@@ -1029,6 +1073,13 @@ def cmd_briefing(args: argparse.Namespace, storage: Storage, out: Any, err: Any)
         lines += [
             f"  [{o.get('status', '?')}] {o.get('path', '')}" for o in obs if not o.get("truncated")
         ]
+    # Informed retry (#265): the engine's account of prior attempts, next to
+    # the agent's own summary above. Absent history means no section.
+    if decision.informed_retry:
+        from continuum.recovery.summary import render_informed_retry
+
+        lines.append("what previous attempts changed (engine-recorded):")
+        lines += [f"  {line}" for line in render_informed_retry(decision.informed_retry)]
     if steps:
         lines.append("next steps:")
         lines += [f"  {i}. {t}" for i, t in enumerate(steps, 1)]
@@ -1862,6 +1913,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     tree_parser = with_run(add("tree", cmd_tree, "Show a parent run and its children."))
     tree_parser.add_argument("--limit", type=int, default=None, help=argparse.SUPPRESS)
+
+    fork_cmd = with_run(
+        add("fork", cmd_fork, "Approve a divergent continuation as a child run. Mutates storage.")
+    )
+    fork_cmd.add_argument("--reason", required=True, help="why this divergence is legitimate")
+    fork_cmd.add_argument("--child", default=None, help="run id for the fork (default: auto)")
 
     compact = with_run(
         add("compact", cmd_compact, "Archive the pre-anchor log prefix. Mutates storage.")

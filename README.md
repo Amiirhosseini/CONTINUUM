@@ -43,7 +43,18 @@ CONTINUUM asks a narrower, harder question: can an agent resume from a compact s
 
 ## Quick Start
 
-Not published to PyPI yet. Install from a clone. One clone is enough to get the library, CLI, MCP server, and every adapter ready for contribution.
+Not published to PyPI yet, so everything below pulls straight from this repository. Release tags additionally ship built wheels attached to [GitHub Releases](https://github.com/Cyrax321/CONTINUUM/releases).
+
+Zero-setup paths (no clone, no install, nothing published anywhere):
+
+| Path | How |
+|:--|:--|
+| Watch crash recovery happen end to end | `docker run --rm ghcr.io/cyrax321/continuum` |
+| Use the CLI through Docker | `docker run --rm ghcr.io/cyrax321/continuum continuum --help` |
+| Run the CLI without cloning | `uvx --from git+https://github.com/Cyrax321/CONTINUUM.git continuum --help` |
+| Full dev environment in the browser | [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/Cyrax321/CONTINUUM?quickstart=1) |
+
+The Docker image is published to GHCR by CI on every push to `main` and every release tag (`.github/workflows/docker-publish.yml`). The Codespace is defined in `.devcontainer/`.
 
 ```bash
 git clone https://github.com/Cyrax321/CONTINUUM.git
@@ -56,6 +67,10 @@ uv pip install -e ".[dev]"
 
 # Or pick only what you need: . (minimal), [mcp], [otel], [langgraph],
 # [openai], [langchain], [attest], [postgres]
+
+# Or skip the clone entirely:
+uv pip install git+https://github.com/Cyrax321/CONTINUUM.git
+uv pip install "continuum-agent[mcp] @ git+https://github.com/Cyrax321/CONTINUUM.git"
 ```
 
 > **pip fallback:** replace `uv pip install` with `pip install` in every command above.
@@ -316,7 +331,7 @@ CONTINUUM sits at the overlap of durable execution, idempotent side-effect track
 ## Status and limitations
 
 - **Tested**: roughly 1,300 tests passing across Python 3.11, 3.12, and 3.13; exact counts and skips vary by platform and optional services such as Postgres (see [STATUS.md](STATUS.md)). The MCP surface has also been audited adversarially over the live protocol; see [test.md](test.md).
-- **Not on PyPI.** Install from a clone (see Quick Start).
+- **Not on PyPI.** Install from a clone, a git URL, a release wheel, or Docker (see Quick Start).
 - **MCP caller authentication is opt-in per deployment.** When `CONTINUUM_MCP_TOKEN` is set, the server refuses every mutating tool unless the caller presents that shared secret in the `initialize` handshake's `_meta.authToken`. Without it, authorization is by declared identity only (the historical default, preserved for local single-user use).
 - **Confirming self-reported state over MCP requires a separate secret.** `continuum_confirm` refuses every caller until the operator sets `CONTINUUM_MCP_CONFIRM_TOKEN`, because an agent allowed to record progress must not also be able to confirm it. The default path stays human-driven: run `continuum confirm <run_id>` on the host.
 - **Unbuilt components**: Cloud API (Phase 13).
