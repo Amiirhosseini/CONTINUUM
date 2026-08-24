@@ -80,7 +80,7 @@ Verify:
 ```bash
 continuum --help                 # CLI entrypoint
 continuum-mcp --help             # MCP server entrypoint (needs [mcp] or [dev])
-pytest -q                        # ~1,300 passed (exact count and skips vary by environment)
+pytest -q                        # ~1,350 collected (exact count and skips vary by environment)
 ruff check src/ tests/ examples/ && ruff format --check src/ tests/ examples/
 mypy src/continuum               # the three gates CI enforces
 ```
@@ -176,7 +176,7 @@ CONTINUUM is verified against real LLM agents, live protocol boundaries, and har
 - **Third-party clients**: Gemini CLI and Kilo Code connected over stdio JSON-RPC against the live SQLite store, validating multi-agent co-existence and authorization isolation.
 - **Protocol compliance**: driven end to end with `@modelcontextprotocol/inspector --cli` across process deaths; mutating tools deny by default behind `CONTINUUM_MCP_MUTATING_CLIENTS`; external claims degrade to `REQUIRES_REVIEW` (`safe: false`).
 - **Self-healing**: hard-killed servers recover from orphaned SQLite `-wal`/`-shm` sidecars via single-retry cleanup at startup.
-- **Scale**: roughly 1,300 tests passing on Python 3.11, 3.12, and 3.13 (unit, `hypothesis` property-based, concurrency, adversarial); CONTINUUM-Bench runs five crash scenarios proving 0 duplicate work and 0 duplicate side effects.
+- **Scale**: roughly 1,330 tests passing on Python 3.11, 3.12, and 3.13 (unit, `hypothesis` property-based, concurrency, adversarial); CONTINUUM-Bench runs five crash scenarios proving 0 duplicate work and 0 duplicate side effects.
 - **Adversarial audit**: the full MCP surface was audited over the live protocol; three defects were found and fixed. Method and reproduction steps in [test.md](test.md).
 
 ## MCP Integration
@@ -247,7 +247,7 @@ The system is built on immutable Pydantic v2 models with a cryptographic hash ch
 
 Key guarantees: append-only events, atomic sequence allocation, durability on `append_event` return, write races fail loudly, and corruption is refused rather than returned.
 
-CONTINUUM is one library (`src/continuum`, 100 Python files) plus a large test suite (93 files, roughly 1,300 tests). All modules append to and replay one hash-chained event log:
+CONTINUUM is one library (`src/continuum`, 102 Python files) plus a large test suite (97 files, roughly 1,350 tests). All modules append to and replay one hash-chained event log:
 
 | Module | LOC | Role |
 |:--|--:|:--|
@@ -330,7 +330,7 @@ CONTINUUM sits at the overlap of durable execution, idempotent side-effect track
 
 ## Status and limitations
 
-- **Tested**: roughly 1,300 tests passing across Python 3.11, 3.12, and 3.13; exact counts and skips vary by platform and optional services such as Postgres (see [STATUS.md](STATUS.md)). The MCP surface has also been audited adversarially over the live protocol; see [test.md](test.md).
+- **Tested**: 1,327 passed + 23 skipped on Python 3.13 at the 2026-08-24 audit of `main` (see [STATUS.md](STATUS.md)); counts vary by platform and optional services such as Postgres. The MCP surface has also been audited adversarially over the live protocol; see [test.md](test.md).
 - **Not on PyPI.** Install from a clone, a git URL, a release wheel, or Docker (see Quick Start).
 - **MCP caller authentication is opt-in per deployment.** When `CONTINUUM_MCP_TOKEN` is set, the server refuses every mutating tool unless the caller presents that shared secret in the `initialize` handshake's `_meta.authToken`. Without it, authorization is by declared identity only (the historical default, preserved for local single-user use).
 - **Confirming self-reported state over MCP requires a separate secret.** `continuum_confirm` refuses every caller until the operator sets `CONTINUUM_MCP_CONFIRM_TOKEN`, because an agent allowed to record progress must not also be able to confirm it. The default path stays human-driven: run `continuum confirm <run_id>` on the host.

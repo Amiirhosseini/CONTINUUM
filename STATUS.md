@@ -17,6 +17,20 @@ believed, and what is neither.
 
 ---
 
+## Full-gate audit (2026-08-24)
+
+Ran against `main` at `4659693` (merge of #275) in a clean worktree, Python 3.13:
+
+- `pytest`: **1327 passed, 23 skipped, 0 failed** (31s). The suite is green.
+- `ruff check src/ tests/ examples/`: pass. `mypy src/continuum`: pass (102 files).
+- `ruff format --check`: **red**. The informed retry block added in #275
+  (`src/continuum/cli/main.py`, inside `cmd_resume`) is not formatter-canonical,
+  so the `Lint & Type-check` CI job fails on main (run for 4659693). Fix: PR #298.
+- Distribution surfaces verified live: #277 merged, and the GHCR publish
+  workflow ran green on both the #275 and #277 merges, so
+  `docker run --rm ghcr.io/cyrax321/continuum` serves the crash-recovery demo
+  from a published image.
+
 ## Verified
 
 1047 tests collected, 1038 passing, 9 skipped, on Python 3.13 with `mcp 2.0.0` installed. The MCP

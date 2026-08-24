@@ -901,3 +901,45 @@ functional end to end rather than two standalone modules:
 
 - `impacted_files` reports files by import ownership only; it does not attempt
   runtime provenance or trace which files an action actually wrote.
+
+## 19. Informed retry and the distribution layer (2026-08-24)
+
+### 19.1 Informed retry summaries (#265, merged as #275)
+
+Recovery surfaces no longer show only the current decision; they can also
+render an account of what previous attempts changed, derived from events
+already in the hash chain rather than from agent self-report.
+
+- **What changed.** `continuum.recovery.summary` builds a prior-attempt block
+  (`build_informed_retry`) and renders it as lines
+  (`render_informed_retry`). `RecoveryDecision` carries the block
+  (`decision.informed_retry`). `cmd_resume` appends it to human output under
+  "What previous attempts changed (informed retry)"; absent history means no
+  section is rendered at all.
+- **Provenance stays intact.** The block is computed from recovery-path
+  events recorded during earlier attempts, so it inherits the chain's
+  tamper-evidence instead of introducing a new trust boundary.
+- **Tests.** `tests/test_informed_retry.py`, `tests/test_retry_budgets.py`.
+
+### 19.2 Distribution layer (#277)
+
+How the system is obtained and run became part of the architecture:
+
+- **Docker/GHCR.** A slim image whose default command runs the crash-recovery
+  demo end to end; any argument replaces the command, so
+  `docker run --rm ghcr.io/cyrax321/continuum continuum --help` reaches the
+  CLI. CI publishes to GHCR on pushes to `main` and release tags, with a
+  `continuum --version` smoke test after push.
+- **Devcontainer.** One-click Codespaces: dev toolchain installed via
+  `uv sync --extra dev`, dashboard port forwarded.
+- **Installs without PyPI.** pip/uv straight from the git URL, wheels
+  attached to GitHub Releases, `uvx`/`pipx run` off the repo. The PyPI job in
+  the release workflow is opt-in via the `PUBLISH_PYPI` repository variable,
+  so tagging cannot fail on unconfigured trusted publishing.
+
+### 19.3 Known limitations
+
+- The informed retry block summarizes past attempts but does not by itself
+  change any recovery decision; the engine's severity ordering is unchanged.
+- The published image runs as a non-root user and carries no secrets, but it
+  is not yet multi-arch; CI builds for its runner platform only.
