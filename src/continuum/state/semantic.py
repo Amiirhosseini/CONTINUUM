@@ -452,6 +452,7 @@ _NON_PROJECTING = frozenset(
     {
         EventType.RUN_COMPLETED,
         EventType.RUN_ABORTED,
+        EventType.RUN_FORKED,
         EventType.TOOL_CALLED,
         EventType.TOOL_COMPLETED,
         EventType.TOOL_FAILED,
@@ -464,6 +465,8 @@ _NON_PROJECTING = frozenset(
         EventType.ACTION_RECORDED,
         EventType.ACTION_RECONCILED,
         EventType.ACTION_COMPENSATED,
+        # log maintenance (issue #239): records the compaction boundary itself
+        EventType.EVENT_LOG_ANCHORED,
     }
 )
 

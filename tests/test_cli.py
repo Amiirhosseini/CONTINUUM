@@ -183,6 +183,7 @@ def test_a_missing_run_is_distinguishable(db: str) -> None:
         ("confirm", []),
         ("attest", []),
         ("attest-verify", ["--attest", "irrelevant-on-missing-run.json"]),
+        ("fork", ["--reason", "test"]),
     ],
 )
 def test_no_command_reports_success_for_a_run_that_does_not_exist(

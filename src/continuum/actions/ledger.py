@@ -44,6 +44,7 @@ from __future__ import annotations
 import os
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from heapq import merge
 from typing import Any
 
 from continuum.actions.idempotency import (
@@ -249,8 +250,25 @@ class ActionLedger:
     # -- reading ---------------------------------------------------------- #
 
     def _replay(self) -> dict[str, Action]:
-        """Rebuild the ledger by folding action events. Cheap and verifiable."""
-        return fold_action_events(self.storage.read_events(self.run_id))
+        """Rebuild the ledger by folding action events. Cheap and verifiable.
+
+        Archived events (compaction, issue #239) fold too: a claim settled
+        before compaction must keep protecting afterwards, or exactly-once
+        would quietly reset at the anchor boundary and a month-old side
+        effect could fire a second time. Both streams are already sequence-
+        sorted, so they merge linearly instead of paying a re-sort on this
+        hot path.
+        """
+        merged = merge(
+            self.storage.read_archived_events(self.run_id),
+            self.storage.read_events(self.run_id),
+            key=lambda e: e.sequence,
+        )
+        return fold_action_events(merged)
+
+    def folded(self) -> dict[str, Action]:
+        """Public view of the ``key -> newest action`` fold, archive included."""
+        return self._replay()
 
     def _foreign_action(self, key: str) -> Action | None:
         """Find ``key`` in another run's ledger, for unscoped claims.

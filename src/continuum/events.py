@@ -57,6 +57,9 @@ class EventType(StrEnum):
     RUN_ABORTED = "RUN_ABORTED"
     TASK_UPDATED = "TASK_UPDATED"
 
+    # lineage (issue #259): a divergent continuation was approved off this run
+    RUN_FORKED = "RUN_FORKED"
+
     # tools
     TOOL_CALLED = "TOOL_CALLED"
     TOOL_COMPLETED = "TOOL_COMPLETED"

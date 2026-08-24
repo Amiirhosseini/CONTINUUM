@@ -86,6 +86,7 @@ def _resolve_path(url_or_path: str | Path) -> str:
 
 class SQLiteStorage(Storage):
     supports_action_index = True
+    supports_compaction = True
     """Single-host durable storage. Safe for threads and for separate processes."""
 
     def __init__(self, url: str | Path = ":memory:", *, timeout: float = 30.0) -> None:
@@ -285,30 +286,58 @@ class SQLiteStorage(Storage):
         source: Origin = Origin.DETERMINISTIC,
     ) -> Event:
         with self._write() as conn:
-            self._require_run(conn, run_id)
-            head = conn.execute(
-                "SELECT sequence, hash FROM events WHERE run_id = ? ORDER BY sequence DESC LIMIT 1",
-                (run_id,),
-            ).fetchone()
-            current = head["sequence"] if head else 0
-
-            if expected_sequence is not None and expected_sequence != current:
-                raise ConcurrentWriteError(
-                    f"run {run_id!r} is at sequence {current}, caller expected {expected_sequence}"
-                )
-
-            event = Event(
-                event_id=make_id("event"),
-                run_id=run_id,
-                sequence=current + 1,
-                type=type,
-                timestamp=utcnow(),
-                payload=dict(payload or {}),
+            event = self._append_chained(
+                conn,
+                run_id,
+                type,
+                payload,
                 causer_event_id=causer_event_id,
+                expected_sequence=expected_sequence,
                 source=source,
-                prev_hash=head["hash"] if head else None,
-            ).sealed()
-            self._insert_event(conn, event)
+            )
+        return event
+
+    def _append_chained(
+        self,
+        conn: sqlite3.Connection,
+        run_id: str,
+        type: EventType,
+        payload: Mapping[str, Any] | None,
+        *,
+        causer_event_id: str | None,
+        expected_sequence: int | None,
+        source: Origin,
+    ) -> Event:
+        """Build and insert the next chained event on an open write txn.
+
+        Callers that need an event appended atomically with other statements
+        (compaction) reuse this instead of :meth:`append_event`, which would
+        try to nest a second transaction.
+        """
+        self._require_run(conn, run_id)
+        head = conn.execute(
+            "SELECT sequence, hash FROM events WHERE run_id = ? ORDER BY sequence DESC LIMIT 1",
+            (run_id,),
+        ).fetchone()
+        current = head["sequence"] if head else 0
+
+        if expected_sequence is not None and expected_sequence != current:
+            raise ConcurrentWriteError(
+                f"run {run_id!r} is at sequence {current}, caller expected {expected_sequence}"
+            )
+
+        event = Event(
+            event_id=make_id("event"),
+            run_id=run_id,
+            sequence=current + 1,
+            type=type,
+            timestamp=utcnow(),
+            payload=dict(payload or {}),
+            causer_event_id=causer_event_id,
+            source=source,
+            prev_hash=head["hash"] if head else None,
+        ).sealed()
+        self._insert_event(conn, event)
         return event
 
     def append_sealed(self, event: Event) -> Event:
@@ -364,10 +393,14 @@ class SQLiteStorage(Storage):
     def compact_run(self, run_id: str, *, through_sequence: int | None = None) -> dict[str, int]:
         """Archive the pre-anchor prefix of a run's log (issue #239).
 
-        Order matters: the EVENT_LOG_ANCHORED marker is appended first so it
-        becomes the trusted genesis of the post-compaction chain, then the
-        forced anchor checkpoint records state at the boundary, then the
-        prefix is moved to ``events_archive`` verbatim.
+        A forced anchor checkpoint first records state at the boundary (its
+        STATE_CHECKPOINTED marker joins the log like any event). Then one
+        transaction appends the EVENT_LOG_ANCHORED marker and moves the prefix
+        up to the boundary into ``events_archive`` verbatim. The single
+        transaction matters: committing the marker separately would let a
+        crash in between leave an anchored live log whose prefix never
+        reached the archive, so verify would trust a genesis that was never
+        earned.
         """
         from continuum.checkpoint.manager import CheckpointManager
 
@@ -391,14 +424,16 @@ class SQLiteStorage(Storage):
         if through < 1:
             raise ValueError("nothing to compact: anchor would be empty")
 
-        self.append_event(
-            run_id,
-            EventType.EVENT_LOG_ANCHORED,
-            {"anchored_through": through, "version": storage_version.version},
-            source=Origin.DETERMINISTIC,
-        )
-
         with self._write() as conn:
+            self._append_chained(
+                conn,
+                run_id,
+                EventType.EVENT_LOG_ANCHORED,
+                {"anchored_through": through, "version": storage_version.version},
+                causer_event_id=None,
+                expected_sequence=None,
+                source=Origin.DETERMINISTIC,
+            )
             cur = conn.execute(
                 "INSERT INTO events_archive"
                 " (run_id, sequence, event_id, type, timestamp, payload,"
@@ -415,6 +450,13 @@ class SQLiteStorage(Storage):
             )
 
         return {"archived": max(archived, 0)}
+
+    def read_archived_events(self, run_id: str) -> Sequence[Event]:
+        with self._read() as conn:
+            rows = conn.execute(
+                "SELECT * FROM events_archive WHERE run_id = ? ORDER BY sequence ASC", (run_id,)
+            ).fetchall()
+        return [self._row_to_event(row) for row in rows]
 
     def foreign_action(self, key: str, *, exclude_run: str) -> Action | None:
         """Indexed cross-run ledger lookup (issue #216).
@@ -488,20 +530,36 @@ class SQLiteStorage(Storage):
         return corrections
 
     def _canonical_index_rows(self) -> dict[str, tuple[tuple[str, str, str, str, str], int]]:
-        """Fold the log into ``{key: ((entry...), order_seq)}``, last write wins."""
+        """Fold the log into ``{key: ((entry...), order_seq)}``, last write wins.
+
+        Compacted history (#239) folds too, archive first and live second:
+        everything in ``events_archive`` predates every live row of its run,
+        so folding the two tables in one shared stream would let an archived
+        action claimed long ago outrank a newer live write of the same key
+        (they number their rows independently). Live rows keep their
+        insertion rowid, matching incremental index maintenance exactly;
+        archived rows receive negative order positions below every possible
+        rowid, oldest first, so last-write-per-key stays true after
+        compaction while uncompacted stores fold identically to before.
+        """
         with self._read() as conn:
+            archived = conn.execute(
+                "SELECT type, payload FROM events_archive ORDER BY rowid"
+            ).fetchall()
             rows = conn.execute(
                 "SELECT rowid AS rid, type, payload FROM events ORDER BY rowid"
             ).fetchall()
         canonical: dict[str, tuple[tuple[str, str, str, str, str], int]] = {}
-        for row in rows:
+        offset = len(archived)
+        for position, row in enumerate([*archived, *rows]):
             try:
                 payload = json.loads(row["payload"])
             except json.JSONDecodeError:
                 continue
             entry = index_entry_from_payload(EventType(row["type"]), payload)
             if entry is not None:
-                canonical[entry[0]] = (entry, int(row["rid"]))
+                order = int(row["rid"]) if position >= offset else position - offset
+                canonical[entry[0]] = (entry, order)
         return canonical
 
     @staticmethod
@@ -556,19 +614,47 @@ class SQLiteStorage(Storage):
             ) from exc
 
     def verify_events(self, run_id: str) -> IntegrityReport:
-        """Re-audit a persisted chain without loading it into an EventLog."""
+        """Re-audit a persisted chain without loading it into an EventLog.
+
+        For a compacted run (#239) the walk resumes at the archive boundary:
+        the newest ``events_archive`` row supplies the expected ``prev_hash``
+        and sequence of the first live event, and every archived row itself
+        is re-digested and chain-linked. An anchored log therefore verifies
+        only while its archived prefix is intact; removing the boundary
+        events or editing history in the archive fails here instead of
+        minting a fresh genesis out of whatever live rows survive.
+        """
         violations: list[IntegrityViolation] = []
         checked = 0
         last_good = 0
         intact = True
         prev_digest: str | None = None
         expected_sequence = 1
+        archive_edge: tuple[int, str] | None = None
 
         with self._read() as conn:
             rows = conn.execute(
                 "SELECT * FROM events WHERE run_id = ? ORDER BY sequence ASC", (run_id,)
             ).fetchall()
-        has_anchored_prefix = any(r["type"] == "EVENT_LOG_ANCHORED" for r in rows)
+            # Gate on either signal: a surviving anchor marks a compacted run,
+            # but if that row itself was deleted the archive must still be
+            # audited rather than silently escaping the walk.
+            has_archive = (
+                conn.execute(
+                    "SELECT 1 FROM events_archive WHERE run_id = ? LIMIT 1", (run_id,)
+                ).fetchone()
+                is not None
+            )
+            if has_archive or any(r["type"] == "EVENT_LOG_ANCHORED" for r in rows):
+                archive_violations, archive_edge = self._audit_archive(conn, run_id)
+                violations.extend(archive_violations)
+                if archive_violations:
+                    intact = False
+
+        if archive_edge is not None:
+            # The live chain must pick up exactly where the archive ends.
+            prev_digest = archive_edge[1]
+            expected_sequence = archive_edge[0] + 1
 
         for row in rows:
             checked += 1
@@ -591,15 +677,7 @@ class SQLiteStorage(Storage):
                 continue
 
             digest = event.digest()
-            if checked == 1 and has_anchored_prefix:
-                # Compacted run (#239): the archive holds the verified prefix,
-                # so the live log legitimately starts past sequence 1 with
-                # whatever boundary events compaction wrote (checkpoint marker
-                # + anchor). Trust the first row as the genesis of this walk;
-                # the archived era itself is auditable in events_archive.
-                prev_digest = row["prev_hash"]
-                expected_sequence = int(row["sequence"])
-            if event.sequence != expected_sequence and not (checked == 1 and has_anchored_prefix):
+            if event.sequence != expected_sequence:
                 healthy = False
                 violations.append(
                     IntegrityViolation(
@@ -649,6 +727,84 @@ class SQLiteStorage(Storage):
             violations=violations,
             trusted_through={run_id: last_good},
         )
+
+    @classmethod
+    def _audit_archive(
+        cls, conn: sqlite3.Connection, run_id: str
+    ) -> tuple[list[IntegrityViolation], tuple[int, str] | None]:
+        """Deep-audit one run's archived prefix (issue #239).
+
+        The archive holds the run's verbatim beginning, so it can be held to
+        the full genesis standard: sequence 1 with no predecessor, unbroken
+        sequencing and hash linkage throughout, and every stored hash equal
+        to the recomputed digest. Returns the violations found plus the
+        ``(sequence, hash)`` edge the live chain must continue from, or
+        ``None`` when nothing is archived.
+        """
+        violations: list[IntegrityViolation] = []
+        edge: tuple[int, str] | None = None
+        prev_hash: str | None = None
+        expected_sequence = 1
+
+        rows = conn.execute(
+            "SELECT * FROM events_archive WHERE run_id = ? ORDER BY sequence ASC", (run_id,)
+        ).fetchall()
+        for row in rows:
+            try:
+                event = cls._row_to_event(row)
+            except CorruptedRecord as exc:
+                violations.append(
+                    IntegrityViolation(
+                        kind="UNREADABLE_RECORD",
+                        run_id=run_id,
+                        sequence=row["sequence"],
+                        event_id=row["event_id"],
+                        detail=f"archived row unreadable: {exc}",
+                    )
+                )
+                prev_hash = None
+                expected_sequence = int(row["sequence"]) + 1
+                edge = None
+                continue
+
+            if event.sequence != expected_sequence:
+                violations.append(
+                    IntegrityViolation(
+                        kind="SEQUENCE_GAP",
+                        run_id=run_id,
+                        sequence=event.sequence,
+                        event_id=event.event_id,
+                        detail=f"archived: expected sequence {expected_sequence}",
+                    )
+                )
+            if event.hash != event.digest():
+                violations.append(
+                    IntegrityViolation(
+                        kind="TAMPERED_CONTENT",
+                        run_id=run_id,
+                        sequence=event.sequence,
+                        event_id=event.event_id,
+                        detail="archived: stored hash does not match recomputed digest",
+                    )
+                )
+            if event.prev_hash != prev_hash:
+                violations.append(
+                    IntegrityViolation(
+                        kind="BROKEN_CHAIN",
+                        run_id=run_id,
+                        sequence=event.sequence,
+                        event_id=event.event_id,
+                        detail=(
+                            f"archived: prev_hash {event.prev_hash!r} does not match "
+                            f"predecessor digest {prev_hash!r}"
+                        ),
+                    )
+                )
+            prev_hash = event.hash
+            expected_sequence = event.sequence + 1
+            edge = (event.sequence, event.hash) if event.hash is not None else None
+
+        return violations, edge
 
     # -- versions --------------------------------------------------------- #
 

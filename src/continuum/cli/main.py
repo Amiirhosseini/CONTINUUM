@@ -782,15 +782,16 @@ def cmd_tree(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> 
     if not children:
         lines.append("  (no children)")
     for child in children:
+        fork_mark = "[fork] " if str(child.metadata.get("fork", "")) == "true" else ""
         try:
             d = engine.assess(child.run_id)
             mark = "ok " if d.safe else "!! "
             lines.append(
-                f"  {mark}{child.run_id}  [{d.mode.value}, "
+                f"  {mark}{fork_mark}{child.run_id}  [{d.mode.value}, "
                 f"uncertain={len(d.uncertain_actions)}]  {child.goal[:44]}"
             )
         except Exception as exc:
-            lines.append(f"  !! {child.run_id}  [assess error: {exc}]")
+            lines.append(f"  !! {fork_mark}{child.run_id}  [assess error: {exc}]")
     a2a = [
         (c.run_id, c.metadata.get("a2a_task_id")) for c in children if c.metadata.get("a2a_task_id")
     ]
@@ -812,6 +813,15 @@ def cmd_tree(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> 
 def cmd_compact(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
     """Archive the pre-anchor prefix of a run's event log (issue #239). Mutates."""
     storage.get_run(args.run_id)
+    if not getattr(storage, "supports_compaction", False):
+        # Capability flag, not a caught NotImplementedError: a clear refusal
+        # beats a traceback from an engine that never had an archive table.
+        print(
+            f"this storage engine ({type(storage).__name__}) does not support "
+            "compaction; it maintains no events_archive table",
+            file=err,
+        )
+        return ExitCode.ERROR
     if not args.force:
         print(
             "compact archives the pre-anchor event prefix and appends an "
@@ -866,6 +876,40 @@ def cmd_complete(args: argparse.Namespace, storage: Storage, out: Any, err: Any)
     _emit(
         payload,
         f"Run {args.run_id} completed.",
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
+    )
+    return ExitCode.OK
+
+
+def cmd_fork(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Approve a divergent continuation of a run (issue #259).
+
+    The third outcome of replay-or-fork: when the gate surfaces fork
+    candidates on an unclaimed call, this records the human decision to
+    branch rather than block. Writes RUN_FORKED to the parent log
+    (Origin.HUMAN) and creates the linked child run.
+    """
+    from continuum.recovery.fork import approve_fork
+
+    storage.get_run(args.run_id)  # raises RunNotFound -> NOT_FOUND by the dispatcher
+    try:
+        child = approve_fork(
+            storage,
+            args.run_id,
+            reason=args.reason or "",
+            child_run_id=args.child,
+        )
+    except ValueError as exc:
+        print(f"error: {exc}", file=err)
+        return ExitCode.ERROR
+
+    _emit(
+        {"parent": args.run_id, "child": child.run_id, "reason": child.metadata["fork_reason"]},
+        f"Forked {args.run_id} into {child.run_id}.\n"
+        f"Resume it independently: continuum resume {child.run_id}\n"
+        f"Lineage: continuum tree {args.run_id}",
         as_json=args.json,
         stream=out,
         palette=getattr(args, "_palette", None),
@@ -1492,41 +1536,56 @@ def cmd_replay(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
     storage.get_run(args.run_id)
     events = storage.read_events(args.run_id, upto=args.upto)
 
-    anchored = (
-        any(e.type is EventType.EVENT_LOG_ANCHORED for e in events)
-        and storage.latest_version(args.run_id) is not None
-    )
-    if anchored and args.upto is None:
+    stored = storage.latest_version(args.run_id)
+    anchored = any(e.type is EventType.EVENT_LOG_ANCHORED for e in events) and stored is not None
+    if anchored and args.upto is None and stored is not None:
         # Compacted run (#239): fold the restored checkpoint state forward
         # over the post-anchor tail; the archived prefix lives in
-        # events_archive and is audited by verify's deep mode.
+        # events_archive and is deep-audited by verify.
         from continuum.state.semantic import project_incremental
 
-        stored = storage.latest_version(args.run_id)
         base = CheckpointManager(storage).restore(args.run_id, replay=False).state
         # The anchor event sits exactly at the base boundary; folding it would
         # trip the monotonic-sequence check.
-        tail = [e for e in events if base is None or e.sequence > base.source_sequence]
+        tail = [e for e in events if e.sequence > base.source_sequence]
         state, _report = project_incremental(args.run_id, tail, base=base)
+        # Verify for real: re-fold only the stored version's own prefix and
+        # compare fingerprints, exactly as the plain path's
+        # _verify_against_stored does. A hardcoded pass here silently retired
+        # the corruption contract for every compacted run.
+        at_stored, _ = project_incremental(
+            args.run_id,
+            [e for e in tail if e.sequence <= stored.source_sequence],
+            base=base,
+        )
+        matches = state_fingerprint(at_stored) == state_fingerprint(stored)
+        where = f"checkpoint v{stored.version} at sequence {stored.source_sequence}"
+        verification = (
+            f"anchored run: {'matches' if matches else 'DOES NOT match'} stored {where}; "
+            f"{len(tail)} tail event(s) folded, prefix audited in events_archive"
+        )
         payload = {
             "run_id": args.run_id,
             "events_replayed": len(events),
             "completed": state.progress.completed,
             "source_sequence": state.source_sequence,
-            "verified": True,
-            "verification": (
-                f"anchored run: checkpoint v{stored.version if stored else 0} "
-                f"+ {len(events)} tail event(s); prefix audited in events_archive"
-            ),
+            "verified": matches,
+            "verification": verification,
         }
         _emit(
             payload,
-            f"Anchored replay: folded v{stored.version if stored else 0} + "
-            f"{len(events)} tail event(s)",
+            f"Anchored replay: folded {where} + {len(tail)} tail event(s)\n"
+            f"Verification: {verification}",
             as_json=args.json,
             stream=out,
             palette=getattr(args, "_palette", None),
         )
+        if not matches:
+            print(
+                f"replayed state does not match the stored version for run {args.run_id}",
+                file=err,
+            )
+            return ExitCode.CORRUPTED
         return ExitCode.OK
 
     if args.upto is not None and not any(e.type == EventType.RUN_STARTED for e in events):
@@ -1855,6 +1914,12 @@ def build_parser() -> argparse.ArgumentParser:
     tree_parser = with_run(add("tree", cmd_tree, "Show a parent run and its children."))
     tree_parser.add_argument("--limit", type=int, default=None, help=argparse.SUPPRESS)
 
+    fork_cmd = with_run(
+        add("fork", cmd_fork, "Approve a divergent continuation as a child run. Mutates storage.")
+    )
+    fork_cmd.add_argument("--reason", required=True, help="why this divergence is legitimate")
+    fork_cmd.add_argument("--child", default=None, help="run id for the fork (default: auto)")
+
     compact = with_run(
         add("compact", cmd_compact, "Archive the pre-anchor log prefix. Mutates storage.")
     )
@@ -2028,7 +2093,7 @@ def build_parser() -> argparse.ArgumentParser:
     def cmd_dashboard(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
         from continuum.dashboard import serve_dashboard as _serve
 
-        print(f"Serving dashboard at http://{args.host}:{args.port}", file=err)
+        print(f"Serving dashboard at http://localhost:{args.port}", file=out)
         _serve(storage, port=args.port, host=args.host)
         return 0
 

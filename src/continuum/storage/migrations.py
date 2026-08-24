@@ -312,7 +312,7 @@ def _up_v6() -> str:
 """
 
 
-#: Forward migrations, keyed by the version they *produce*.#: Forward migrations, keyed by the version they *produce*.#: Forward migrations, keyed by the version they *produce*.
+#: Forward migrations, keyed by the version they *produce*.
 MIGRATIONS: dict[int, Migration] = {
     2: Migration(version=2, name="add_versions_table_and_event_provenance", up=_up_v2()),
     3: Migration(version=3, name="add_action_index_projection", up=_up_v3()),

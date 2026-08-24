@@ -30,16 +30,16 @@ it by bare command name:
 }
 ```
 
-The bare name is deliberate — an absolute path in a committed file would be wrong
-on every machine except the one that wrote it — but it means the client resolves
+The bare name is deliberate, an absolute path in a committed file would be wrong
+on every machine except the one that wrote it, but it means the client resolves
 `continuum-mcp` against the `PATH` it inherited. Registration therefore succeeds
 only when the environment CONTINUUM was installed into is on that `PATH`. When it
 is not, the client cannot start the server at all; see
 [Troubleshooting](#troubleshooting).
 
 Registration makes the tools below available to the agent. It does not by itself
-instrument anything: state is recorded when the agent calls the tools, and —
-because a voluntary call can always be missed — when the `PostToolUse` hook
+instrument anything: state is recorded when the agent calls the tools, and,
+because a voluntary call can always be missed, when the `PostToolUse` hook
 installed by `continuum hooks install claude-code` records a file write outside
 the model's control.
 
@@ -52,7 +52,7 @@ tools are gated by the allowlist (see Security).
 |------|------|---------|
 | `continuum_record_progress` | mutate | Record goal progress (completed/total). |
 | `continuum_checkpoint` | mutate | Force a state checkpoint. |
-| `continuum_record_summary` | mutate | Record where reasoning stands (plan stack, decisions, open questions, working set) so a fresh session inherits the plan instead of guessing. Capped at 4096 serialized characters; informational only — never moves mode or safety. |
+| `continuum_record_summary` | mutate | Record where reasoning stands (plan stack, decisions, open questions, working set) so a fresh session inherits the plan instead of guessing. Capped at 4096 serialized characters; informational only, never moves mode or safety. |
 | `continuum_intercept_action` | mutate | Claim a side effect; returns whether to proceed. |
 | `continuum_complete_action` | mutate | Record a side effect succeeded. |
 | `continuum_fail_action` | mutate | Record a side effect did not happen. |
@@ -94,14 +94,14 @@ that never started: the client could not resolve `continuum-mcp` on the `PATH` i
 inherited, and a spawn that fails surfaces as a transport that closed.
 
 No CONTINUUM code runs in this failure. The executable is never located, so the
-server cannot detect the condition, report it, or recover from it — the whole
+server cannot detect the condition, report it, or recover from it, the whole
 diagnosis has to happen on the client side, which is why it is documented here
 rather than handled in code.
 
 This is not a Windows-specific defect, but it shows up there most often. A console
 script installs as `.venv\Scripts\continuum-mcp.exe`, and that directory joins
 `PATH` only inside an activated virtual environment, so a client started from
-anywhere else — a desktop launcher, a fresh terminal, an IDE — inherits a `PATH`
+anywhere else, a desktop launcher, a fresh terminal, an IDE, inherits a `PATH`
 without it. The same failure occurs on macOS and Linux whenever the client is
 launched outside the environment holding the install; an already-activated shell
 is what usually hides it.
@@ -125,7 +125,7 @@ running it through its full path:
 
 Usage text and exit 0 mean the server is sound and only resolution failed.
 
-#### Remedy 1 — launch the client from the installed environment
+#### Remedy 1, launch the client from the installed environment
 
 Activate the environment first, so the client inherits a `PATH` that contains the
 install:
@@ -139,9 +139,9 @@ claude                           # then start the client from that shell
 
 Nothing is written to the repository and `.mcp.json` resolves as intended.
 
-#### Remedy 2 — pin the absolute path in the local scope
+#### Remedy 2, pin the absolute path in the local scope
 
-When the client is not launched from a shell — a desktop app, or an IDE — register
+When the client is not launched from a shell, a desktop app, or an IDE, register
 the resolved path instead:
 
 ```
@@ -165,7 +165,7 @@ nobody else. Local scope takes precedence over project scope, so this entry wins
 over `.mcp.json`.
 
 Claude Code will then report a conflicting-scopes diagnostic naming both
-endpoints. That is expected — both definitions exist, and the local one is the one
+endpoints. That is expected, both definitions exist, and the local one is the one
 in use. Do not resolve it with `claude mcp remove continuum-mcp -s project`, which
 edits the committed `.mcp.json` and unregisters the server for everyone who clones
 the repository. Leave the diagnostic in place, or drop the local entry with
