@@ -1,11 +1,11 @@
-# CONTINUUM Upgrade Spec 2026-08-24: Durable, Verifiable Agents for Weeks and Months
+# CONTINUUM Upgrade Spec:   Durable, Verifiable Agents for Weeks and Months
 
 * Status: Draft, proposed for review
 * Author: CONTINUUM maintainers, synthesis from live web sweep 2026-08-24
 * Created: 2026-08-24
 * Last updated: 2026-08-24
-* Branch: `docs/upgrade-plan-2026-08-24` targeting `main`
-* Companion docs: `docs/research/months_web_synthesis_2026-08-24.md` (live sweep), `docs/research/long_horizon_gaps.md` (gap audit), `STATUS.md` (verified vs believed), `docs/CONTINUUM_MASTER_PLAN.md` (phased plan), `docs/ARCHITECTURE_EVOLUTION.md` (north star), `references/related-work.md` and `citation-audit-2026-08-24.md`
+* Branch: `docs/upgrade-spec` targeting `main`
+* Companion docs: `docs/research/WEB_SYNTHESIS.md` (live sweep), `docs/research/long_horizon_gaps.md` (gap audit), `STATUS.md` (verified vs believed), `docs/CONTINUUM_MASTER_PLAN.md` (phased plan), `docs/ARCHITECTURE_EVOLUTION.md` (north star), `references/related-work.md` and `citation-audit-2026-08-24.md`
 * Open issues referenced: #213, #244, #254, #288, #289, #292, #293, #294, #295, #296, #297, #301, #302, #303, #304, #307, #308, #309, #312, #313, plus 30 `good first issue` and 9 `bug`
 * Recent PRs referenced: #311 open, #310, #300, #287, #286, #277, #275, #272, #264, #253 merged
 
@@ -177,7 +177,7 @@ The earlier wave (253 compaction, 255 retry budgets, 257 dashboard HITL, 264 par
 
 ## 6. Gap analysis (verified gaps vs shipped)
 
-Method: map `docs/research/months_web_synthesis_2026-08-24.md` live sweep plus `long_horizon_gaps.md` against the verified table in section 3.3. Only gaps with a reproduction are listed as open.
+Method: map `docs/research/WEB_SYNTHESIS.md` live sweep plus `long_horizon_gaps.md` against the verified table in section 3.3. Only gaps with a reproduction are listed as open.
 
 | Gap | Today | Evidence | Grade |
 | --- | --- | --- | --- |
@@ -408,5 +408,5 @@ Core: 60 files in `src/continuum` as listed in section 3.2. Entry points: `conti
 
 ---
 
-End of spec. Next write is the PR that lands `months_web_synthesis_2026-08-24.md` plus this spec plus the `STATUS.md` checklist update.
+End of spec. Next write is the PR that lands `WEB_SYNTHESIS.md` plus this spec plus the `STATUS.md` checklist update.
 
