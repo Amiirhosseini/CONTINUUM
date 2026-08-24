@@ -124,13 +124,18 @@ def idempotency_key(
     silently drop the second. When the caller knows the operation's identity,
     it should say so rather than encode it by perturbing the arguments.
     """
+    if not action_type.strip():
+        # Checked on both branches, not only the derived-key one. The action type
+        # is the unit the retry budget counts and the key the reconciler registry
+        # matches on, so a blank one is silently exempt from both: it matches no
+        # probe and pools every unnamed action into a single budget. Supplying an
+        # explicit ``key`` used to skip this check entirely.
+        raise ValueError("action_type must be a non-empty string")
+
     if key is not None:
         if not key:
             raise ValueError("explicit idempotency key must be a non-empty string")
         return IdempotencyKey(stable_hash({"scope": scope, "type": action_type, "key": key}))
-
-    if not action_type:
-        raise ValueError("action_type must be a non-empty string")
 
     return IdempotencyKey(
         stable_hash(

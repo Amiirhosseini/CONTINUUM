@@ -157,6 +157,7 @@ class SQLiteStorage(Storage):
     # -- runs ------------------------------------------------------------- #
 
     def create_run(self, run: Run) -> Run:
+        self.require_usable_run_id(run)
         with self._write() as conn:
             try:
                 conn.execute(
@@ -178,6 +179,7 @@ class SQLiteStorage(Storage):
 
     def create_run_started(self, run: Run, *, source: Origin = Origin.DETERMINISTIC) -> Run:
         """Create the run row and its first event in one transaction."""
+        self.require_usable_run_id(run)
         with self._write() as conn:
             try:
                 conn.execute(
