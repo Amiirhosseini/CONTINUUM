@@ -586,9 +586,8 @@ def cmd_resume(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
     if decision.informed_retry:
         from continuum.recovery.summary import render_informed_retry
 
-        text += (
-            "\n\nWhat previous attempts changed (informed retry):\n"
-            + "\n".join(f"  {line}" for line in render_informed_retry(decision.informed_retry))
+        text += "\n\nWhat previous attempts changed (informed retry):\n" + "\n".join(
+            f"  {line}" for line in render_informed_retry(decision.informed_retry)
         )
 
     # Version pinning drift (issue #241): informational only.
