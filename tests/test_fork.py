@@ -154,17 +154,48 @@ def test_approve_fork_writes_event_and_linked_child(db: str) -> None:
 
 
 def test_fork_child_is_independently_resumable(db: str) -> None:
+    """The child must be usable straight out of approve_fork.
+
+    This test used to append RUN_STARTED to the child itself before resuming,
+    which meant it proved the fixture's work rather than the code's: fork wrote
+    only a run row, so the child had an empty log and every reader refused it,
+    including the `continuum resume <child>` line that `continuum fork` prints as
+    the next step. Same defect class as #47. approve_fork now writes the row and
+    its RUN_STARTED in one transaction, so nothing is staged here.
+    """
     with SQLiteStorage(db) as store:
         child = approve_fork(store, "run_1", reason="new terms")
-        store.append_event(child.run_id, EventType.RUN_STARTED, {"goal": child.goal, "total": 1})
+        # The child's own log is startable with no help from this test.
+        events = store.read_events(child.run_id)
+        assert [e.type for e in events] == [EventType.RUN_STARTED]
+        assert events[0].source is Origin.HUMAN
 
     code, out, _ = run("--db", db, "resume", child.run_id)
-    # Resume reaches its own verdict about the CHILD: an empty fork with a
-    # consistent start event is cleanly resumable, independent of the parent.
+    # Resume reaches its own verdict about the CHILD, independent of the parent.
     assert code == ExitCode.OK
     assert f"Run: {child.run_id}" in out
     assert "Recovery decision: RESUME" in out
     assert "FAMILY BLOCKED" not in out
+
+
+def test_every_reader_accepts_a_fresh_fork_child(db: str) -> None:
+    """The commands `continuum fork` points the user at must all work.
+
+    `fork` prints "Resume it independently" and "Lineage: continuum tree", so
+    those two at minimum have to succeed on an untouched child. The rest are
+    included because they share the projection path that an empty log breaks.
+    """
+    with SQLiteStorage(db) as store:
+        child = approve_fork(store, "run_1", reason="branching")
+
+    for command in ("resume", "inspect", "replay", "verify", "events", "show-contract"):
+        code, _, err = run("--db", db, command, child.run_id)
+        assert code == ExitCode.OK, f"{command} failed on a fresh fork child: {err}"
+
+    code, out, _ = run("--db", db, "tree", "run_1")
+    assert code == ExitCode.OK
+    assert child.run_id in out
+    assert "assess error" not in out, f"tree still cannot assess the child: {out}"
 
 
 def test_duplicate_child_and_empty_reason_are_refused(db: str) -> None:

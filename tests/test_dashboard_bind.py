@@ -51,3 +51,39 @@ def test_handler_serves_the_dashboard_over_a_real_socket(db: str) -> None:
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_an_unknown_run_answers_404_not_200(db: str) -> None:
+    """A run nobody wrote to must not answer 200 over HTTP.
+
+    The body already said "Run not found", but the status line said OK, and the
+    status is what anything other than a human reads. The CLI holds the same
+    line: `test_no_command_reports_success_for_a_run_that_does_not_exist` exists
+    so a typo'd run name never looks like a clean bill of health, and the
+    dashboard is that same claim over a different transport.
+    """
+    import threading
+    import urllib.error
+
+    from continuum.events import EventType
+    from continuum.models import Run
+
+    storage = SQLiteStorage(db)
+    storage.create_run(Run(run_id="real_run", goal="g"))
+    storage.append_event("real_run", EventType.RUN_STARTED, {"goal": "g"})
+
+    server = make_dashboard_server(storage, port=0)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        _, port = server.server_address[:2]
+        resp = urllib.request.urlopen(f"http://127.0.0.1:{port}/runs/real_run", timeout=5)
+        assert resp.status == 200
+
+        with pytest.raises(urllib.error.HTTPError) as caught:
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/runs/definitely-not-a-run", timeout=5)
+        assert caught.value.code == 404
+        assert "Run not found" in caught.value.read().decode()
+    finally:
+        server.shutdown()
+        server.server_close()

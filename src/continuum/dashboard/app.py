@@ -42,6 +42,17 @@ def render_dashboard_html(storage: Storage) -> str:
 </table></body></html>"""
 
 
+def _run_exists(storage: Storage, run_id: str) -> bool:
+    """Whether the run is real, so the handler can answer 404 rather than 200."""
+    from continuum.storage import RunNotFound
+
+    try:
+        storage.get_run(run_id)
+    except RunNotFound:
+        return False
+    return True
+
+
 def render_run_detail_html(storage: Storage, run_id: str) -> str:
     try:
         run = storage.get_run(run_id)
@@ -163,9 +174,14 @@ def make_dashboard_server(
             if self.path.startswith("/runs/"):
                 run_id = self.path.split("/runs/")[1].split("?")[0].split("/")[0]
                 content = render_run_detail_html(storage, run_id)
-            else:
-                content = render_dashboard_html(storage)
-            self._html(content)
+                # A run nobody has ever written to must not answer 200. The body
+                # already says "Run not found", but the status is what anything
+                # other than a human reads, and the CLI holds the same line: a
+                # typo'd run name never looks like a clean bill of health.
+                code = 200 if _run_exists(storage, run_id) else 404
+                self._html(content, code=code)
+                return
+            self._html(render_dashboard_html(storage))
 
         def do_POST(self) -> None:  # noqa: N802
             length = int(self.headers.get("Content-Length") or 0)
