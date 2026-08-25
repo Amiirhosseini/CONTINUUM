@@ -126,6 +126,15 @@ def human_steps_for(
                 )
         elif step.kind is RepairKind.HUMAN_REVIEW:
             steps.append(f"verify {step.target} yourself, then run `continuum confirm {run_id}`")
+        elif step.kind is RepairKind.REPAIR_LOG:
+            # No automated surface can settle a refused event yet (that is the
+            # repair/amend command, deliberately unbuilt), so name where to
+            # look and who must decide rather than implying a command exists.
+            steps.append(
+                f"the log stops folding at {step.target}: run `continuum verify {run_id}` "
+                f"for the offending event; settling it needs an operator decision, "
+                f"no amend surface exists yet"
+            )
         elif step.kind is RepairKind.REVALIDATE_DEPENDENCY:
             steps.append(
                 f"re-pin dependency {step.target!r}: rerun with "

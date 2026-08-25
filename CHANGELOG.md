@@ -732,7 +732,12 @@ All notable changes to this project are documented here. The format follows
   recovery engine folds with degrade enabled, so a poisoned log yields a
   `request_human` verdict naming where folding stopped instead of a pydantic
   traceback, and CLI `status`, `inspect` and `replay` report the same break and
-  exit non-zero. The diagnostic call sites opted in are the engine's restore
+  exit non-zero. The break also reaches the machine-readable contract instead of
+  living only in prose: a new `repair_log` repair step makes `required_actions`
+  name real work, `next_allowed_action` points at it rather than falling through
+  to a rendered "continue" over a `requires_human` verdict, `verified` entries
+  are qualified with the last-good sequence, and `invalidated` records the
+  projection itself. The diagnostic call sites opted in are the engine's restore
   path, the CLI status/inspect/replay surfaces, the serve sidecar's progress
   report and dependency dedup, and the benchmark's strategy readout; the MCP
   write-path guard `_project_candidate` and the checkpoint capture surfaces

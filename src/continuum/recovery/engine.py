@@ -161,7 +161,12 @@ class RecoveryDecision:
         if self.plan:
             lines += ["", "Repairs required:", self.plan.render()]
 
-        lines += ["", f"Next permitted action: {self.next_allowed_action or 'continue'}"]
+        permitted = self.next_allowed_action or (
+            "continue"
+            if self.mode is RecoveryMode.RESUME
+            else "none (settle the repairs above first)"
+        )
+        lines += ["", f"Next permitted action: {permitted}"]
         return "\n".join(lines)
 
 
@@ -259,10 +264,24 @@ class RecoveryEngine:
                 for path in source_graph.files_using(resource)
             )
 
+        # The degraded fold must reach the plan (issue #383): without a step,
+        # required_actions is empty and the contract's next_allowed falls
+        # through to "continue" over a requires_human verdict.
+        broken = restored.state
+        unprojectable = (
+            (
+                broken.unprojectable_at_sequence,
+                broken.unprojectable_event_type or "unknown event",
+                broken.unprojectable_reason or "unknown projection failure",
+            )
+            if broken.status is StateStatus.INVALID and broken.unprojectable_at_sequence is not None
+            else None
+        )
         plan = plan_repairs(
             validation.report.statuses,
             uncertain_actions=uncertain,
             strict_unknown=self.validator.strict_unknown,
+            unprojectable=unprojectable,
         )
         mode, rationale = self._decide(validation, uncertain, plan, restored, self.strict_unknown)
 

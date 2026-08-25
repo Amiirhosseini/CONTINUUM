@@ -1088,6 +1088,24 @@ def test_resume_on_an_unprojectable_run_answers_instead_of_crashing(db: str) -> 
     assert payload["contract"]["recovery_status"] != "safe_to_resume"
 
 
+def test_show_contract_on_an_unprojectable_run_carries_the_break(db: str) -> None:
+    """The contract is the machine-readable artifact; it must not read clean.
+
+    The prose rationale named the break from day one, but required_actions was
+    empty and next_allowed rendered as "continue" over a requires_human
+    verdict (#385 review): a caller keying on the structure saw nothing to do.
+    """
+    _poison(db)
+    code, out, err = run("--db", db, "show-contract", "run_1")
+
+    assert code == ExitCode.REQUIRES_HUMAN, out
+    assert "repair_log:" in out, "required_actions must name real work"
+    assert "next_allowed:      repair_log:" in out
+    assert "continue" not in out
+    assert "(through sequence " in out, "verified entries are qualified, not unqualified"
+    assert "projection (invalid" in out
+
+
 def test_status_on_an_unprojectable_run_names_the_break_and_fails(db: str) -> None:
     _poison(db)
     code, out, err = run("--db", db, "status", "run_1")

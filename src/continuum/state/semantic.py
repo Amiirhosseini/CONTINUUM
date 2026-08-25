@@ -529,7 +529,9 @@ def project_incremental(
     keeps going: the state after a skipped write is not a state the run was ever
     in, so folding resumes nowhere. The default stays ``"raise"`` so every
     existing caller keeps getting exactly today's behaviour; a silent partial
-    state reads as authoritative, which is worse than a crash.
+    state reads as authoritative, which is worse than a crash. Note that
+    ``report.consumed`` counts the refused event too, since it is incremented
+    before the fold is attempted; ``consumed - applied`` therefore includes it.
 
     The run-mismatch and sequence-order checks above deliberately stay outside
     that treatment: they mean the caller handed the fold a malformed stream, not
