@@ -714,6 +714,32 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **One unprojectable event bricked every projecting command, with no route back (#383).**
+  A log whose fold fails is intact as a chain but dead as a run: because the fold
+  validates each intermediate state, no later event could correct an earlier bad
+  one, so `status`, `resume`, `inspect`, `replay`, `show-contract`, `validate`,
+  `briefing` and `compact` all raised on precisely the runs that needed them,
+  while the action tools (which fold only ACTION_* events) kept authorising real
+  side effects that recovery could not assess. The fold can now degrade instead
+  of raising: `project` and `project_incremental` accept
+  `on_unprojectable="raise"|"degrade"`, defaulting to `"raise"` so every existing
+  caller sees byte-for-byte today's behaviour. Degrade mode stops at the earliest
+  refused event and returns the last-good prefix marked
+  `SemanticState.status = INVALID` with `unprojectable_at_sequence`,
+  `unprojectable_event_type` and a condensed `unprojectable_reason`; it never
+  skips past the break, and if nothing folds before the break it still raises,
+  since a partial answer invented from nothing would be worse than an error. The
+  recovery engine folds with degrade enabled, so a poisoned log yields a
+  `request_human` verdict naming where folding stopped instead of a pydantic
+  traceback, and CLI `status`, `inspect` and `replay` report the same break and
+  exit non-zero. The diagnostic call sites opted in are the engine's restore
+  path, the CLI status/inspect/replay surfaces, the serve sidecar's progress
+  report and dependency dedup, and the benchmark's strategy readout; the MCP
+  write-path guard `_project_candidate` and the checkpoint capture surfaces
+  deliberately keep raising, because accepting or pinning a partial fold would
+  launder it into authoritative state. Repair/amend and fork-from-last-good-prefix
+  remain future work and are not attempted here.
+
 - **`continuum verify` certified a run whose log could not be projected (#382).**
   `verify` re-audits the hash chain, which is a statement about integrity, and an
   unprojectable log is perfectly intact: the offending event was written through

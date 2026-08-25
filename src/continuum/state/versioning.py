@@ -29,10 +29,25 @@ def state_fingerprint(state: SemanticState) -> str:
     Two states with the same goal, progress, decisions, findings, evidence,
     pending work, approvals and dependencies are the same state even if they
     were projected at different times or carry different version numbers.
+
+    The projection-degradation fields are excluded for the same reason: they
+    describe how the log was read (where folding stopped), not what the state
+    says. Including them would break fingerprint dedup across the upgrade for
+    every stored version, and a degraded prefix-state genuinely is the same
+    task state as its healthy counterpart.
     """
     payload = state.model_dump(
         mode="json",
-        exclude={"version", "created_at", "updated_at", "source_sequence"},
+        exclude={
+            "version",
+            "created_at",
+            "updated_at",
+            "source_sequence",
+            "status",
+            "unprojectable_at_sequence",
+            "unprojectable_event_type",
+            "unprojectable_reason",
+        },
     )
     return stable_hash(payload)
 

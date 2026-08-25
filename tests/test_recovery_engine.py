@@ -504,3 +504,43 @@ def test_self_certified_runs_are_confirmable(store: SQLiteStorage) -> None:
     assert all(
         e.status is not StateStatus.REQUIRES_REVIEW for e in confirmed.validation.report.statuses
     )
+
+
+# --- unprojectable logs (issue #383) ---------------------------------------- #
+
+
+def test_an_unprojectable_log_requests_a_human_and_names_the_break(store: SQLiteStorage) -> None:
+    """A poisoned log must produce a verdict, not a pydantic traceback.
+
+    The action tools fold only ACTION_* events, so a run whose projection is
+    dead can still authorise real side effects. Recovery has to be able to say
+    what is known, where the log stops folding, and that continuing is not a
+    decision software may take.
+    """
+    seed(store)
+    store.append_event("run_1", EventType.TASK_UPDATED, {"completed": 999, "failed": 0})
+
+    decision = RecoveryEngine(store).assess("run_1", current_environment=env("v3"))
+
+    assert decision.mode is not RecoveryMode.RESUME
+    assert decision.mode is RecoveryMode.REQUEST_HUMAN
+    assert not decision.safe
+    assert decision.contract.recovery_status is RecoverySafety.REQUIRES_HUMAN
+    assert "stops folding at sequence" in " ".join(decision.rationale)
+    # The verdict covers the last-good prefix only, and says so.
+    state = decision.state
+    assert state.status is StateStatus.INVALID
+    assert state.unprojectable_at_sequence == 26
+    assert state.source_sequence == 24
+
+
+def test_a_healthy_log_still_resumes_with_degrade_wired_in(store: SQLiteStorage) -> None:
+    """The engine now folds with degrade enabled everywhere; a sound log must
+    be untouched by that."""
+    seed(store)
+    decision = RecoveryEngine(store).assess("run_1", current_environment=env("v3"))
+
+    assert decision.mode is RecoveryMode.RESUME
+    assert decision.safe
+    assert decision.state.status is StateStatus.VALID
+    assert decision.state.unprojectable_at_sequence is None

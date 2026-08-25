@@ -390,6 +390,11 @@ class SemanticState(BaseModel):
     A state is a *projection* of an event prefix. ``source_sequence`` records
     how far into the log the projection consumed, which makes the state
     reproducible: folding the same prefix again must yield an equal state.
+
+    A state whose log stopped folding partway (issue #383) is marked
+    ``status=INVALID`` and names the break in the ``unprojectable_*`` fields.
+    Such a state reports what was known through its last good event; it must
+    never be read as a complete picture of the run.
     """
 
     model_config = Frozen
@@ -408,6 +413,16 @@ class SemanticState(BaseModel):
     version: int = 0
     source_sequence: int = 0
     """Highest event sequence folded into this state (0 = nothing consumed)."""
+    status: StateStatus = StateStatus.VALID
+    """VALID for a complete fold. INVALID marks a degraded projection that
+    stopped at ``unprojectable_at_sequence``."""
+    unprojectable_at_sequence: int | None = None
+    """Sequence of the earliest event the fold refused, or None when the whole
+    log folded."""
+    unprojectable_event_type: str | None = None
+    """Type of the refused event, as ``unprojectable_reason`` alone may not name it."""
+    unprojectable_reason: str | None = None
+    """Single-line statement of the constraint the refused event violated."""
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 

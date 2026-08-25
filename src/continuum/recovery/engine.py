@@ -207,7 +207,12 @@ class RecoveryEngine:
         :mod:`continuum.analysis`) records on the returned decision every file
         whose imports belong to a scoped dependency.
         """
-        restored = self._manager.restore(run_id, replay=replay)
+        # Degrade, not raise (issue #383): the engine's whole job is to answer
+        # "where does this run stand", and a poisoned log is precisely the run
+        # that needs an answer. An unprojectable tail yields the last-good
+        # prefix marked INVALID; _decide turns that into request_human rather
+        # than letting it pass for a complete state.
+        restored = self._manager.restore(run_id, replay=replay, on_unprojectable="degrade")
         checkpoint_environment = restored.checkpoint.environment if restored.checkpoint else None
         checkpoint_version = restored.checkpoint.version if restored.checkpoint else 0
 
@@ -350,6 +355,26 @@ class RecoveryEngine:
     ) -> tuple[RecoveryMode, tuple[str, ...]]:
         """Collect a proposal per signal and return the most cautious."""
         proposals: list[tuple[RecoveryMode, str]] = []
+
+        # A degraded fold (issue #383) outranks every signal computed below,
+        # which is why it is proposed unconditionally rather than guarded: the
+        # validation below ran on the last-good prefix, so its statuses describe
+        # only what was known before the break. REQUEST_HUMAN, not ABORT: the
+        # log is not necessarily dead (a human can confirm or rewrite the
+        # offending event), and declaring the run permanently unanswerable is
+        # exactly the terminal state #383 exists to remove.
+        state = restored.state
+        if state.unprojectable_at_sequence is not None and state.status is StateStatus.INVALID:
+            proposals.append(
+                (
+                    RecoveryMode.REQUEST_HUMAN,
+                    f"the event log stops folding at sequence "
+                    f"{state.unprojectable_at_sequence} "
+                    f"({state.unprojectable_event_type}: {state.unprojectable_reason}); "
+                    f"this verdict covers events through sequence "
+                    f"{state.source_sequence} only",
+                )
+            )
 
         if validation.safe and not uncertain:
             proposals.append((RecoveryMode.RESUME, "all state verified against the environment"))
