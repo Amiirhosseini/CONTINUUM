@@ -57,6 +57,8 @@ from continuum.actions.idempotency import (
     idempotency_key,
     identity_tokens,
     leaf_tokens,
+    location_tokens,
+    locations_agree,
 )
 from continuum.concurrency.lease import LeaseCoordinator
 from continuum.events import EventType
@@ -478,6 +480,16 @@ class ActionLedger:
         second side effect would be silently swallowed -- the exact failure this
         ledger exists to prevent.
 
+        Leaf comparison alone was not enough either, for the same reason in a
+        different disguise: two files with the same name in different directories
+        share every leaf, so ``/tenants/acme/report.csv`` matched
+        ``/tenants/globex/report.csv`` and globex was never notified (issue #365).
+        A match therefore also requires the *locations* to agree, which
+        ``locations_agree`` decides by suffix rather than equality so the drift
+        case that motivated leaf comparison (``invoices/INV-5.pdf`` for
+        ``/data/invoices/INV-5.pdf``) still matches. A side carrying no path at
+        all makes no claim about location and so contradicts nothing.
+
         Containment on its own is still too loose: a completed action folds its
         outcome ``external_id`` and any optional descriptive argument into its
         token set, so the stored set is a *superset* of a sparser re-claim even
@@ -498,7 +510,9 @@ class ActionLedger:
         # common to every claim in the run, so it must never count as a
         # resource token when deciding whether two claims are the same work.
         plumbing = leaf_tokens(identity_tokens(external_id=self.run_id))
-        incoming = leaf_tokens(identity_tokens(arguments, volatile=volatile)) - plumbing
+        incoming_all = identity_tokens(arguments, volatile=volatile)
+        incoming = leaf_tokens(incoming_all) - plumbing
+        incoming_where = location_tokens(incoming_all)
         if not incoming:
             return None
 
@@ -511,11 +525,15 @@ class ActionLedger:
             # is never present on the incoming claim, so folding it into ``known``
             # would make the stored set a systematic superset of every sparser
             # re-claim. It is therefore excluded from the comparison (issue #64).
-            known = leaf_tokens(identity_tokens(action.arguments)) - plumbing
+            known_all = identity_tokens(action.arguments)
+            known = leaf_tokens(known_all) - plumbing
             # An empty ``known`` is contained in everything; treat a stored
             # action with no identity of its own as unrecognisable, not as a
             # match for every claim of the same type.
             if not known:
+                continue
+            # Same leaves, different directories, is different work (issue #365).
+            if not locations_agree(incoming_where, location_tokens(known_all)):
                 continue
             if incoming <= known:
                 # The stored action carries more tokens than the claim. That is
@@ -774,14 +792,52 @@ class ActionLedger:
         external_id: str | None = None,
         result: Mapping[str, Any] | None = None,
     ) -> Action:
-        """Record that the effect succeeded."""
+        """Record that the effect succeeded.
+
+        Settles a claim that is still in flight. Re-reporting an action that is
+        already ``COMPLETED`` is allowed, because a caller repeating itself after
+        a dropped response is not asserting anything new.
+
+        Every other status is refused (issue #366). Those are not settlements, they
+        are corrections of a recorded outcome, and correcting an outcome needs
+        evidence about the outside world that this method neither takes nor
+        records. ``UNKNOWN`` is the case that matters: the action reached that
+        status precisely because nobody could say whether the effect happened, and
+        completing it here erased the recovery blocker, wrote no note, and left an
+        ``ACTION_RECORDED`` event indistinguishable from an ordinary first-time
+        success. An auditor could not tell that an uncertain charge had been
+        resolved by assertion.
+
+        :meth:`reconcile` is the supported route for all of them. It takes the
+        same decision, demands the caller stand behind it, and records
+        ``ACTION_RECONCILED`` with a note so the correction is visible in the log.
+
+        Omitted arguments never erase what is on record. A caller repeating a
+        completion after a dropped response usually sends only the key, and
+        overwriting ``external_id`` and ``result`` with ``None`` would destroy the
+        receipt proving the effect happened. Same invariant :meth:`reconcile`
+        already documents, and a no-op on a first completion, where there is
+        nothing yet to preserve.
+        """
         key, existing = self._require(key)
+        if existing.status not in (ActionStatus.STARTED, ActionStatus.COMPLETED):
+            raise LedgerError(
+                f"action {existing.action_type!r} is {existing.status.value}, not in flight, so "
+                f"completing it would assert an outcome nothing has verified. "
+                f"Check the external system, then call reconcile(occurred=True) "
+                f"(continuum_reconcile_action over MCP), which records the evidence "
+                f"and the note alongside the correction."
+            )
+        settled_external = external_id if external_id is not None else existing.external_id
+        settled_result = dict(result) if result is not None else existing.result
         action = existing.model_copy(
             update={
                 "status": ActionStatus.COMPLETED,
-                "external_id": external_id,
-                "result": dict(result) if result is not None else None,
-                "result_hash": stable_hash(dict(result)) if result is not None else None,
+                "external_id": settled_external,
+                "result": dict(settled_result) if settled_result is not None else None,
+                "result_hash": (
+                    stable_hash(dict(settled_result)) if settled_result is not None else None
+                ),
                 "completed_at": utcnow(),
                 "side_effect_uncertain": False,
             }

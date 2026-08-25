@@ -733,6 +733,45 @@ All notable changes to this project are documented here. The format follows
   reconcile existing attempts (useless when every prior attempt is settled FAILED),
   and says the registry file may need creating rather than raising.
 
+- **Same-named files in different directories collapsed into one action (#365).**
+  With no explicit `key` the exact argument hash misses on two differently-spelled
+  paths, so the identity fallback decides, and it compared basenames.
+  `/tenants/acme/report.csv` and `/tenants/globex/report.csv` both reduced to
+  `{report.csv, report}`, containment held both ways, and the second claim was
+  answered `proceed=false` carrying acme's `external_id` and the guidance "Already
+  performed. Reuse the previous result; do not repeat it." Globex was never
+  notified, which is the silent swallow the fallback exists to prevent, and
+  per-directory files with conventional names are a common fan-out shape. Leaf
+  comparison was introduced so a re-rendered path (`invoices/INV-5.pdf` for
+  `/data/invoices/INV-5.pdf`) would still deduplicate, so the container is now set
+  aside rather than discarded: new `location_tokens` returns exactly what
+  `leaf_tokens` drops, and `_identity_match` additionally requires the locations to
+  agree. `same_location` compares by path suffix rather than equality, which is the
+  shape drift actually takes, so the re-rendering case still matches while two
+  fully-qualified paths agreeing on nothing but the filename do not. A side that
+  names no path at all makes no claim about location and so contradicts nothing,
+  which keeps the field-rename case working. Comparison stays purely lexical, with
+  no filesystem or working-directory resolution, so the answer is identical on
+  every machine.
+
+- **`complete` could launder an `UNKNOWN` action into `COMPLETED` (#366).**
+  `ActionLedger.complete` had no status guard, so a side effect whose real-world
+  outcome nobody could determine, a charge that timed out after the request was
+  sent, could be recorded as a clean success in one call: no evidence, no note,
+  and an `ACTION_RECORDED` event indistinguishable from an ordinary first-time
+  completion. `continuum_list_actions` then reported `unresolved: 0` and the
+  recovery blocker was gone, with nothing in the log to show the decision had been
+  made by assertion. The incentives pointed straight at it, because
+  `continuum_complete_action` is the tool an agent is told to call routinely, sits
+  on the same mutation allowlist as everything else, and accepts the key already in
+  hand, while the evidence-gated route through `reconcile` was the harder one.
+  `complete` now settles only a claim still in flight, plus a repeat report of one
+  already `COMPLETED`, since a caller retrying after a dropped response asserts
+  nothing new. `UNKNOWN`, `FAILED`, `COMPENSATED` and `REQUIRES_REVIEW` are refused
+  with a message naming the status and pointing at `reconcile`, which takes the
+  same decision but demands the caller stand behind it and records
+  `ACTION_RECONCILED` with the note.
+
 - **`continuum verify` certified a run whose log could not be projected (#382).**
   `verify` re-audits the hash chain, which is a statement about integrity, and an
   unprojectable log is perfectly intact: the offending event was written through

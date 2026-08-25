@@ -1152,6 +1152,228 @@ async def test_list_actions_marks_the_unresolved_row_itself(
 
 
 @pytest.mark.asyncio
+async def test_two_tenants_with_the_same_filename_are_two_actions(
+    server_ctx: tuple[Any, Any],
+) -> None:
+    """Per-directory files with a conventional name are not one action (#365).
+
+    With no explicit `key` the exact argument hash misses, so the identity
+    fallback decides, and it compared basenames. Both paths reduced to
+    `{report.csv, report}`, so the second claim was answered `proceed=false` with
+    the first tenant's `external_id` attached and the guidance "Already
+    performed. Reuse the previous result; do not repeat it." Globex was never
+    notified. Fan-out over `report.csv`, `invoice.pdf`, `index.json` and friends
+    is a common shape, so the exposure is not exotic.
+    """
+    server, _ = server_ctx
+    await seed_run(server)
+    acme = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="tenant.notify",
+        arguments={"path": "/tenants/acme/report.csv"},
+    )
+    assert acme["proceed"] is True
+    await call(
+        server,
+        "continuum_complete_action",
+        run_id="run_1",
+        action_key=acme["action_key"],
+        external_id="notify-acme-001",
+    )
+
+    globex = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="tenant.notify",
+        arguments={"path": "/tenants/globex/report.csv"},
+    )
+    assert globex["proceed"] is True, "globex must still be notified"
+    assert globex["action_key"] != acme["action_key"]
+    assert globex.get("external_id") is None, "acme's receipt must not be reused"
+
+
+@pytest.mark.asyncio
+async def test_a_re_rendered_path_still_deduplicates(
+    server_ctx: tuple[Any, Any],
+) -> None:
+    """Fixing #365 must not cost the drift case the fallback exists for.
+
+    An agent that writes an absolute path in one session and a relative one in
+    the next means the same file, so the second claim must still be refused with
+    the first result rather than performing the effect twice.
+    """
+    server, _ = server_ctx
+    await seed_run(server)
+    first = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="bench.send",
+        arguments={"file": "/data/invoices/INV-5.pdf"},
+    )
+    await call(
+        server,
+        "continuum_complete_action",
+        run_id="run_1",
+        action_key=first["action_key"],
+        external_id="ext-5",
+    )
+
+    again = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="bench.send",
+        arguments={"file": "invoices/INV-5.pdf"},
+    )
+    assert again["proceed"] is False
+    assert again["external_id"] == "ext-5"
+
+
+@pytest.mark.asyncio
+async def test_complete_action_cannot_clear_an_unknown_outcome(
+    server_ctx: tuple[Any, Any],
+) -> None:
+    """The evidence gate must not be bypassable by the ungated tool (issue #366).
+
+    `continuum_complete_action` is the tool an agent is told to call routinely,
+    it is on the same mutation allowlist as everything else, and it accepts the
+    key the agent already holds from `continuum_intercept_action`. So it was both
+    the easiest door and the one with no evidence requirement, while the gated
+    route through `continuum_reconcile_action` was the harder one. An agent trying
+    to get unstuck reaches for the easy door.
+    """
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    server, _ = server_ctx
+    await seed_run(server)
+    claimed = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="card.charge",
+        arguments={"amount": 4200, "invoice": "INV-9001"},
+        key="charge:INV-9001",
+    )
+    await call(
+        server,
+        "continuum_fail_action",
+        run_id="run_1",
+        action_key=claimed["action_key"],
+        error="gateway timeout after the charge request was sent",
+        certain=False,
+    )
+
+    with pytest.raises(ToolError, match="nothing has verified"):
+        await server.call_tool(
+            "continuum_complete_action",
+            {"run_id": "run_1", "action_key": claimed["action_key"]},
+            context=_ctx(TEST_CLIENT),
+        )
+
+    # The blocker survives, so recovery still refuses to call the run safe.
+    listed = await call(server, "continuum_list_actions", run_id="run_1")
+    assert listed["unresolved"] == 1
+    assert listed["actions"][0]["status"] == "unknown"
+    resumed = await call(server, "continuum_resume", run_id="run_1")
+    assert resumed["safe"] is False
+    assert resumed["next_allowed_action"].startswith("reconcile_action:")
+
+
+@pytest.mark.asyncio
+async def test_reconciling_an_unknown_outcome_records_that_it_was_a_correction(
+    server_ctx: tuple[Any, Any],
+) -> None:
+    """The supported route keeps the decision visible in the log (issue #366).
+
+    `complete` recorded ACTION_RECORDED, indistinguishable from a first-time
+    success, so an auditor could not tell that an uncertain effect had been
+    resolved by assertion. `reconcile` records ACTION_RECONCILED with the note.
+    """
+    server, ctx = server_ctx
+    await seed_run(server)
+    claimed = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="card.charge",
+        arguments={"invoice": "INV-9001"},
+        key="charge:INV-9001",
+    )
+    await call(
+        server,
+        "continuum_fail_action",
+        run_id="run_1",
+        action_key=claimed["action_key"],
+        error="gateway timeout",
+        certain=False,
+    )
+    settled = await call(
+        server,
+        "continuum_reconcile_action",
+        run_id="run_1",
+        action_key=claimed["action_key"],
+        occurred=True,
+        external_id="txn-1",
+        note="found the charge in the gateway ledger",
+    )
+
+    assert settled["status"] == "completed"
+    assert settled["side_effect_uncertain"] is False
+    assert (await call(server, "continuum_list_actions", run_id="run_1"))["unresolved"] == 0
+    assert EventType.ACTION_RECONCILED in [e.type for e in ctx.storage.read_events("run_1")]
+
+
+@pytest.mark.asyncio
+async def test_reconcile_can_store_the_evidence_it_was_given(
+    server_ctx: tuple[Any, Any],
+) -> None:
+    """The route `complete` points at must accept what `complete` accepted (#366).
+
+    `continuum_complete_action` takes `result`, and refusing an UNKNOWN action
+    sends the caller to `continuum_reconcile_action` instead. That tool had no
+    `result` parameter, so structured evidence from the external check had nowhere
+    to go over MCP even though `ActionLedger.reconcile` has always stored it.
+    """
+    server, _ = server_ctx
+    await seed_run(server)
+    claimed = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="card.charge",
+        arguments={"invoice": "INV-9001"},
+        key="charge:INV-9001",
+    )
+    await call(
+        server,
+        "continuum_fail_action",
+        run_id="run_1",
+        action_key=claimed["action_key"],
+        error="gateway timeout",
+        certain=False,
+    )
+    settled = await call(
+        server,
+        "continuum_reconcile_action",
+        run_id="run_1",
+        action_key=claimed["action_key"],
+        occurred=True,
+        external_id="txn-1",
+        result={"cents": 4200, "settled_at": "2026-08-25"},
+        note="found in the gateway ledger",
+    )
+
+    assert settled["status"] == "completed"
+    assert settled["result"] == {"cents": 4200, "settled_at": "2026-08-25"}
+    listed = await call(server, "continuum_list_actions", run_id="run_1")
+    assert listed["actions"][0]["external_id"] == "txn-1"
+
+
+@pytest.mark.asyncio
 async def test_the_identifier_resume_advertises_is_accepted_by_reconcile(
     server_ctx: tuple[Any, Any],
 ) -> None:
