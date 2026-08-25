@@ -714,6 +714,26 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`MODEL_CHANGED` had no writer, so `expected_model` could never validate (#370).**
+  The event type was defined, treated as checkpoint-worthy by the trigger policy and
+  projected into `SemanticState.model`, but nothing in `src/` ever emitted it. The
+  validator's model component could therefore only ever answer "no model recorded
+  for this run, cannot compare against ...", the `expected_model` parameter on
+  `continuum_resume` and `continuum_validate` could never do anything, and
+  `RepairKind.REVALIDATE_MODEL_STATE` with its "pass `--model <name>`" guidance was
+  unreachable. A parameter that cannot be satisfied is worse than an absent one,
+  because its presence implies the check is covered, and a different model resuming
+  another model's work is exactly the drift the surrounding architecture exists to
+  catch. `continuum_checkpoint` gains optional `model_id` and `provider`, emitting
+  `MODEL_CHANGED` when the value actually changes, so drift now reports
+  `requires_review` naming both models instead of `unknown`. Attached to
+  checkpointing because it is the same kind of statement as `env`: here is what the
+  world looked like when this state was saved. Recorded as `EXTERNAL_AGENT`, since
+  an agent naming its own model is self-reporting, but the comparison against a
+  later `expected_model` stays independent of that claim. `provider` carries forward
+  when omitted, so naming the model alone cannot erase a provider recorded earlier,
+  and omitting `model_id` records nothing rather than asserting absence.
+
 - **The retry budget counted per action type, blocking work that never failed (#368).**
   `attempts_for_type` folded on `action_type` and ignored the idempotency key, so
   the limit capped a run's distinct unsettled work of a type rather than retries of
