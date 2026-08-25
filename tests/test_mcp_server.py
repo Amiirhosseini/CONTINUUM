@@ -1152,6 +1152,228 @@ async def test_list_actions_marks_the_unresolved_row_itself(
 
 
 @pytest.mark.asyncio
+async def test_two_tenants_with_the_same_filename_are_two_actions(
+    server_ctx: tuple[Any, Any],
+) -> None:
+    """Per-directory files with a conventional name are not one action (#365).
+
+    With no explicit `key` the exact argument hash misses, so the identity
+    fallback decides, and it compared basenames. Both paths reduced to
+    `{report.csv, report}`, so the second claim was answered `proceed=false` with
+    the first tenant's `external_id` attached and the guidance "Already
+    performed. Reuse the previous result; do not repeat it." Globex was never
+    notified. Fan-out over `report.csv`, `invoice.pdf`, `index.json` and friends
+    is a common shape, so the exposure is not exotic.
+    """
+    server, _ = server_ctx
+    await seed_run(server)
+    acme = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="tenant.notify",
+        arguments={"path": "/tenants/acme/report.csv"},
+    )
+    assert acme["proceed"] is True
+    await call(
+        server,
+        "continuum_complete_action",
+        run_id="run_1",
+        action_key=acme["action_key"],
+        external_id="notify-acme-001",
+    )
+
+    globex = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="tenant.notify",
+        arguments={"path": "/tenants/globex/report.csv"},
+    )
+    assert globex["proceed"] is True, "globex must still be notified"
+    assert globex["action_key"] != acme["action_key"]
+    assert globex.get("external_id") is None, "acme's receipt must not be reused"
+
+
+@pytest.mark.asyncio
+async def test_a_re_rendered_path_still_deduplicates(
+    server_ctx: tuple[Any, Any],
+) -> None:
+    """Fixing #365 must not cost the drift case the fallback exists for.
+
+    An agent that writes an absolute path in one session and a relative one in
+    the next means the same file, so the second claim must still be refused with
+    the first result rather than performing the effect twice.
+    """
+    server, _ = server_ctx
+    await seed_run(server)
+    first = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="bench.send",
+        arguments={"file": "/data/invoices/INV-5.pdf"},
+    )
+    await call(
+        server,
+        "continuum_complete_action",
+        run_id="run_1",
+        action_key=first["action_key"],
+        external_id="ext-5",
+    )
+
+    again = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="bench.send",
+        arguments={"file": "invoices/INV-5.pdf"},
+    )
+    assert again["proceed"] is False
+    assert again["external_id"] == "ext-5"
+
+
+@pytest.mark.asyncio
+async def test_complete_action_cannot_clear_an_unknown_outcome(
+    server_ctx: tuple[Any, Any],
+) -> None:
+    """The evidence gate must not be bypassable by the ungated tool (issue #366).
+
+    `continuum_complete_action` is the tool an agent is told to call routinely,
+    it is on the same mutation allowlist as everything else, and it accepts the
+    key the agent already holds from `continuum_intercept_action`. So it was both
+    the easiest door and the one with no evidence requirement, while the gated
+    route through `continuum_reconcile_action` was the harder one. An agent trying
+    to get unstuck reaches for the easy door.
+    """
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    server, _ = server_ctx
+    await seed_run(server)
+    claimed = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="card.charge",
+        arguments={"amount": 4200, "invoice": "INV-9001"},
+        key="charge:INV-9001",
+    )
+    await call(
+        server,
+        "continuum_fail_action",
+        run_id="run_1",
+        action_key=claimed["action_key"],
+        error="gateway timeout after the charge request was sent",
+        certain=False,
+    )
+
+    with pytest.raises(ToolError, match="nothing has verified"):
+        await server.call_tool(
+            "continuum_complete_action",
+            {"run_id": "run_1", "action_key": claimed["action_key"]},
+            context=_ctx(TEST_CLIENT),
+        )
+
+    # The blocker survives, so recovery still refuses to call the run safe.
+    listed = await call(server, "continuum_list_actions", run_id="run_1")
+    assert listed["unresolved"] == 1
+    assert listed["actions"][0]["status"] == "unknown"
+    resumed = await call(server, "continuum_resume", run_id="run_1")
+    assert resumed["safe"] is False
+    assert resumed["next_allowed_action"].startswith("reconcile_action:")
+
+
+@pytest.mark.asyncio
+async def test_reconciling_an_unknown_outcome_records_that_it_was_a_correction(
+    server_ctx: tuple[Any, Any],
+) -> None:
+    """The supported route keeps the decision visible in the log (issue #366).
+
+    `complete` recorded ACTION_RECORDED, indistinguishable from a first-time
+    success, so an auditor could not tell that an uncertain effect had been
+    resolved by assertion. `reconcile` records ACTION_RECONCILED with the note.
+    """
+    server, ctx = server_ctx
+    await seed_run(server)
+    claimed = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="card.charge",
+        arguments={"invoice": "INV-9001"},
+        key="charge:INV-9001",
+    )
+    await call(
+        server,
+        "continuum_fail_action",
+        run_id="run_1",
+        action_key=claimed["action_key"],
+        error="gateway timeout",
+        certain=False,
+    )
+    settled = await call(
+        server,
+        "continuum_reconcile_action",
+        run_id="run_1",
+        action_key=claimed["action_key"],
+        occurred=True,
+        external_id="txn-1",
+        note="found the charge in the gateway ledger",
+    )
+
+    assert settled["status"] == "completed"
+    assert settled["side_effect_uncertain"] is False
+    assert (await call(server, "continuum_list_actions", run_id="run_1"))["unresolved"] == 0
+    assert EventType.ACTION_RECONCILED in [e.type for e in ctx.storage.read_events("run_1")]
+
+
+@pytest.mark.asyncio
+async def test_reconcile_can_store_the_evidence_it_was_given(
+    server_ctx: tuple[Any, Any],
+) -> None:
+    """The route `complete` points at must accept what `complete` accepted (#366).
+
+    `continuum_complete_action` takes `result`, and refusing an UNKNOWN action
+    sends the caller to `continuum_reconcile_action` instead. That tool had no
+    `result` parameter, so structured evidence from the external check had nowhere
+    to go over MCP even though `ActionLedger.reconcile` has always stored it.
+    """
+    server, _ = server_ctx
+    await seed_run(server)
+    claimed = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="card.charge",
+        arguments={"invoice": "INV-9001"},
+        key="charge:INV-9001",
+    )
+    await call(
+        server,
+        "continuum_fail_action",
+        run_id="run_1",
+        action_key=claimed["action_key"],
+        error="gateway timeout",
+        certain=False,
+    )
+    settled = await call(
+        server,
+        "continuum_reconcile_action",
+        run_id="run_1",
+        action_key=claimed["action_key"],
+        occurred=True,
+        external_id="txn-1",
+        result={"cents": 4200, "settled_at": "2026-08-25"},
+        note="found in the gateway ledger",
+    )
+
+    assert settled["status"] == "completed"
+    assert settled["result"] == {"cents": 4200, "settled_at": "2026-08-25"}
+    listed = await call(server, "continuum_list_actions", run_id="run_1")
+    assert listed["actions"][0]["external_id"] == "txn-1"
+
+
+@pytest.mark.asyncio
 async def test_the_identifier_resume_advertises_is_accepted_by_reconcile(
     server_ctx: tuple[Any, Any],
 ) -> None:
@@ -1986,8 +2208,14 @@ async def test_a_completed_action_still_deduplicates_at_budget(
     the budget gate runs first it raises instead of answering, and an agent that
     gets an error where it expected "already done" has every reason to perform
     the side effect again out of band.
+
+    Pinned with `max_attempts: 1` so one attempt is the whole allowance, and the
+    budget is counted per operation (issue #368) so this asserts the property on
+    the very key being re-claimed rather than on unrelated work of the same type.
     """
     monkeypatch.chdir(tmp_path)
+    (tmp_path / ".continuum").mkdir()
+    (tmp_path / ".continuum" / "budgets.json").write_text('{"default_max_attempts": 1}')
     server, _ = server_ctx
     await seed_run(server)
 
@@ -2007,23 +2235,29 @@ async def test_a_completed_action_still_deduplicates_at_budget(
         result={"cents": 500},
     )
 
-    # Exhaust the default budget of 3 with genuinely unsettled attempts.
-    for n in range(3):
-        await call(
-            server,
-            "continuum_intercept_action",
-            run_id="run_1",
-            action_type="charge",
-            key=f"charge:stuck-{n}",
-        )
-
-    # A fresh identity is now correctly refused.
+    # A different operation of the same type burns its own single attempt and is
+    # then refused, which is the gate working.
     from mcp.server.mcpserver.exceptions import ToolError
 
+    stuck = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="charge",
+        key="charge:stuck",
+    )
+    await call(
+        server,
+        "continuum_fail_action",
+        run_id="run_1",
+        action_key=stuck["action_key"],
+        error="500 from upstream",
+        certain=True,
+    )
     with pytest.raises(ToolError, match="retry budget exhausted"):
         await server.call_tool(
             "continuum_intercept_action",
-            {"run_id": "run_1", "action_type": "charge", "key": "charge:new"},
+            {"run_id": "run_1", "action_type": "charge", "key": "charge:stuck"},
             context=_ctx(TEST_CLIENT),
         )
 
@@ -2042,13 +2276,116 @@ async def test_a_completed_action_still_deduplicates_at_budget(
 
 
 @pytest.mark.asyncio
+async def test_a_never_retried_operation_is_not_blocked_by_its_neighbours(
+    server_ctx: tuple[Any, Any],
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Distinct work must not share one allowance (issue #368).
+
+    Three recipients each failing once, with no retry anywhere, exhausted a
+    budget of three and blocked a fourth that had never been attempted. Any
+    fan-out with more failures than the limit deadlocked mid-run, and the refusal
+    called it a retry budget while nothing had been retried.
+    """
+    monkeypatch.chdir(tmp_path)
+    server, _ = server_ctx
+    await seed_run(server)
+
+    for recipient in ("a", "b", "c"):
+        claim = await call(
+            server,
+            "continuum_intercept_action",
+            run_id="run_1",
+            action_type="email_send",
+            arguments={"to": f"{recipient}@example.com"},
+            key=f"email:{recipient}",
+        )
+        await call(
+            server,
+            "continuum_fail_action",
+            run_id="run_1",
+            action_key=claim["action_key"],
+            error="550 rejected by upstream",
+            certain=True,
+        )
+
+    fourth = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="email_send",
+        arguments={"to": "d@example.com"},
+        key="email:d",
+    )
+    assert fourth["proceed"] is True, "d was never attempted and must not be blocked"
+
+
+@pytest.mark.asyncio
+async def test_the_exhaustion_message_names_the_operation_and_the_way_out(
+    server_ctx: tuple[Any, Any],
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The old wording did not fit the state it fired in (issue #368).
+
+    It advised reconciling existing attempts, which is no help when every prior
+    attempt is settled FAILED with nothing uncertain about it, and it pointed at
+    a registry file without saying that the file usually needs creating.
+    """
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".continuum").mkdir()
+    (tmp_path / ".continuum" / "budgets.json").write_text('{"default_max_attempts": 1}')
+    server, _ = server_ctx
+    await seed_run(server)
+
+    claim = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="deploy",
+        key="deploy:v2",
+    )
+    await call(
+        server,
+        "continuum_fail_action",
+        run_id="run_1",
+        action_key=claim["action_key"],
+        error="rejected before sending",
+        certain=True,
+    )
+
+    with pytest.raises(ToolError) as raised:
+        await server.call_tool(
+            "continuum_intercept_action",
+            {"run_id": "run_1", "action_type": "deploy", "key": "deploy:v2"},
+            context=_ctx(TEST_CLIENT),
+        )
+    message = str(raised.value)
+    assert "this 'deploy' operation" in message
+    assert "max_attempts" in message
+    assert "does not exist" in message
+    assert "Reconcile existing attempts" not in message
+
+
+@pytest.mark.asyncio
 async def test_an_uncertain_action_still_refuses_at_budget(
     server_ctx: tuple[Any, Any],
     tmp_path: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An exhausted budget must not mask the reconciliation path either."""
+    """An exhausted budget must not mask the reconciliation path either.
+
+    With `max_attempts: 1` the single attempt is spent, so without the
+    settled-status bypass the re-claim would be refused for budget instead of
+    being told the outcome is unknown, and the agent would never learn that a
+    reconciliation is owed.
+    """
     monkeypatch.chdir(tmp_path)
+    (tmp_path / ".continuum").mkdir()
+    (tmp_path / ".continuum" / "budgets.json").write_text('{"default_max_attempts": 1}')
     server, _ = server_ctx
     await seed_run(server)
 
@@ -2067,25 +2404,6 @@ async def test_an_uncertain_action_still_refuses_at_budget(
         error="timeout after send",
         certain=False,
     )
-    # The unresolved charge:maybe is itself one unsettled attempt, so two more
-    # reach the default budget of 3.
-    for n in range(2):
-        await call(
-            server,
-            "continuum_intercept_action",
-            run_id="run_1",
-            action_type="charge",
-            key=f"charge:stuck-{n}",
-        )
-
-    from mcp.server.mcpserver.exceptions import ToolError
-
-    with pytest.raises(ToolError, match="retry budget exhausted"):
-        await server.call_tool(
-            "continuum_intercept_action",
-            {"run_id": "run_1", "action_type": "charge", "key": "charge:new"},
-            context=_ctx(TEST_CLIENT),
-        )
 
     again = await call(
         server,
