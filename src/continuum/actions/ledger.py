@@ -57,6 +57,8 @@ from continuum.actions.idempotency import (
     idempotency_key,
     identity_tokens,
     leaf_tokens,
+    location_tokens,
+    locations_agree,
 )
 from continuum.concurrency.lease import LeaseCoordinator
 from continuum.events import EventType
@@ -478,6 +480,16 @@ class ActionLedger:
         second side effect would be silently swallowed -- the exact failure this
         ledger exists to prevent.
 
+        Leaf comparison alone was not enough either, for the same reason in a
+        different disguise: two files with the same name in different directories
+        share every leaf, so ``/tenants/acme/report.csv`` matched
+        ``/tenants/globex/report.csv`` and globex was never notified (issue #365).
+        A match therefore also requires the *locations* to agree, which
+        ``locations_agree`` decides by suffix rather than equality so the drift
+        case that motivated leaf comparison (``invoices/INV-5.pdf`` for
+        ``/data/invoices/INV-5.pdf``) still matches. A side carrying no path at
+        all makes no claim about location and so contradicts nothing.
+
         Containment on its own is still too loose: a completed action folds its
         outcome ``external_id`` and any optional descriptive argument into its
         token set, so the stored set is a *superset* of a sparser re-claim even
@@ -498,7 +510,9 @@ class ActionLedger:
         # common to every claim in the run, so it must never count as a
         # resource token when deciding whether two claims are the same work.
         plumbing = leaf_tokens(identity_tokens(external_id=self.run_id))
-        incoming = leaf_tokens(identity_tokens(arguments, volatile=volatile)) - plumbing
+        incoming_all = identity_tokens(arguments, volatile=volatile)
+        incoming = leaf_tokens(incoming_all) - plumbing
+        incoming_where = location_tokens(incoming_all)
         if not incoming:
             return None
 
@@ -511,11 +525,15 @@ class ActionLedger:
             # is never present on the incoming claim, so folding it into ``known``
             # would make the stored set a systematic superset of every sparser
             # re-claim. It is therefore excluded from the comparison (issue #64).
-            known = leaf_tokens(identity_tokens(action.arguments)) - plumbing
+            known_all = identity_tokens(action.arguments)
+            known = leaf_tokens(known_all) - plumbing
             # An empty ``known`` is contained in everything; treat a stored
             # action with no identity of its own as unrecognisable, not as a
             # match for every claim of the same type.
             if not known:
+                continue
+            # Same leaves, different directories, is different work (issue #365).
+            if not locations_agree(incoming_where, location_tokens(known_all)):
                 continue
             if incoming <= known:
                 # The stored action carries more tokens than the claim. That is

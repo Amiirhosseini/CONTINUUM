@@ -714,6 +714,27 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Same-named files in different directories collapsed into one action (#365).**
+  With no explicit `key` the exact argument hash misses on two differently-spelled
+  paths, so the identity fallback decides, and it compared basenames.
+  `/tenants/acme/report.csv` and `/tenants/globex/report.csv` both reduced to
+  `{report.csv, report}`, containment held both ways, and the second claim was
+  answered `proceed=false` carrying acme's `external_id` and the guidance "Already
+  performed. Reuse the previous result; do not repeat it." Globex was never
+  notified, which is the silent swallow the fallback exists to prevent, and
+  per-directory files with conventional names are a common fan-out shape. Leaf
+  comparison was introduced so a re-rendered path (`invoices/INV-5.pdf` for
+  `/data/invoices/INV-5.pdf`) would still deduplicate, so the container is now set
+  aside rather than discarded: new `location_tokens` returns exactly what
+  `leaf_tokens` drops, and `_identity_match` additionally requires the locations to
+  agree. `same_location` compares by path suffix rather than equality, which is the
+  shape drift actually takes, so the re-rendering case still matches while two
+  fully-qualified paths agreeing on nothing but the filename do not. A side that
+  names no path at all makes no claim about location and so contradicts nothing,
+  which keeps the field-rename case working. Comparison stays purely lexical, with
+  no filesystem or working-directory resolution, so the answer is identical on
+  every machine.
+
 - **`complete` could launder an `UNKNOWN` action into `COMPLETED` (#366).**
   `ActionLedger.complete` had no status guard, so a side effect whose real-world
   outcome nobody could determine, a charge that timed out after the request was
