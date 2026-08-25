@@ -646,14 +646,12 @@ class Run(BaseModel):
 #: (both predate #383; hashing them would brand every existing record as
 #: tampered), and omitted from persisted bodies so readers built before #383,
 #: whose SemanticState forbids extra inputs, can still load newer databases.
-PROJECTION_BOOKKEEPING: frozenset[str] = frozenset(
-    {
-        "status",
-        "unprojectable_at_sequence",
-        "unprojectable_event_type",
-        "unprojectable_reason",
-    }
-)
+PROJECTION_BOOKKEEPING: set[str] = {
+    "status",
+    "unprojectable_at_sequence",
+    "unprojectable_event_type",
+    "unprojectable_reason",
+}
 
 
 class StateCheckpoint(BaseModel):
