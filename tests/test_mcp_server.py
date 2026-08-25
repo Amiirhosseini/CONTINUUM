@@ -1256,6 +1256,105 @@ async def test_an_unmatched_identifier_says_which_spaces_were_tried(
         )
 
 
+# --- the model behind a run (issue #370) ------------------------------------ #
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_records_the_model_so_drift_can_be_detected(
+    server_ctx: tuple[Any, Any],
+) -> None:
+    """`expected_model` was unsatisfiable: nothing ever wrote MODEL_CHANGED (#370).
+
+    The event type was defined, treated as checkpoint-worthy and projected, but no
+    MCP tool, CLI command or adapter emitted it, so the validator's model component
+    could only ever answer "no model recorded" and the drift check advertised by
+    `continuum_resume` and `continuum_validate` could never fire.
+    """
+    server, ctx = server_ctx
+    await seed_run(server)
+
+    before = await call(server, "continuum_validate", run_id="run_1", expected_model="model-a")
+    model_before = [c for c in before["components"] if c["component"] == "model"]
+    assert model_before and model_before[0]["status"] == "unknown"
+
+    checkpointed = await call(
+        server,
+        "continuum_checkpoint",
+        run_id="run_1",
+        model_id="model-a",
+        provider="anthropic",
+    )
+    assert checkpointed["model"] == "model-a"
+    assert EventType.MODEL_CHANGED in [e.type for e in ctx.storage.read_events("run_1")]
+
+    # Same model: nothing to review.
+    same = await call(server, "continuum_validate", run_id="run_1", expected_model="model-a")
+    assert not [
+        c for c in same["components"] if c["component"] == "model" and c["status"] != "valid"
+    ]
+
+    # A different model now surfaces as drift rather than as "unknown".
+    drifted = await call(server, "continuum_validate", run_id="run_1", expected_model="model-b")
+    entry = next(c for c in drifted["components"] if c["component"] == "model")
+    assert entry["status"] == "requires_review"
+    assert "model-a" in entry["detail"] and "model-b" in entry["detail"]
+
+
+@pytest.mark.asyncio
+async def test_an_unchanged_model_is_not_re_recorded_on_every_checkpoint(
+    server_ctx: tuple[Any, Any],
+) -> None:
+    """Checkpointing on a schedule must not append an identical event each time.
+
+    Same reasoning as `_declare_dependencies`: the projection folds every one of
+    them back to the same value, so they are noise in the log.
+    """
+    server, ctx = server_ctx
+    await seed_run(server)
+    for _ in range(3):
+        await call(server, "continuum_checkpoint", run_id="run_1", model_id="model-a")
+
+    changes = [e for e in ctx.storage.read_events("run_1") if e.type is EventType.MODEL_CHANGED]
+    assert len(changes) == 1
+
+    # A genuine switch is recorded.
+    await call(server, "continuum_checkpoint", run_id="run_1", model_id="model-b")
+    changes = [e for e in ctx.storage.read_events("run_1") if e.type is EventType.MODEL_CHANGED]
+    assert len(changes) == 2
+
+
+@pytest.mark.asyncio
+async def test_naming_the_model_alone_keeps_the_recorded_provider(
+    server_ctx: tuple[Any, Any],
+) -> None:
+    """A later checkpoint that omits `provider` must not erase it (issue #370)."""
+    server, ctx = server_ctx
+    await seed_run(server)
+    await call(
+        server,
+        "continuum_checkpoint",
+        run_id="run_1",
+        model_id="model-a",
+        provider="anthropic",
+    )
+    await call(server, "continuum_checkpoint", run_id="run_1", model_id="model-a")
+
+    state = project("run_1", ctx.storage.read_events("run_1"))
+    assert state.model is not None
+    assert state.model.model == "model-a"
+    assert state.model.provider == "anthropic"
+
+
+@pytest.mark.asyncio
+async def test_omitting_the_model_records_nothing(server_ctx: tuple[Any, Any]) -> None:
+    """The parameter is optional, and silence must not be read as a claim."""
+    server, ctx = server_ctx
+    await seed_run(server)
+    await call(server, "continuum_checkpoint", run_id="run_1")
+
+    assert EventType.MODEL_CHANGED not in [e.type for e in ctx.storage.read_events("run_1")]
+
+
 # --- storage configuration --------------------------------------------------- #
 
 
