@@ -347,6 +347,55 @@ def _append_projectable(
     raise AssertionError("unreachable: the loop either returns or raises")
 
 
+def _declare_model(
+    ctx: ContinuumMCP,
+    run_id: str,
+    model_id: str | None,
+    provider: str | None = None,
+) -> None:
+    """Record which model is driving this run, so drift becomes detectable (#370).
+
+    ``MODEL_CHANGED`` was defined, treated as checkpoint-worthy by the trigger
+    policy, and projected into ``SemanticState.model``, but nothing anywhere in
+    the codebase ever emitted it. So the validator's model component could only
+    ever answer "no model recorded for this run, cannot compare against ...", the
+    ``expected_model`` parameter on ``continuum_resume`` and ``continuum_validate``
+    could never do anything, and ``RepairKind.REVALIDATE_MODEL_STATE`` was
+    unreachable. A parameter that cannot be satisfied is worse than an absent one,
+    because its presence implies the check is covered.
+
+    That matters more than an ordinary dead branch: a different model resuming
+    another model's work is exactly the drift the surrounding architecture exists
+    to catch, and model-specific assumptions recorded by one model are not
+    automatically sound for another.
+
+    Attached to checkpointing rather than to progress because it is the same kind
+    of statement as ``env``: here is what the world looked like when this state was
+    saved. Recorded as ``EXTERNAL_AGENT``, since an agent naming its own model is
+    self-reporting, but the *comparison* against a later ``expected_model`` stays
+    independent of that claim, exactly as it does for declared dependencies.
+
+    Only appended when the value actually changes, so an agent checkpointing on a
+    schedule does not add an identical event each time. ``provider`` carries
+    forward when omitted, so naming the model alone cannot silently erase a
+    provider recorded earlier.
+    """
+    if not model_id:
+        return
+    current = project(run_id, ctx.storage.read_events(run_id)).model
+    recorded_model = current.model if current else None
+    recorded_provider = current.provider if current else None
+    settled_provider = provider if provider is not None else recorded_provider
+    if recorded_model == model_id and recorded_provider == settled_provider:
+        return
+    ctx.storage.append_event(
+        run_id,
+        EventType.MODEL_CHANGED,
+        {"model": model_id, "provider": settled_provider},
+        source=AGENT_SOURCE,
+    )
+
+
 def _environment(run_id: str, env: Mapping[str, str] | None) -> EnvironmentSnapshot | None:
     """Build a snapshot from a ``{name: version}`` mapping.
 
@@ -696,7 +745,10 @@ def build_server(
             "Save a durable checkpoint of the current task state. Worth doing at "
             "milestones, before risky or irreversible steps, and before a long gap. "
             "Recovery replays from the newest checkpoint, so checkpointing bounds "
-            "how much work a crash can cost."
+            "how much work a crash can cost.\n\n"
+            "Pass 'model_id' with your own model identifier. It is what later lets "
+            "continuum_resume answer whether the model resuming this work is the one "
+            "that produced it; without it that check can only report 'unknown'."
         ),
         annotations=mutating,
     )
@@ -705,10 +757,13 @@ def build_server(
         run_id: str,
         reason: str = "",
         env: dict[str, str] | None = None,
+        model_id: str | None = None,
+        provider: str | None = None,
     ) -> str:
         """Create a semantic checkpoint."""
         ctx.ensure_run(run_id)
         _declare_dependencies(ctx, run_id, env)
+        _declare_model(ctx, run_id, model_id, provider)
         state = project(run_id, ctx.storage.read_events(run_id))
         checkpoint = ctx.adapter.capture_state(
             run_id,
@@ -723,6 +778,7 @@ def build_server(
                 "version": checkpoint.version,
                 "trigger": checkpoint.trigger,
                 "integrity_hash": checkpoint.integrity_hash,
+                "model": state.model.model if state.model else None,
                 "completed": checkpoint.state.progress.completed,
                 "source_sequence": checkpoint.state.source_sequence,
             }
@@ -1031,7 +1087,7 @@ def build_server(
         from continuum.budgets import (
             DEFAULT_BUDGETS_PATH,
             BudgetConfigError,
-            attempts_for_type,
+            attempts_by_key,
             evaluate_budget,
         )
 
@@ -1074,16 +1130,31 @@ def build_server(
 
         if not settled:
             events = ctx.storage.read_events(run_id)
-            attempts = attempts_for_type(events, action_type)
+            # Counted per key, so the budget caps retries of *this* operation
+            # rather than the run's distinct work of this type (issue #368).
+            claim_key = str(
+                idempotency_key(
+                    action_type,
+                    arguments,
+                    scope=run_id if scoped_to_run else None,
+                    key=key,
+                )
+            )
+            attempts = attempts_by_key(events, action_type).get(claim_key, 0)
             allowed, used, maximum = evaluate_budget(budgets, action_type, attempts)
             if not allowed:
                 from mcp.server.mcpserver.exceptions import ToolError
 
+                # The old wording advised reconciling, which is no help when every
+                # prior attempt is already settled FAILED, and pointed at a
+                # registry file that usually does not exist yet (issue #368).
                 raise ToolError(
-                    f"retry budget exhausted for {action_type!r}: "
-                    f"{used} attempt(s) recorded, budget is {maximum}. "
-                    "Reconcile existing attempts or ask the operator to raise "
-                    ".continuum/budgets.json."
+                    f"retry budget exhausted for this {action_type!r} operation "
+                    f"(key {claim_key[:12]}...): {used} attempt(s) recorded, budget is "
+                    f"{maximum}. Retrying it again is the thing the budget exists to "
+                    f"stop, so either settle it a different way or raise the limit by "
+                    f"setting action_types.{action_type}.max_attempts in "
+                    f"{DEFAULT_BUDGETS_PATH} (creating that file if it does not exist)."
                 )
 
         try:
@@ -1240,11 +1311,20 @@ def build_server(
         action_key: str,
         occurred: bool,
         external_id: str | None = None,
+        result: dict[str, Any] | None = None,
         note: str = "",
     ) -> str:
         """Resolve an uncertain action using external evidence."""
+        # `result` is accepted here because `complete` refuses an UNKNOWN action
+        # (issue #366) and this is the route it points at. Without it, structured
+        # evidence gathered by the probe had nowhere to go over MCP even though
+        # `ActionLedger.reconcile` has always stored it.
         action = ctx.ledger(run_id).reconcile(
-            action_key, occurred=occurred, external_id=external_id, note=note
+            action_key,
+            occurred=occurred,
+            external_id=external_id,
+            result=result,
+            note=note,
         )
         return _json(
             {
@@ -1252,6 +1332,7 @@ def build_server(
                 "action_id": action.action_id,
                 "status": action.status.value,
                 "external_id": action.external_id,
+                "result": dict(action.result) if action.result else None,
                 "side_effect_uncertain": action.side_effect_uncertain,
             }
         )
