@@ -712,6 +712,14 @@ All notable changes to this project are documented here. The format follows
   snapshot to STATUS.md. The suite is now 900 tests (up from the 740 recorded
   earlier; the Postgres backend's tests skip without `CONTINUUM_TEST_POSTGRES_DSN`).
 
+- **`docs/api/cli.md` now lists every CLI subcommand (#360).** The command
+  table was missing 14 shipped subcommands (`start`, `status`, `complete`,
+  `budget`, `tree`, `fork`, `compact`, `observe`, `gateway`, `briefing`,
+  `gate`, `hooks`, `reconcile`, `dashboard`), so a newcomer had no reference
+  for them even though README and the `--help` output list them. Each new row
+  mirrors the `help=` string from `src/continuum/cli/main.py:build_parser`;
+  the table now matches the parser exactly (33 rows, one per subcommand).
+
 ### Fixed
 
 - **`ActionLedger` could not serialise concurrent claims on one key (#345).**
