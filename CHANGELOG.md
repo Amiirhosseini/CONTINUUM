@@ -714,6 +714,25 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **The retry budget counted per action type, blocking work that never failed (#368).**
+  `attempts_for_type` folded on `action_type` and ignored the idempotency key, so
+  the limit capped a run's distinct unsettled work of a type rather than retries of
+  one operation. Three different recipients each failing once, with zero retries
+  anywhere, exhausted the default budget of three and refused a fourth that had
+  never been attempted, so any fan-out with more failures than the limit deadlocked
+  mid-run. The default applies with no config file present, so this was live in any
+  project that had never configured budgets. New `attempts_by_key` counts per
+  idempotency key, which is the operation's identity and is stable across retries
+  because re-claiming after FAILED or COMPENSATED copies the existing action.
+  `attempts_for_type` now reports the worst single operation, which is the figure
+  the claim site compares against the limit, so `continuum budget` agrees with what
+  is enforced; it is deliberately not the sum across keys, since that measures
+  distinct work and nothing here caps that. The limit stays configured per type,
+  because that is the unit an operator thinks in. The exhaustion message also fits
+  the state it fires in: it names the specific operation, drops the advice to
+  reconcile existing attempts (useless when every prior attempt is settled FAILED),
+  and says the registry file may need creating rather than raising.
+
 - **Same-named files in different directories collapsed into one action (#365).**
   With no explicit `key` the exact argument hash misses on two differently-spelled
   paths, so the identity fallback decides, and it compared basenames.
