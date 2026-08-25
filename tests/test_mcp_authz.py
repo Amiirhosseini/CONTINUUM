@@ -367,13 +367,16 @@ def test_a_disabled_auth_policy_is_a_no_op() -> None:
 
 
 def test_a_configured_secret_is_required() -> None:
-    auth = AuthPolicy("secret")
+    auth = AuthPolicy("actual-token-value")
     assert not auth.disabled
     # Correct secret passes.
-    auth.verify(ALLOWED, "secret")
+    auth.verify(ALLOWED, "actual-token-value")
     # Missing, empty, or wrong secret refuses.
-    with pytest.raises(NotAuthenticated, match="shared secret"):
+    with pytest.raises(NotAuthenticated, match="shared secret") as exc_info:
         auth.verify(ALLOWED, None)
+    assert "CONTINUUM_MCP_TOKEN" in str(exc_info.value)
+    assert "_meta.authToken" in str(exc_info.value)
+    assert "actual-token-value" not in str(exc_info.value)
     with pytest.raises(NotAuthenticated, match="shared secret"):
         auth.verify(ALLOWED, "")
     with pytest.raises(NotAuthenticated, match="shared secret"):

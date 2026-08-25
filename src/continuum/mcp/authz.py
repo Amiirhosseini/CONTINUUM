@@ -152,7 +152,10 @@ class AuthPolicy:
             expected = self.expected
         # An empty expected secret cannot be presented, so it must refuse.
         if not expected or not token or token != expected:
-            raise NotAuthenticated("the caller did not present the expected shared secret")
+            raise NotAuthenticated(
+                "expected shared secret (set CONTINUUM_MCP_TOKEN on the server "
+                "and pass _meta.authToken during initialize)"
+            )
 
 
 #: Confirmation of self-reported state over MCP is gated behind its own secret

@@ -110,7 +110,10 @@ class SidecarAuth:
         if self.disabled:
             return
         if not token or token != self.expected:
-            raise NotAuthorized("the caller did not present the expected shared secret")
+            raise NotAuthorized(
+                "expected shared secret (set CONTINUUM_SERVE_TOKEN on the server "
+                "and pass auth_token on the client)"
+            )
 
 
 def _require(params: dict[str, Any], key: str) -> Any:
