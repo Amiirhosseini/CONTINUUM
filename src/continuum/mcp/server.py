@@ -1013,7 +1013,7 @@ def build_server(
         from continuum.budgets import (
             DEFAULT_BUDGETS_PATH,
             BudgetConfigError,
-            attempts_for_type,
+            attempts_by_key,
             evaluate_budget,
         )
 
@@ -1056,16 +1056,31 @@ def build_server(
 
         if not settled:
             events = ctx.storage.read_events(run_id)
-            attempts = attempts_for_type(events, action_type)
+            # Counted per key, so the budget caps retries of *this* operation
+            # rather than the run's distinct work of this type (issue #368).
+            claim_key = str(
+                idempotency_key(
+                    action_type,
+                    arguments,
+                    scope=run_id if scoped_to_run else None,
+                    key=key,
+                )
+            )
+            attempts = attempts_by_key(events, action_type).get(claim_key, 0)
             allowed, used, maximum = evaluate_budget(budgets, action_type, attempts)
             if not allowed:
                 from mcp.server.mcpserver.exceptions import ToolError
 
+                # The old wording advised reconciling, which is no help when every
+                # prior attempt is already settled FAILED, and pointed at a
+                # registry file that usually does not exist yet (issue #368).
                 raise ToolError(
-                    f"retry budget exhausted for {action_type!r}: "
-                    f"{used} attempt(s) recorded, budget is {maximum}. "
-                    "Reconcile existing attempts or ask the operator to raise "
-                    ".continuum/budgets.json."
+                    f"retry budget exhausted for this {action_type!r} operation "
+                    f"(key {claim_key[:12]}...): {used} attempt(s) recorded, budget is "
+                    f"{maximum}. Retrying it again is the thing the budget exists to "
+                    f"stop, so either settle it a different way or raise the limit by "
+                    f"setting action_types.{action_type}.max_attempts in "
+                    f"{DEFAULT_BUDGETS_PATH} (creating that file if it does not exist)."
                 )
 
         try:
