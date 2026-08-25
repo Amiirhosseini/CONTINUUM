@@ -252,6 +252,46 @@ def test_a_crashed_writer_leaves_a_readable_prefix(tmp_path: Path) -> None:
         assert project("run_1", recovered.read_events("run_1")).progress.completed == 1
 
 
+def test_close_is_idempotent(tmp_path: Path) -> None:
+    """Closing twice must not raise (#320).
+
+    Shipped in #347 without a test, so the behaviour it fixed was left unpinned.
+    Double-close happens for real: an explicit ``close()`` inside a ``with``
+    block, or a caller closing before ``__del__`` runs.
+    """
+    store = SQLiteStorage(tmp_path / "agent.db")
+    store.create_run(Run(run_id="run_1", goal="g"))
+
+    store.close()
+    store.close()
+    store.close()
+
+
+def test_using_a_closed_store_says_it_was_closed(tmp_path: Path) -> None:
+    """Use-after-close must name the mistake, not a symptom of it.
+
+    Making ``close`` idempotent meant setting ``_connection`` to None, which left
+    every later call failing with ``AttributeError: 'NoneType' object has no
+    attribute 'execute'``. That points at CONTINUUM's internals instead of at the
+    caller's bug, so sqlite3's own wording is restored: reads and writes both go
+    through one accessor that raises ``ProgrammingError``.
+    """
+    db = tmp_path / "agent.db"
+    store = SQLiteStorage(db)
+    store.create_run(Run(run_id="run_1", goal="g"))
+    store.close()
+
+    # A read path and a write path, since they take different routes in.
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        store.get_run("run_1")
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        store.create_run(Run(run_id="run_2", goal="g"))
+
+    # The file itself is untouched: a new handle works normally.
+    with SQLiteStorage(db) as reopened:
+        assert reopened.get_run("run_1").goal == "g"
+
+
 def test_two_connections_to_one_file_see_each_other(tmp_path: Path) -> None:
     db = tmp_path / "agent.db"
     with SQLiteStorage(db) as writer, SQLiteStorage(db) as reader:

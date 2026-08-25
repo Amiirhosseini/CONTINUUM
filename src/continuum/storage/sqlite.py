@@ -119,23 +119,44 @@ class SQLiteStorage(Storage):
 
     # -- transactions ----------------------------------------------------- #
 
+    def _live_connection(self) -> sqlite3.Connection:
+        """The open connection, or a clear error saying it was closed.
+
+        ``close`` sets ``_connection`` to None so it can be called more than once
+        (#320). Without this check every later operation failed with
+        ``AttributeError: 'NoneType' object has no attribute 'execute'``, which
+        names a symptom rather than the mistake. sqlite3's own wording is the
+        thing worth preserving: use-after-close is a caller bug, and the message
+        should say which bug.
+        """
+        # Annotated because getattr with a default is typed Any, and returning
+        # Any from here would erase the connection type for every caller.
+        connection: sqlite3.Connection | None = getattr(self, "_connection", None)
+        if connection is None:
+            raise sqlite3.ProgrammingError(
+                "Cannot operate on a closed database. This SQLiteStorage was "
+                "closed; open a new handle rather than reusing a closed one."
+            )
+        return connection
+
     @contextmanager
     def _write(self) -> Iterator[sqlite3.Connection]:
         """Exclusive write transaction. Rolls back on any exception."""
         with self._lock:
-            self._connection.execute("BEGIN IMMEDIATE")
+            connection = self._live_connection()
+            connection.execute("BEGIN IMMEDIATE")
             try:
-                yield self._connection
+                yield connection
             except BaseException:
-                self._connection.execute("ROLLBACK")
+                connection.execute("ROLLBACK")
                 raise
             else:
-                self._connection.execute("COMMIT")
+                connection.execute("COMMIT")
 
     @contextmanager
     def _read(self) -> Iterator[sqlite3.Connection]:
         with self._lock:
-            yield self._connection
+            yield self._live_connection()
 
     def close(self) -> None:
         with self._lock:
