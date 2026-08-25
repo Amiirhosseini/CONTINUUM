@@ -639,6 +639,23 @@ class Run(BaseModel):
         return self.model_copy(update={"updated_at": utcnow(), **overrides})
 
 
+#: Fields that describe how an event log was *read*, not what a run's state
+#: is (issue #383). They live on SemanticState so a degraded fold can carry
+#: its diagnosis, but they are outside every durable identity of a state:
+#: excluded from the version fingerprint and from checkpoint integrity hashes
+#: (both predate #383; hashing them would brand every existing record as
+#: tampered), and omitted from persisted bodies so readers built before #383,
+#: whose SemanticState forbids extra inputs, can still load newer databases.
+PROJECTION_BOOKKEEPING: frozenset[str] = frozenset(
+    {
+        "status",
+        "unprojectable_at_sequence",
+        "unprojectable_event_type",
+        "unprojectable_reason",
+    }
+)
+
+
 class StateCheckpoint(BaseModel):
     model_config = Frozen
 
@@ -653,8 +670,28 @@ class StateCheckpoint(BaseModel):
     integrity_hash: str | None = None
 
     def content(self) -> dict[str, Any]:
-        """The sealed portion of the checkpoint (everything but the hash)."""
-        return self.model_dump(mode="json", exclude={"integrity_hash"})
+        """The sealed portion of the checkpoint (everything but the hash).
+
+        Projection bookkeeping is excluded beside the hash itself: it was added
+        after these checkpoints existed (#383), it is default in anything that
+        can be persisted (every capture path refuses a degraded fold), and
+        hashing it would report every checkpoint written by earlier builds as
+        tampered, which is exactly the alarm this hash exists to mean.
+        """
+        return self.model_dump(
+            mode="json", exclude={"integrity_hash": True, "state": PROJECTION_BOOKKEEPING}
+        )
+
+    def canonical_json(self) -> str:
+        """The serialised form written to storage.
+
+        Omits projection bookkeeping for the same reasons ``content`` does,
+        plus one more: readers built before #383 validate ``SemanticState``
+        with ``extra="forbid"`` and would refuse a body carrying fields they
+        have never heard of. Omitting them costs nothing, since they are
+        always default in anything persistable.
+        """
+        return self.model_dump_json(exclude={"state": PROJECTION_BOOKKEEPING})
 
     def digest(self) -> str:
         return stable_hash(self.content())

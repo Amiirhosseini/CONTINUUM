@@ -17,10 +17,10 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from continuum.models import SemanticState, utcnow
+from continuum.models import PROJECTION_BOOKKEEPING, SemanticState, utcnow
 from continuum.security.hashing import stable_hash
 
-__all__ = ["VersionEntry", "VersionChain", "state_fingerprint"]
+__all__ = ["VersionEntry", "VersionChain", "canonical_state_json", "state_fingerprint"]
 
 
 def state_fingerprint(state: SemanticState) -> str:
@@ -30,9 +30,9 @@ def state_fingerprint(state: SemanticState) -> str:
     pending work, approvals and dependencies are the same state even if they
     were projected at different times or carry different version numbers.
 
-    The projection-degradation fields are excluded for the same reason: they
-    describe how the log was read (where folding stopped), not what the state
-    says. Including them would break fingerprint dedup across the upgrade for
+    Projection bookkeeping is excluded for the same reason: it describes how
+    the log was read (where folding stopped), not what the state says.
+    Including it would break fingerprint dedup across the #383 upgrade for
     every stored version, and a degraded prefix-state genuinely is the same
     task state as its healthy counterpart.
     """
@@ -43,13 +43,23 @@ def state_fingerprint(state: SemanticState) -> str:
             "created_at",
             "updated_at",
             "source_sequence",
-            "status",
-            "unprojectable_at_sequence",
-            "unprojectable_event_type",
-            "unprojectable_reason",
+            *PROJECTION_BOOKKEEPING,
         },
     )
     return stable_hash(payload)
+
+
+def canonical_state_json(state: SemanticState) -> str:
+    """The serialised form of a state as written to storage.
+
+    Omits projection bookkeeping: it is always default in anything persistable
+    (a degraded fold is refused at every capture path), and carrying it would
+    make databases written after #383 unreadable by readers built before it,
+    whose SemanticState validates with ``extra="forbid"``. The version
+    fingerprint above is computed over the same exclusions, so stripping here
+    cannot desynchronise a stored row from its recorded fingerprint.
+    """
+    return state.model_dump_json(exclude=PROJECTION_BOOKKEEPING)
 
 
 class VersionEntry(BaseModel):
