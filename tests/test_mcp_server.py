@@ -1023,6 +1023,88 @@ async def test_list_actions_marks_the_unresolved_row_itself(
     assert {a["action_id"] for a in payload["actions"] if a["outcome_unresolved"]} == unresolved_ids
 
 
+@pytest.mark.asyncio
+async def test_two_tenants_with_the_same_filename_are_two_actions(
+    server_ctx: tuple[Any, Any],
+) -> None:
+    """Per-directory files with a conventional name are not one action (#365).
+
+    With no explicit `key` the exact argument hash misses, so the identity
+    fallback decides, and it compared basenames. Both paths reduced to
+    `{report.csv, report}`, so the second claim was answered `proceed=false` with
+    the first tenant's `external_id` attached and the guidance "Already
+    performed. Reuse the previous result; do not repeat it." Globex was never
+    notified. Fan-out over `report.csv`, `invoice.pdf`, `index.json` and friends
+    is a common shape, so the exposure is not exotic.
+    """
+    server, _ = server_ctx
+    await seed_run(server)
+    acme = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="tenant.notify",
+        arguments={"path": "/tenants/acme/report.csv"},
+    )
+    assert acme["proceed"] is True
+    await call(
+        server,
+        "continuum_complete_action",
+        run_id="run_1",
+        action_key=acme["action_key"],
+        external_id="notify-acme-001",
+    )
+
+    globex = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="tenant.notify",
+        arguments={"path": "/tenants/globex/report.csv"},
+    )
+    assert globex["proceed"] is True, "globex must still be notified"
+    assert globex["action_key"] != acme["action_key"]
+    assert globex.get("external_id") is None, "acme's receipt must not be reused"
+
+
+@pytest.mark.asyncio
+async def test_a_re_rendered_path_still_deduplicates(
+    server_ctx: tuple[Any, Any],
+) -> None:
+    """Fixing #365 must not cost the drift case the fallback exists for.
+
+    An agent that writes an absolute path in one session and a relative one in
+    the next means the same file, so the second claim must still be refused with
+    the first result rather than performing the effect twice.
+    """
+    server, _ = server_ctx
+    await seed_run(server)
+    first = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="bench.send",
+        arguments={"file": "/data/invoices/INV-5.pdf"},
+    )
+    await call(
+        server,
+        "continuum_complete_action",
+        run_id="run_1",
+        action_key=first["action_key"],
+        external_id="ext-5",
+    )
+
+    again = await call(
+        server,
+        "continuum_intercept_action",
+        run_id="run_1",
+        action_type="bench.send",
+        arguments={"file": "invoices/INV-5.pdf"},
+    )
+    assert again["proceed"] is False
+    assert again["external_id"] == "ext-5"
+
+
 # --- storage configuration --------------------------------------------------- #
 
 

@@ -631,6 +631,65 @@ def test_identity_match_survives_an_absolute_versus_relative_path(
     assert again.external_id == "ext-5"
 
 
+def test_identity_match_does_not_collapse_same_name_files_in_different_directories(
+    ledger: ActionLedger,
+) -> None:
+    """Same basename, different directory, is different work (issue #365).
+
+    Comparing at the leaf is what lets a re-rendered path deduplicate, but it also
+    made every per-tenant file with a conventional name look like one resource.
+    The second tenant was never notified, and the ledger handed back the first
+    tenant's receipt as though it were the second's, which is precisely the silent
+    swallow the identity fallback exists to prevent.
+    """
+    first = ledger.claim("tenant.notify", {"path": "/tenants/acme/report.csv"})
+    ledger.complete(first.key, external_id="notify-acme-001")
+
+    second = ledger.claim("tenant.notify", {"path": "/tenants/globex/report.csv"})
+    assert second.fresh, "globex is a different file and must still be notified"
+    assert second.external_id is None, "acme's receipt must not be reused for globex"
+    assert second.key != first.key
+
+
+def test_identity_match_still_matches_when_only_one_side_names_a_path(
+    ledger: ActionLedger,
+) -> None:
+    """A side with no path makes no claim about location (issue #365).
+
+    Requiring locations to agree must not undo the field-rename case: an argument
+    set that drops the path entirely contradicts nothing, so it still matches on
+    its leaves.
+    """
+    first = ledger.claim("bench.send", {"file": "/data/invoices/INV-5.pdf"})
+    ledger.complete(first.key, external_id="ext-5")
+
+    again = ledger.claim("bench.send", {"invoice": "INV-5.pdf"})
+    assert not again.fresh
+    assert again.external_id == "ext-5"
+
+
+@pytest.mark.parametrize(
+    ("left", "right", "same"),
+    [
+        # Drift: one rendering is a trailing part of the other.
+        ("/data/invoices/INV-5.pdf", "invoices/INV-5.pdf", True),
+        ("/data/invoices/INV-5.pdf", "./invoices/INV-5.pdf", True),
+        ("/data/invoices/INV-5.pdf", "/data/invoices/INV-5.pdf", True),
+        # Different containers for the same filename are different files.
+        ("/tenants/acme/report.csv", "/tenants/globex/report.csv", False),
+        ("a/report.csv", "b/report.csv", False),
+        # Separator style is a rendering difference, not a resource difference.
+        ("data\\invoices\\INV-5.pdf", "invoices/INV-5.pdf", True),
+    ],
+)
+def test_same_location_compares_by_suffix_not_basename(left: str, right: str, same: bool) -> None:
+    """Suffix comparison is the shape path drift actually takes (issue #365)."""
+    from continuum.actions.idempotency import same_location
+
+    assert same_location(left, right) is same
+    assert same_location(right, left) is same, "the comparison must be symmetric"
+
+
 def test_identity_match_does_not_collapse_actions_sharing_one_incidental_value(
     ledger: ActionLedger,
 ) -> None:
