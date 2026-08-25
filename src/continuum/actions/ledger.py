@@ -774,14 +774,52 @@ class ActionLedger:
         external_id: str | None = None,
         result: Mapping[str, Any] | None = None,
     ) -> Action:
-        """Record that the effect succeeded."""
+        """Record that the effect succeeded.
+
+        Settles a claim that is still in flight. Re-reporting an action that is
+        already ``COMPLETED`` is allowed, because a caller repeating itself after
+        a dropped response is not asserting anything new.
+
+        Every other status is refused (issue #366). Those are not settlements, they
+        are corrections of a recorded outcome, and correcting an outcome needs
+        evidence about the outside world that this method neither takes nor
+        records. ``UNKNOWN`` is the case that matters: the action reached that
+        status precisely because nobody could say whether the effect happened, and
+        completing it here erased the recovery blocker, wrote no note, and left an
+        ``ACTION_RECORDED`` event indistinguishable from an ordinary first-time
+        success. An auditor could not tell that an uncertain charge had been
+        resolved by assertion.
+
+        :meth:`reconcile` is the supported route for all of them. It takes the
+        same decision, demands the caller stand behind it, and records
+        ``ACTION_RECONCILED`` with a note so the correction is visible in the log.
+
+        Omitted arguments never erase what is on record. A caller repeating a
+        completion after a dropped response usually sends only the key, and
+        overwriting ``external_id`` and ``result`` with ``None`` would destroy the
+        receipt proving the effect happened. Same invariant :meth:`reconcile`
+        already documents, and a no-op on a first completion, where there is
+        nothing yet to preserve.
+        """
         key, existing = self._require(key)
+        if existing.status not in (ActionStatus.STARTED, ActionStatus.COMPLETED):
+            raise LedgerError(
+                f"action {existing.action_type!r} is {existing.status.value}, not in flight, so "
+                f"completing it would assert an outcome nothing has verified. "
+                f"Check the external system, then call reconcile(occurred=True) "
+                f"(continuum_reconcile_action over MCP), which records the evidence "
+                f"and the note alongside the correction."
+            )
+        settled_external = external_id if external_id is not None else existing.external_id
+        settled_result = dict(result) if result is not None else existing.result
         action = existing.model_copy(
             update={
                 "status": ActionStatus.COMPLETED,
-                "external_id": external_id,
-                "result": dict(result) if result is not None else None,
-                "result_hash": stable_hash(dict(result)) if result is not None else None,
+                "external_id": settled_external,
+                "result": dict(settled_result) if settled_result is not None else None,
+                "result_hash": (
+                    stable_hash(dict(settled_result)) if settled_result is not None else None
+                ),
                 "completed_at": utcnow(),
                 "side_effect_uncertain": False,
             }

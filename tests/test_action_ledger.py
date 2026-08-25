@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import Any
 
 import pytest
 
@@ -225,6 +226,117 @@ def test_a_timeout_is_not_evidence_of_absence(ledger: ActionLedger) -> None:
 
     with pytest.raises(UnknownSideEffect):
         ledger.claim("payment.charge", {"amount": 100})
+
+
+def test_complete_cannot_launder_an_unknown_action(ledger: ActionLedger) -> None:
+    """`complete` must not clear a blocker that exists for lack of evidence (#366).
+
+    An action is UNKNOWN precisely because nobody could say whether the effect
+    happened. Completing it here asserted that it did, wrote no note, and left an
+    ACTION_RECORDED event indistinguishable from an ordinary first-time success,
+    so the audit trail lost the fact that the decision was made by assertion.
+    """
+    outcome = ledger.claim("payment.charge", {"amount": 100})
+    ledger.fail(outcome.key, "gateway timeout after the charge was sent", certain=False)
+
+    with pytest.raises(LedgerError, match="nothing has verified"):
+        ledger.complete(outcome.key, external_id="txn-1")
+
+    still = ledger.get(str(outcome.key))
+    assert still is not None
+    assert still.status is ActionStatus.UNKNOWN
+    assert ledger.pending(), "the recovery blocker must survive the refused call"
+
+
+def test_reconcile_remains_the_route_for_a_settled_unknown(ledger: ActionLedger) -> None:
+    """The refusal must point somewhere that works (issue #366).
+
+    `reconcile` takes the same decision but demands the caller stand behind it and
+    records ACTION_RECONCILED with a note, so the correction stays visible.
+    """
+    outcome = ledger.claim("payment.charge", {"amount": 100})
+    ledger.fail(outcome.key, "gateway timeout", certain=False)
+
+    settled = ledger.reconcile(
+        outcome.key,
+        occurred=True,
+        external_id="txn-1",
+        note="found the charge in the gateway ledger",
+    )
+    assert settled.status is ActionStatus.COMPLETED
+    assert settled.external_id == "txn-1"
+    assert not ledger.pending()
+    assert EventType.ACTION_RECONCILED in [e.type for e in ledger.storage.read_events("run_1")]
+
+
+@pytest.mark.parametrize(
+    ("settle", "expected_status"),
+    [
+        (lambda led, key: led.fail(key, "rejected before sending", certain=True), "failed"),
+        (lambda led, key: led.compensate(key, note="refunded"), "compensated"),
+        (lambda led, key: led.flag_for_review(key, "amount looks wrong"), "requires_review"),
+    ],
+)
+def test_complete_refuses_every_status_that_is_not_in_flight(
+    ledger: ActionLedger,
+    settle: Any,
+    expected_status: str,
+) -> None:
+    """Only a claim still in flight is a settlement; the rest are corrections (#366).
+
+    A FAILED action contradicted without evidence, a COMPENSATED one whose effect
+    was deliberately undone, and one a human flagged for review are all outcomes
+    already on record. Overwriting them belongs to `reconcile`, which records why.
+    """
+    outcome = ledger.claim("payment.charge", {"amount": 100})
+    settle(ledger, outcome.key)
+
+    with pytest.raises(LedgerError, match=expected_status):
+        ledger.complete(outcome.key, external_id="txn-1")
+
+
+def test_completing_an_already_completed_action_is_still_allowed(
+    ledger: ActionLedger,
+) -> None:
+    """A caller repeating itself after a dropped response asserts nothing new."""
+    outcome = ledger.claim("payment.charge", {"amount": 100})
+    ledger.complete(outcome.key, external_id="txn-1")
+
+    again = ledger.complete(outcome.key, external_id="txn-1")
+    assert again.status is ActionStatus.COMPLETED
+
+
+def test_repeating_a_completion_without_arguments_keeps_the_receipt(
+    ledger: ActionLedger,
+) -> None:
+    """Omission must not erase the evidence the effect happened (issue #366).
+
+    A caller retrying after a dropped response usually sends only the key, and
+    overwriting `external_id` and `result` with None would destroy the receipt on
+    the action the fold reports. Same invariant `reconcile` already documents.
+    """
+    outcome = ledger.claim("payment.charge", {"amount": 100})
+    ledger.complete(outcome.key, external_id="txn-1", result={"cents": 100})
+
+    again = ledger.complete(outcome.key)
+    assert again.external_id == "txn-1"
+    assert again.result == {"cents": 100}
+    assert again.result_hash is not None
+    # And the folded view, which is what every reader sees, agrees.
+    folded = ledger.get(str(outcome.key))
+    assert folded is not None and folded.external_id == "txn-1"
+
+
+def test_a_completion_may_still_replace_the_receipt_it_supplies(
+    ledger: ActionLedger,
+) -> None:
+    """Preserving on omission must not block a caller that does supply values."""
+    outcome = ledger.claim("payment.charge", {"amount": 100})
+    ledger.complete(outcome.key, external_id="txn-1", result={"cents": 100})
+
+    corrected = ledger.complete(outcome.key, external_id="txn-2", result={"cents": 250})
+    assert corrected.external_id == "txn-2"
+    assert corrected.result == {"cents": 250}
 
 
 def test_a_definite_failure_is_distinguished_from_a_timeout(
