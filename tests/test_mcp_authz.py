@@ -402,8 +402,19 @@ def test_per_client_tokens_map_a_secret_to_a_name() -> None:
     with pytest.raises(NotAuthenticated, match="not registered"):
         auth.verify(STRANGER, "a-secret")
     # A registered caller with the wrong token is refused.
-    with pytest.raises(NotAuthenticated, match="shared secret"):
+    with pytest.raises(NotAuthenticated, match="registered for this caller") as exc_info:
         auth.verify(ALLOWED, "nope")
+    assert "CONTINUUM_MCP_TOKEN" not in str(exc_info.value)
+    assert "_meta.authToken" in str(exc_info.value)
+
+
+def test_argument_auth_names_the_matching_client_field() -> None:
+    auth = AuthPolicy("a-secret", source="argument")
+
+    with pytest.raises(NotAuthenticated, match="auth_token argument") as exc_info:
+        auth.verify(ALLOWED, "nope")
+    assert "CONTINUUM_MCP_TOKEN" not in str(exc_info.value)
+    assert "_meta.authToken" in str(exc_info.value)
 
 
 def test_load_auth_reads_the_env_var() -> None:
