@@ -34,18 +34,20 @@ The `[0.1.0]` changelog section itself is authored by #388 and #404. Here you
 only verify it landed correctly.
 
 ```bash
-# The 0.1.0 heading exists and carries a resolved release date
-grep -n "^## \[0.1.0\]" CHANGELOG.md
+# The 0.1.0 heading exists exactly once and carries a resolved ISO date.
+# Prints the heading; exits nonzero if the date is missing or malformed.
+grep -E "^## \[0\.1\.0\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$" CHANGELOG.md
 
-# Both declared version locations agree
-grep -n '^version' pyproject.toml                # expect version = "0.1.0"
-grep -n '^__version__' src/continuum/__init__.py # expect __version__ = "0.1.0"
+# Both declared version locations must pin exactly 0.1.0.
+# Each prints its line; exits nonzero on any other value.
+grep -E '^version = "0\.1\.0"$' pyproject.toml
+grep -E '^__version__ = "0\.1\.0"$' src/continuum/__init__.py
 ```
 
 Passing looks like:
 
-- The grep finds one `## [0.1.0] - YYYY-MM-DD` heading whose date is resolved,
-  not a placeholder.
+- The heading check finds exactly one `## [0.1.0] - YYYY-MM-DD` line whose date
+  is resolved, not a placeholder.
 - Entries merged after the cut sit under `[Unreleased]`, never inside the
   shipped section.
 - `pyproject.toml` and `src/continuum/__init__.py` read the same version, and
