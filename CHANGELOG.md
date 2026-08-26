@@ -666,6 +666,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Editable-install troubleshooting (#402).** `CONTRIBUTING.md` now explains
+  that moving or renaming a clone leaves the old path in editable-install
+  metadata and gives uninstall/reinstall commands to refresh it. `STATUS.md`
+  records the clean-venv result confirming the package configuration already
+  resolves the current repository correctly.
+
 - **`continuum dashboard` binds 127.0.0.1 by default** (#270); pass
   `--host 0.0.0.0` to opt into network exposure. The previous
   all-interfaces bind exposed recovery contracts (goals, side-effect
