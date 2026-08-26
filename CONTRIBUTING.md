@@ -48,6 +48,26 @@ pytest tests/test_hashing.py tests/test_models.py -v
 
 ---
 
+## Troubleshooting
+
+### `pip show` reports an old editable project location
+
+An editable install records the repository path used when it was installed.
+Moving or renaming the clone does not update that metadata. If
+`python -m pip show continuum-agent` reports an old path, reinstall from the
+current project root:
+
+```bash
+python -m pip uninstall --yes continuum-agent
+python -m pip install -e ".[mcp]"
+python -m pip show continuum-agent
+```
+
+The final command's `Editable project location` should be the current project
+root.
+
+---
+
 ## Linting & Type-Checking
 
 ```bash
