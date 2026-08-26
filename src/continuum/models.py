@@ -17,6 +17,7 @@ Conventions
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -46,6 +47,8 @@ __all__ = [
     "PendingWork",
     "Approval",
     "ExternalDependency",
+    "ConstraintPinned",
+    "ConstraintRetracted",
     "ModelSpecificState",
     "ModelState",
     "Run",
@@ -361,6 +364,93 @@ class ExternalDependency(BaseModel):
     metadata: Mapping[str, Any] = Field(default_factory=dict)
     last_verified_at: datetime | None = None
     provenance: Provenance = Field(default_factory=Provenance)
+
+
+# --------------------------------------------------------------------------- #
+# Constraint pins (issues #391, #416)
+# --------------------------------------------------------------------------- #
+
+#: A constraint id is a machine label, never prose: 1 to 128 characters from
+#: ASCII letters, digits and ``.`` ``_`` ``:`` ``-``. The tight charset and
+#: bound are deliberate. Hashing exists so the constraint text is never
+#: stored, which leaves the id as the only free-text-shaped field on the
+#: event; restricting it to labels keeps that field unusable as a side
+#: channel for the very text the hash replaces.
+_CONSTRAINT_ID_PATTERN = re.compile(r"[A-Za-z0-9._:-]{1,128}")
+
+#: Digests are recorded exactly as hashlib produces them: 64 lowercase hex
+#: characters. Anything else (uppercase, short, prefixed, non-hex) is refused
+#: at the boundary rather than normalised, so every stored pin compares equal
+#: byte for byte against a recomputed digest.
+_SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
+
+
+def _validated_constraint_id(value: str) -> str:
+    if not _CONSTRAINT_ID_PATTERN.fullmatch(value):
+        raise ValueError("constraint_id must be 1-128 chars from ASCII letters, digits and . _ : -")
+    return value
+
+
+class ConstraintPinned(BaseModel):
+    """Payload of ``CONSTRAINT_PINNED``: a standing constraint, pinned by digest.
+
+    Constraints are issued once at session start and vanish precisely when
+    they matter most: context reconstruction (briefing, compaction, resume).
+    Pinning makes them first-class events while storing only the SHA-256 of
+    the constraint text (issue #391). The plaintext is forgettable at pin
+    time by everyone except the pinner; verification later compares digests.
+    """
+
+    model_config = Frozen
+
+    constraint_id: str = Field(strict=True)
+    """Stable label for the constraint within the run.
+
+    1-128 chars from ASCII letters, digits and ``.`` ``_`` ``:`` ``-`` (see
+    ``_CONSTRAINT_ID_PATTERN`` for why it is deliberately narrow). Strict
+    typing: labels are strings, and silently decoding bytes into one would
+    blur the boundary that keeps ids out of the content business.
+    """
+
+    sha256: str = Field(strict=True)
+    """SHA-256 of the exact constraint text (UTF-8 bytes), lowercase hex.
+
+    Never the text itself. The full text lives nowhere in CONTINUUM: not in
+    payloads, logs or reprs, and callers are encouraged to forget it too.
+    Strict typing so a bytes argument is refused rather than decoded into a
+    digest that then looks validated.
+    """
+
+    @field_validator("constraint_id")
+    @classmethod
+    def _constraint_id_is_a_label(cls, value: str) -> str:
+        return _validated_constraint_id(value)
+
+    @field_validator("sha256")
+    @classmethod
+    def _sha256_is_lowercase_hex(cls, value: str) -> str:
+        if not _SHA256_PATTERN.fullmatch(value):
+            raise ValueError("sha256 must be exactly 64 lowercase hex characters")
+        return value
+
+
+class ConstraintRetracted(BaseModel):
+    """Payload of ``CONSTRAINT_RETRACTED``: a previously pinned constraint withdrawn.
+
+    Retraction records the id alone. It is storable even when the id was never
+    pinned in this log (for instance across an anchored prefix); how an
+    unmatched retraction projects is decided downstream (#417), not here.
+    """
+
+    model_config = Frozen
+
+    constraint_id: str = Field(strict=True)
+    """Id of the retracted constraint, same rules as on ``ConstraintPinned``."""
+
+    @field_validator("constraint_id")
+    @classmethod
+    def _constraint_id_is_a_label(cls, value: str) -> str:
+        return _validated_constraint_id(value)
 
 
 class ModelSpecificState(BaseModel):
