@@ -274,7 +274,12 @@ def derive(storage: Storage, edit_point: EditPoint) -> DerivationResult:
             )
             watched.pop(current_key, None)
             updated = slots[current_key]
-            if in_span(updated.first_seq) and updated.action.status is ActionStatus.COMPLETED:
+            # Membership is judged at the completion, the event that creates
+            # the risk: an action claimed before the anchor but completed
+            # inside the span loses its completion to the edit, so a surviving
+            # step referencing its result is stranded exactly as much as one
+            # whose whole lifecycle sat inside the span.
+            if in_span(event.sequence) and updated.action.status is ActionStatus.COMPLETED:
                 watched[current_key] = DependedResult(
                     key=current_key,
                     action_id=updated.action.action_id,

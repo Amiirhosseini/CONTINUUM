@@ -150,6 +150,46 @@ def test_completed_action_referenced_by_a_later_step_is_reported(store: SQLiteSt
     )
 
 
+def test_action_claimed_before_the_anchor_but_completed_inside_the_span_is_reported(
+    store: SQLiteStorage,
+) -> None:
+    """Membership is judged at the completion (#416 review thread, gitar-bot).
+
+    The claim predates the anchor and survives the edit; the completion does
+    not. A surviving step referencing the result would wait on an outcome the
+    edit discarded, so the result belongs in the report even though the slot
+    was opened before the anchor.
+    """
+    ledger = ActionLedger(store, RUN_ID)
+    outcome = ledger.claim("mail.send", {"to": "a@example.com"}, key="k1")
+    anchor = store.last_sequence(RUN_ID)
+    ledger.complete(outcome.key, external_id="m1")
+    completed_at = store.last_sequence(RUN_ID)
+    store.append_event(
+        RUN_ID,
+        EventType.WORK_ADDED,
+        {"task_id": "w2", "description": "tell the requester", "prerequisite": [outcome.key]},
+    )
+    result = derive(
+        store,
+        EditPoint(
+            run_id=RUN_ID,
+            anchor_sequence=anchor,
+            candidate_sequence=store.last_sequence(RUN_ID),
+        ),
+    )
+    assert result.depended_results == frozenset(
+        {
+            DependedResult(
+                key=outcome.key,
+                action_id=outcome.action.action_id,
+                action_type="mail.send",
+                sequence=completed_at,
+            )
+        }
+    )
+
+
 def test_action_id_reference_counts_as_a_dependency(store: SQLiteStorage) -> None:
     ledger = ActionLedger(store, RUN_ID)
     outcome = ledger.claim("mail.send", {"to": "a@example.com"}, key="k1")
