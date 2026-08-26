@@ -10,6 +10,7 @@ from __future__ import annotations
 import io
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -20,7 +21,11 @@ from continuum.budgets import (
     attempts_for_type,
     backoff_delay,
     evaluate_budget,
+    get_remaining,
+    increment,
     load_budgets,
+    save_budgets,
+    would_refuse,
 )
 from continuum.cli import ExitCode, main
 from continuum.events import EventType
@@ -62,6 +67,200 @@ def test_nonpositive_limits_are_refused(tmp_path: Path) -> None:
     p.write_text(json.dumps({"action_types": {"x": 0}}))
     with pytest.raises(BudgetConfigError, match="positive"):
         load_budgets(p)
+
+
+# --- authorization-bound registry (issue #411) --------------------------------------- #
+
+
+def bound_registry() -> dict[str, Any]:
+    """Hand-built registry shape, so pure-helper tests need no filesystem."""
+    return {
+        "default_max_attempts": 3,
+        "action_types": {"send_invoice": {"max_attempts": 5}},
+        "authorization_bound": {
+            "send_invoice": {
+                "authz:stripe-cust-1": {"counter": 2, "max_attempts": 5},
+                "authz:stripe-cust-2": {"counter": 5, "max_attempts": 5},
+            },
+        },
+    }
+
+
+def test_authorization_bound_section_round_trips(tmp_path: Path) -> None:
+    """save then load reproduces the registry with the section intact."""
+    reg = bound_registry()
+    p = tmp_path / "budgets.json"
+    save_budgets(p, reg)
+    assert load_budgets(p) == reg
+
+
+def test_increment_then_save_round_trips(tmp_path: Path) -> None:
+    """The mutate-then-persist cycle #413 will use keeps counters durable."""
+    raw = bound_registry()
+    assert increment(raw, "send_invoice", "authz:stripe-cust-1") == 2
+    p = tmp_path / "budgets.json"
+    save_budgets(p, raw)
+    reloaded = load_budgets(p)
+    assert get_remaining(reloaded, "send_invoice", "authz:stripe-cust-1") == 2
+
+
+def test_save_preserves_keys_the_loader_does_not_know(tmp_path: Path) -> None:
+    """Unknown keys pass through today; saving must not drop them either."""
+    body: dict[str, Any] = {"future_section": {"anything": [1, 2]}, "default_max_attempts": 2}
+    p = tmp_path / "budgets.json"
+    save_budgets(p, body)
+    assert load_budgets(p) == body
+
+
+def test_registry_without_the_section_loads_unchanged(tmp_path: Path) -> None:
+    """Old configs gain nothing and lose nothing on load (epic #390)."""
+    body: dict[str, Any] = {"default_max_attempts": 3, "action_types": {"x": 2}}
+    p = tmp_path / "budgets.json"
+    save_budgets(p, body)
+    loaded = load_budgets(p)
+    assert loaded == body
+    assert "authorization_bound" not in loaded
+
+
+def test_absent_section_is_a_noop_for_reads_and_refusal_checks() -> None:
+    """No section means unbound: reads answer None and nothing refuses."""
+    raw: dict[str, Any] = {"default_max_attempts": 3}
+    assert get_remaining(raw, "send_invoice", "authz-1") is None
+    refused, reason = would_refuse(raw, "send_invoice", "authz-1")
+    assert refused is False
+    assert "authz-1" in reason
+
+
+@pytest.mark.parametrize(
+    ("section", "fragment"),
+    [
+        pytest.param([], "must be an object", id="section-not-an-object"),
+        pytest.param(
+            {"deploy": []},
+            "entries for 'deploy' must be an object",
+            id="type-level-not-an-object",
+        ),
+        pytest.param(
+            {"deploy": {"k": "nope"}},
+            "'deploy'/'k' must be an object",
+            id="entry-not-an-object",
+        ),
+        pytest.param(
+            {"deploy": {"k": {"counter": -1, "max_attempts": 2}}},
+            "needs a non-negative integer 'counter'",
+            id="negative-counter",
+        ),
+        pytest.param(
+            {"deploy": {"k": {"counter": "0", "max_attempts": 2}}},
+            "needs a non-negative integer 'counter'",
+            id="counter-not-an-int",
+        ),
+        pytest.param(
+            {"deploy": {"k": {"counter": 0}}},
+            "needs a positive integer 'max_attempts'",
+            id="max-missing",
+        ),
+        pytest.param(
+            {"deploy": {"k": {"counter": 0, "max_attempts": 0}}},
+            "needs a positive integer 'max_attempts'",
+            id="zero-max",
+        ),
+    ],
+)
+def test_malformed_sections_raise_like_the_rest_of_the_file(
+    tmp_path: Path, section: object, fragment: str
+) -> None:
+    """A bad authorization-bound entry is a malformed registry, same contract."""
+    p = tmp_path / "budgets.json"
+    p.write_text(json.dumps({"default_max_attempts": 3, "authorization_bound": section}))
+    with pytest.raises(BudgetConfigError, match=fragment):
+        load_budgets(p)
+
+
+def test_section_error_names_the_file(tmp_path: Path) -> None:
+    """Messages point at an absolute path the operator can open, as elsewhere."""
+    p = tmp_path / "budgets.json"
+    p.write_text(json.dumps({"authorization_bound": []}))
+    with pytest.raises(BudgetConfigError) as excinfo:
+        load_budgets(p)
+    assert str(excinfo.value) == f"{p.resolve()}: 'authorization_bound' must be an object"
+
+
+def test_old_malformations_keep_their_exact_message(tmp_path: Path) -> None:
+    """Pre-existing failures win: the classic message survives byte for byte."""
+    body = {
+        "action_types": {"x": 0},
+        "authorization_bound": {
+            "send_invoice": {"a": {"counter": -1, "max_attempts": 1}},
+        },
+    }
+    p = tmp_path / "b.json"
+    p.write_text(json.dumps(body))
+    with pytest.raises(BudgetConfigError) as excinfo:
+        load_budgets(p)
+    assert str(excinfo.value) == (
+        f"{tmp_path / 'b.json'}: action type 'x' needs a positive integer 'max_attempts'"
+    )
+
+
+def test_get_remaining_and_refusal_math() -> None:
+    """Remaining is max minus counter; refusals name the type, id and figures."""
+    raw = bound_registry()
+    assert get_remaining(raw, "send_invoice", "authz:stripe-cust-1") == 3
+    refused, reason = would_refuse(raw, "send_invoice", "authz:stripe-cust-1")
+    assert refused is False
+    assert "3 of 5" in reason
+    refused, reason = would_refuse(raw, "send_invoice", "authz:stripe-cust-2")
+    assert refused is True
+    assert "authz:stripe-cust-2" in reason
+    assert "5 of 5" in reason
+
+
+def test_increment_counts_monotonically_and_returns_remaining() -> None:
+    """The counter only climbs; past the cap remaining floors at zero."""
+    raw = bound_registry()
+    entry = raw["authorization_bound"]["send_invoice"]["authz:stripe-cust-1"]
+    assert increment(raw, "send_invoice", "authz:stripe-cust-1") == 2
+    assert entry["counter"] == 3
+    assert increment(raw, "send_invoice", "authz:stripe-cust-2") == 0
+    assert increment(raw, "send_invoice", "authz:stripe-cust-2") == 0
+    assert raw["authorization_bound"]["send_invoice"]["authz:stripe-cust-2"]["counter"] == 7
+
+
+def test_increment_without_an_entry_raises_rather_than_inventing_a_cap() -> None:
+    """No entry, no limit to enforce: KeyError beats a silently guessed one."""
+    raw = bound_registry()
+    with pytest.raises(KeyError, match="charge_card"):
+        increment(raw, "charge_card", "authz-9")
+
+
+def test_missing_entry_reads_as_unbound_not_refused() -> None:
+    """One unknown authorization must not be treated as an exhausted one."""
+    raw = bound_registry()
+    assert get_remaining(raw, "send_invoice", "authz-absent") is None
+    refused, _ = would_refuse(raw, "send_invoice", "authz-absent")
+    assert refused is False
+
+
+def test_zero_max_refuses_at_once_and_still_counts() -> None:
+    """A zero allowance refuses immediately; increments stay monotonic."""
+    raw: dict[str, Any] = {
+        "authorization_bound": {"deploy": {"k": {"counter": 0, "max_attempts": 0}}}
+    }
+    refused, reason = would_refuse(raw, "deploy", "k")
+    assert refused is True
+    assert "0 of 0" in reason
+    assert get_remaining(raw, "deploy", "k") == 0
+    assert increment(raw, "deploy", "k") == 0
+    assert raw["authorization_bound"]["deploy"]["k"]["counter"] == 1
+
+
+def test_distinct_authorizations_keep_independent_counters() -> None:
+    """Drawing down one authorization leaves its neighbours untouched."""
+    raw = bound_registry()
+    increment(raw, "send_invoice", "authz:stripe-cust-1")
+    assert get_remaining(raw, "send_invoice", "authz:stripe-cust-1") == 2
+    assert get_remaining(raw, "send_invoice", "authz:stripe-cust-2") == 0
 
 
 # --- counting + evaluation -------------------------------------------------------- #

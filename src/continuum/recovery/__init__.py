@@ -22,6 +22,14 @@ from continuum.recovery.ledger import (
 )
 from continuum.recovery.limits import RecoveryTimeoutError, run_with_limits
 from continuum.recovery.planner import RepairKind, RepairPlan, RepairStep, plan_repairs
+from continuum.recovery.preconditions import (
+    DependedResult,
+    DerivationResult,
+    EditPoint,
+    UncertainSlot,
+    UnsettledAuthorization,
+    derive,
+)
 
 __all__ = [
     "RecoveryTimeoutError",
@@ -29,6 +37,9 @@ __all__ = [
     "run_with_limits",
     "SEVERITY",
     "DependencyGraph",
+    "DependedResult",
+    "DerivationResult",
+    "EditPoint",
     "FileLedgerBackend",
     "ImpactedSet",
     "LedgerBackend",
@@ -44,7 +55,10 @@ __all__ = [
     "RepairKind",
     "RepairPlan",
     "RepairStep",
+    "UncertainSlot",
+    "UnsettledAuthorization",
     "build_contract",
+    "derive",
     "plan_repairs",
     "render_contract",
     "seal_contract",

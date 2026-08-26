@@ -2,6 +2,7 @@
 
 Thank you for helping make CONTINUUM better. This document covers everything you
 need to go from a fresh clone to a passing test suite and a clean pull request.
+Maintainers cutting a release follow the manual gate in [docs/release-checklist.md](docs/release-checklist.md).
 
 ---
 
