@@ -15,7 +15,7 @@ continuum --json <command>      # machine-readable output
 |---------|---------|
 | `init` | Initialize storage for a new database. |
 | `runs` | List runs and their status. |
-| `start --goal <text>` | Create a run with a goal. Mutates storage. |
+| `start <run_id> --goal <text>` | Create a run with a goal. Mutates storage. |
 | `inspect <run_id>` | Show a run's goal, progress, and metadata. |
 | `status <run_id>` | Show run status. |
 | `history <run_id>` | List checkpoints for a run. |
