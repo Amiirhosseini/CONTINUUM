@@ -411,7 +411,7 @@ def test_per_client_tokens_map_a_secret_to_a_name() -> None:
 def test_argument_auth_names_the_matching_client_field() -> None:
     auth = AuthPolicy("a-secret", source="argument")
 
-    with pytest.raises(NotAuthenticated, match="auth_token argument") as exc_info:
+    with pytest.raises(NotAuthenticated, match="embedding application") as exc_info:
         auth.verify(ALLOWED, "nope")
     assert "CONTINUUM_MCP_TOKEN" not in str(exc_info.value)
     assert "_meta.authToken" in str(exc_info.value)
@@ -424,6 +424,16 @@ def test_load_auth_reads_the_env_var() -> None:
     auth.verify(ALLOWED, "s3cr3t")
     with pytest.raises(NotAuthenticated):
         auth.verify(ALLOWED, "nope")
+
+
+def test_per_client_env_auth_names_the_matching_configuration() -> None:
+    auth = load_auth(env={CLIENT_TOKENS_ENV_VAR: f"{ALLOWED}:a-secret"})
+
+    with pytest.raises(NotAuthenticated, match=CLIENT_TOKENS_ENV_VAR) as exc_info:
+        auth.verify(ALLOWED, "nope")
+    assert "CONTINUUM_MCP_TOKEN" not in str(exc_info.value)
+    assert "_meta.authToken" in str(exc_info.value)
+    assert "a-secret" not in str(exc_info.value)
 
 
 def test_load_auth_is_disabled_without_a_secret() -> None:
@@ -572,7 +582,7 @@ async def test_load_auth_wires_per_client_tokens_into_the_server(
     )
     assert json.loads(result.content[0].text)["completed"] == 3
     # Replaying another client's token against this name is refused.
-    with pytest.raises(ToolError, match="shared secret|not registered"):
+    with pytest.raises(ToolError, match="registered for this caller|not registered"):
         await srv.call_tool(
             "continuum_record_progress",
             {"run_id": "run_1", "completed": 1, "goal": "g"},
@@ -603,7 +613,7 @@ async def test_per_client_secret_is_bound_to_its_name(per_client_server: Any) ->
     )
     assert json.loads(result.content[0].text)["completed"] == 3
     # A different client's token replayed under this name is refused.
-    with pytest.raises(ToolError, match="shared secret|not registered"):
+    with pytest.raises(ToolError, match="registered for this caller|not registered"):
         await per_client_server.call_tool(
             "continuum_record_progress",
             {"run_id": "run_1", "completed": 1, "goal": "g"},
