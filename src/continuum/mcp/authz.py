@@ -173,7 +173,7 @@ class AuthPolicy:
                 )
             else:
                 guidance = (
-                    "expected shared secret (set CONTINUUM_MCP_TOKEN on the server "
+                    f"expected shared secret (set {AUTH_ENV_VAR} on the server "
                     "and pass _meta.authToken during initialize)"
                 )
             raise NotAuthenticated(guidance)
