@@ -666,6 +666,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Editable-install troubleshooting (#402).** `CONTRIBUTING.md` now explains
+  that moving or renaming a clone leaves the old path in editable-install
+  metadata and gives uninstall/reinstall commands to refresh it. `STATUS.md`
+  records the clean-venv result confirming the package configuration already
+  resolves the current repository correctly.
+
 - **`continuum dashboard` binds 127.0.0.1 by default** (#270); pass
   `--host 0.0.0.0` to opt into network exposure. The previous
   all-interfaces bind exposed recovery contracts (goals, side-effect
@@ -721,6 +727,115 @@ All notable changes to this project are documented here. The format follows
   the table now matches the parser exactly (33 rows, one per subcommand).
 
 ### Fixed
+
+- **One unprojectable event bricked every projecting command, with no route back (#383).**
+  A log whose fold fails is intact as a chain but dead as a run: because the fold
+  validates each intermediate state, no later event could correct an earlier bad
+  one, so `status`, `resume`, `inspect`, `replay`, `show-contract`, `validate`,
+  `briefing` and `compact` all raised on precisely the runs that needed them,
+  while the action tools (which fold only ACTION_* events) kept authorising real
+  side effects that recovery could not assess. The fold can now degrade instead
+  of raising: `project` and `project_incremental` accept
+  `on_unprojectable="raise"|"degrade"`, defaulting to `"raise"` so every existing
+  caller sees byte-for-byte today's behaviour. Degrade mode stops at the earliest
+  refused event and returns the last-good prefix marked
+  `SemanticState.status = INVALID` with `unprojectable_at_sequence`,
+  `unprojectable_event_type` and a condensed `unprojectable_reason`; it never
+  skips past the break, and if nothing folds before the break it still raises,
+  since a partial answer invented from nothing would be worse than an error. The
+  recovery engine folds with degrade enabled, so a poisoned log yields a
+  `request_human` verdict naming where folding stopped instead of a pydantic
+  traceback, and CLI `status`, `inspect` and `replay` report the same break and
+  exit non-zero. The break also reaches the machine-readable contract instead of
+  living only in prose: a new `repair_log` repair step makes `required_actions`
+  name real work, `next_allowed_action` points at it rather than falling through
+  to a rendered "continue" over a `requires_human` verdict, `verified` entries
+  are qualified with the last-good sequence, and `invalidated` records the
+  projection itself. The diagnostic call sites opted in are the engine's restore
+  path, the CLI status/inspect/replay surfaces, the serve sidecar's progress
+  report and dependency dedup, and the benchmark's strategy readout; the MCP
+  write-path guard `_project_candidate` and the checkpoint capture surfaces
+  deliberately keep raising, because accepting or pinning a partial fold would
+  launder it into authoritative state. Repair/amend and fork-from-last-good-prefix
+  remain future work and are not attempted here.
+
+- **`MODEL_CHANGED` had no writer, so `expected_model` could never validate (#370).**
+  The event type was defined, treated as checkpoint-worthy by the trigger policy and
+  projected into `SemanticState.model`, but nothing in `src/` ever emitted it. The
+  validator's model component could therefore only ever answer "no model recorded
+  for this run, cannot compare against ...", the `expected_model` parameter on
+  `continuum_resume` and `continuum_validate` could never do anything, and
+  `RepairKind.REVALIDATE_MODEL_STATE` with its "pass `--model <name>`" guidance was
+  unreachable. A parameter that cannot be satisfied is worse than an absent one,
+  because its presence implies the check is covered, and a different model resuming
+  another model's work is exactly the drift the surrounding architecture exists to
+  catch. `continuum_checkpoint` gains optional `model_id` and `provider`, emitting
+  `MODEL_CHANGED` when the value actually changes, so drift now reports
+  `requires_review` naming both models instead of `unknown`. Attached to
+  checkpointing because it is the same kind of statement as `env`: here is what the
+  world looked like when this state was saved. Recorded as `EXTERNAL_AGENT`, since
+  an agent naming its own model is self-reporting, but the comparison against a
+  later `expected_model` stays independent of that claim. `provider` carries forward
+  when omitted, so naming the model alone cannot erase a provider recorded earlier,
+  and omitting `model_id` records nothing rather than asserting absence.
+
+- **The retry budget counted per action type, blocking work that never failed (#368).**
+  `attempts_for_type` folded on `action_type` and ignored the idempotency key, so
+  the limit capped a run's distinct unsettled work of a type rather than retries of
+  one operation. Three different recipients each failing once, with zero retries
+  anywhere, exhausted the default budget of three and refused a fourth that had
+  never been attempted, so any fan-out with more failures than the limit deadlocked
+  mid-run. The default applies with no config file present, so this was live in any
+  project that had never configured budgets. New `attempts_by_key` counts per
+  idempotency key, which is the operation's identity and is stable across retries
+  because re-claiming after FAILED or COMPENSATED copies the existing action.
+  `attempts_for_type` now reports the worst single operation, which is the figure
+  the claim site compares against the limit, so `continuum budget` agrees with what
+  is enforced; it is deliberately not the sum across keys, since that measures
+  distinct work and nothing here caps that. The limit stays configured per type,
+  because that is the unit an operator thinks in. The exhaustion message also fits
+  the state it fires in: it names the specific operation, drops the advice to
+  reconcile existing attempts (useless when every prior attempt is settled FAILED),
+  and says the registry file may need creating rather than raising.
+
+- **Same-named files in different directories collapsed into one action (#365).**
+  With no explicit `key` the exact argument hash misses on two differently-spelled
+  paths, so the identity fallback decides, and it compared basenames.
+  `/tenants/acme/report.csv` and `/tenants/globex/report.csv` both reduced to
+  `{report.csv, report}`, containment held both ways, and the second claim was
+  answered `proceed=false` carrying acme's `external_id` and the guidance "Already
+  performed. Reuse the previous result; do not repeat it." Globex was never
+  notified, which is the silent swallow the fallback exists to prevent, and
+  per-directory files with conventional names are a common fan-out shape. Leaf
+  comparison was introduced so a re-rendered path (`invoices/INV-5.pdf` for
+  `/data/invoices/INV-5.pdf`) would still deduplicate, so the container is now set
+  aside rather than discarded: new `location_tokens` returns exactly what
+  `leaf_tokens` drops, and `_identity_match` additionally requires the locations to
+  agree. `same_location` compares by path suffix rather than equality, which is the
+  shape drift actually takes, so the re-rendering case still matches while two
+  fully-qualified paths agreeing on nothing but the filename do not. A side that
+  names no path at all makes no claim about location and so contradicts nothing,
+  which keeps the field-rename case working. Comparison stays purely lexical, with
+  no filesystem or working-directory resolution, so the answer is identical on
+  every machine.
+
+- **`complete` could launder an `UNKNOWN` action into `COMPLETED` (#366).**
+  `ActionLedger.complete` had no status guard, so a side effect whose real-world
+  outcome nobody could determine, a charge that timed out after the request was
+  sent, could be recorded as a clean success in one call: no evidence, no note,
+  and an `ACTION_RECORDED` event indistinguishable from an ordinary first-time
+  completion. `continuum_list_actions` then reported `unresolved: 0` and the
+  recovery blocker was gone, with nothing in the log to show the decision had been
+  made by assertion. The incentives pointed straight at it, because
+  `continuum_complete_action` is the tool an agent is told to call routinely, sits
+  on the same mutation allowlist as everything else, and accepts the key already in
+  hand, while the evidence-gated route through `reconcile` was the harder one.
+  `complete` now settles only a claim still in flight, plus a repeat report of one
+  already `COMPLETED`, since a caller retrying after a dropped response asserts
+  nothing new. `UNKNOWN`, `FAILED`, `COMPENSATED` and `REQUIRES_REVIEW` are refused
+  with a message naming the status and pointing at `reconcile`, which takes the
+  same decision but demands the caller stand behind it and records
+  `ACTION_RECONCILED` with the note.
 
 - **`continuum verify` certified a run whose log could not be projected (#382).**
   `verify` re-audits the hash chain, which is a statement about integrity, and an

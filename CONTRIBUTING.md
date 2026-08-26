@@ -48,6 +48,26 @@ pytest tests/test_hashing.py tests/test_models.py -v
 
 ---
 
+## Troubleshooting
+
+### `pip show` reports an old editable project location
+
+An editable install records the repository path used when it was installed.
+Moving or renaming the clone does not update that metadata. If
+`python -m pip show continuum-agent` reports an old path, reinstall from the
+current project root:
+
+```bash
+python -m pip uninstall --yes continuum-agent
+python -m pip install -e ".[mcp]"
+python -m pip show continuum-agent
+```
+
+The final command's `Editable project location` should be the current project
+root.
+
+---
+
 ## Linting & Type-Checking
 
 ```bash
@@ -105,28 +125,29 @@ pre-commit run --all-files
 Pre-commit hooks run in isolated environments without the project's installed
 dependencies, so a mypy hook there would produce inaccurate results. Instead,
 mypy runs in CI (`mypy src/continuum`, strict mode) against a full environment.
-To check locally, run `pip install -e ".[dev]"` once, then run `mypy
-src/continuum` yourself - or rely on the CI check on your PR.
+To check locally, run `pip install -e ".[dev]"` once, then run
+`mypy src/continuum` yourself, or rely on the CI check on your PR.
 
 ---
 
 ## Project Structure
 
+```
 src/continuum/
-├── init.py # Public API surface
-├── models.py # Immutable Pydantic data models
-├── events.py # Append-only event log
-├── actions/ # Action ledger (idempotency + reconciliation)
-├── checkpoint/ # Checkpoint manager + policies
-├── environment/ # Environment snapshot + diff
-├── recovery/ # Recovery engine + repair planner
-├── security/ # Content hashing, ID generation
-├── state/ # State projection, extraction, diffing, validation
-└── storage/ # Storage interface + SQLite engine
+├── __init__.py          # Public API surface
+├── models.py            # Immutable Pydantic data models
+├── events.py            # Append-only event log
+├── actions/             # Action ledger (idempotency + reconciliation)
+├── checkpoint/          # Checkpoint manager + policies
+├── environment/         # Environment snapshot + diff
+├── recovery/            # Recovery engine + repair planner
+├── security/            # Content hashing, ID generation
+├── state/               # State projection, extraction, diffing, validation
+└── storage/             # Storage interface + SQLite engine
 
-tests/ # Mirrors src/continuum/ structure
-docs/ # Website (deployed to GitHub Pages)
-
+tests/                   # Mirrors src/continuum/ structure
+docs/                    # Website (deployed to GitHub Pages)
+```
 
 ---
 

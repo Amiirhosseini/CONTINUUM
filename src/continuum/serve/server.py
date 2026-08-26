@@ -37,6 +37,7 @@ from continuum.models import (
     EnvResource,
     Origin,
     Run,
+    StateStatus,
     UnknownSideEffect,
 )
 from continuum.recovery.contract import render_contract
@@ -110,7 +111,10 @@ class SidecarAuth:
         if self.disabled:
             return
         if not token or token != self.expected:
-            raise NotAuthorized("the caller did not present the expected shared secret")
+            raise NotAuthorized(
+                "expected shared secret (set CONTINUUM_SERVE_TOKEN on the server "
+                "and pass auth_token on the client)"
+            )
 
 
 def _require(params: dict[str, Any], key: str) -> Any:
@@ -168,7 +172,9 @@ def _declare_dependencies(server: SidecarServer, run_id: str, env: Any) -> None:
 
     declared = {
         dependency.resource: dependency.version
-        for dependency in project(run_id, server.storage.read_events(run_id)).external_dependencies
+        for dependency in project(
+            run_id, server.storage.read_events(run_id), on_unprojectable="degrade"
+        ).external_dependencies
     }
     for name, version in versions.items():
         if declared.get(name) == version:
@@ -423,8 +429,12 @@ def _h_record_progress(server: SidecarServer, params: dict[str, Any]) -> dict[st
         payload["total"] = total
         payload["pending"] = max(total - completed - failed, 0)
     server.storage.append_event(run_id, EventType.TASK_UPDATED, payload, source=AGENT_SOURCE)
-    state = project(run_id, server.storage.read_events(run_id))
-    return {
+    # Degrade, not raise (issue #383): the event is already committed by the
+    # time this fold runs, so dying here would report an error while leaving
+    # the write in place. Reporting the last-good figures plus the break is the
+    # honest answer; the caller can see the log needs attention.
+    state = project(run_id, server.storage.read_events(run_id), on_unprojectable="degrade")
+    response = {
         "run_id": run_id,
         "completed": state.progress.completed,
         "pending": state.progress.pending,
@@ -432,6 +442,13 @@ def _h_record_progress(server: SidecarServer, params: dict[str, Any]) -> dict[st
         "total": state.progress.total,
         "source_sequence": state.source_sequence,
     }
+    if state.status is StateStatus.INVALID:
+        response["projection_failed_at"] = {
+            "sequence": state.unprojectable_at_sequence,
+            "type": state.unprojectable_event_type,
+            "reason": state.unprojectable_reason,
+        }
+    return response
 
 
 def _h_checkpoint(server: SidecarServer, params: dict[str, Any]) -> dict[str, Any]:
