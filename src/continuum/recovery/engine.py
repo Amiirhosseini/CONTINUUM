@@ -47,6 +47,7 @@ from continuum.models import (
     Action,
     ActionStatus,
     EnvironmentSnapshot,
+    Origin,
     RecoveryContract,
     RecoveryMode,
     RecoverySafety,
@@ -224,9 +225,32 @@ class RecoveryEngine:
         # A human confirmation (REVIEW_CONFIRMED event) clears the self_certified
         # REQUIRES_REVIEW on goal/progress, unblocking an otherwise permanent
         # request_human for externally-driven runs. See issue #35.
-        has_confirmation = any(
-            e.type is EventType.REVIEW_CONFIRMED for e in self.storage.read_events(run_id)
-        )
+        # Scoped confirm (issue #394) narrows this to named components only;
+        # the payload may carry "components" or "scope" as a list, a single
+        # string, or be absent (legacy full confirm of both).
+        confirmed_components: set[str] = set()
+        for _ev in self.storage.read_events(run_id):
+            if _ev.type is not EventType.REVIEW_CONFIRMED:
+                continue
+            # Only human confirmations clear self-certification; an agent
+            # must not be able to confirm its own work (issue #201).
+            if _ev.source != Origin.HUMAN:
+                continue
+            raw_scope = _ev.payload.get("components")
+            if raw_scope is None:
+                raw_scope = _ev.payload.get("scope")
+            if not raw_scope:
+                confirmed_components.update(["goal", "progress"])
+            elif isinstance(raw_scope, str):
+                confirmed_components.add(raw_scope.strip().lower())
+            elif isinstance(raw_scope, (list, tuple, set)):
+                for _c in raw_scope:
+                    if isinstance(_c, str) and _c.strip():
+                        confirmed_components.add(_c.strip().lower())
+                    elif _c is not None:
+                        confirmed_components.add(str(_c).strip().lower())
+            else:
+                confirmed_components.update(["goal", "progress"])
 
         validation = self.validator.validate(
             restored.state,
@@ -234,7 +258,7 @@ class RecoveryEngine:
             checkpoint_environment=checkpoint_environment,
             checkpoint_version=checkpoint_version,
             expected_model=expected_model,
-            confirmed=has_confirmation,
+            confirmed=confirmed_components,
             scope=scope,
         )
 

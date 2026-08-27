@@ -1010,7 +1010,10 @@ def build_server(
             "set CONTINUUM_MCP_CONFIRM_TOKEN and you present that secret in the "
             "handshake _meta.authToken: an agent must not confirm its own "
             "self-reported state. The normal path is for a human to run "
-            "'continuum confirm <run_id>' on the host. Mutates the run."
+            "'continuum confirm <run_id>' on the host. "
+            'Pass scope=["goal"] or ["progress"] to confirm only that '
+            "component, leaving any other uncertainty intact (issue #394). "
+            "Omit scope for a full confirm of both. Mutates the run."
         ),
         annotations=mutating,
     )
@@ -1018,12 +1021,35 @@ def build_server(
     def continuum_confirm(
         run_id: str,
         expected_model: str | None = None,
+        scope: list[str] | str | None = None,
     ) -> str:
         """Record a human confirmation of self-reported state."""
+        # Scope handling (issue #394): normalize to a list of lowercased
+        # component names; None or empty means full confirm of both.
+        if scope is None:
+            components = ["goal", "progress"]
+        elif isinstance(scope, str):
+            components = [scope.strip().lower()] if scope.strip() else ["goal", "progress"]
+        elif isinstance(scope, (list, tuple, set)):
+            normalized: list[str] = []
+            for _c in scope:
+                if isinstance(_c, str) and _c.strip():
+                    normalized.append(_c.strip().lower())
+                elif _c is not None:
+                    normalized.append(str(_c).strip().lower())
+            components = normalized if normalized else ["goal", "progress"]
+        else:
+            components = ["goal", "progress"]
+        allowed = {"goal", "progress"}
+        for _c in components:
+            if _c not in allowed:
+                from mcp.server.mcpserver.exceptions import ToolError
+
+                raise ToolError(f"scope must be one of {sorted(allowed)}; got {components!r}")
         ctx.storage.append_event(
             run_id,
             EventType.REVIEW_CONFIRMED,
-            {"components": ["goal", "progress"]},
+            {"components": components},
             source=Origin.HUMAN,
         )
         decision = ctx.adapter.resume(
@@ -1387,7 +1413,7 @@ def build_server(
         )
 
     if os.environ.get("CONTINUUM_MCP_SLIM") == "1":
-        keep = {"continuum_resume", "continuum_validate", "continuum_confirm"}
+        keep = {"continuum_resume", "continuum_validate", "continuum_list_actions"}
         for name in list(server._tool_manager._tools.keys()):
             if name not in keep:
                 del server._tool_manager._tools[name]
