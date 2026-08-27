@@ -1862,6 +1862,23 @@ def _verify_against_stored(run_id: str, storage: Storage) -> tuple[bool | None, 
     return False, f"DOES NOT match stored {where}"
 
 
+def cmd_export_evidence(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Export a run's evidence as content-addressed JSON lines (issue #395).
+
+    Pure read, zero new dependencies. Each line is a primitive with
+    content_hash and prev_hash so a receiver can detect truncation or
+    tampering by recomputing the chain exactly as verify() does.
+    """
+    from continuum.interchange.evidence import export_evidence
+
+    primitives = export_evidence(storage, args.run_id)
+    for prim in primitives:
+        print(json.dumps(prim, sort_keys=True, default=str), file=out)
+    if hasattr(out, "flush"):
+        out.flush()
+    return ExitCode.OK
+
+
 def cmd_benchmark(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
     import json
 
@@ -2297,6 +2314,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     replay = with_run(add("replay", cmd_replay, "Re-derive state from events."))
     replay.add_argument("--upto", type=int, default=None)
+
+    with_run(
+        add(
+            "export-evidence",
+            cmd_export_evidence,
+            "Export evidence as content-addressed JSON lines. Read-only.",
+        )
+    )
 
     add("benchmark", cmd_benchmark, "Run CONTINUUM-Bench (minimal harness).").add_argument(
         "--total", type=int, default=200, help="documents processed per run (default: 200)"

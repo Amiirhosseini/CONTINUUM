@@ -90,9 +90,26 @@ def _provenance(event: Event) -> Provenance:
     Previously this hardcoded ``DETERMINISTIC``, which was true of the *fold*
     but said nothing about the event being folded — so an agent's self-report
     projected as indistinguishable from a verified fact.
+
+    For derived artifacts (issue #392) the payload may carry a stamped
+    ``derived_origin`` that is the minimum authority of all source events.
+    When present, that degraded origin is used, so the projection never
+    amplifies weak sources. Missing field degrades to unverified.
     """
+    raw_derived = event.payload.get("derived_origin")
+    if isinstance(raw_derived, str):
+        try:
+            from continuum.models import Origin
+
+            origin = Origin(raw_derived)
+        except ValueError:
+            from continuum.models import Origin
+
+            origin = Origin.EXTERNAL_AGENT
+    else:
+        origin = event.source
     return Provenance(
-        origin=event.source,
+        origin=origin,
         source_sequence=event.sequence,
         source_event_id=event.event_id,
         extractor="deterministic",
