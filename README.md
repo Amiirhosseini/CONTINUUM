@@ -12,6 +12,7 @@
 
 <p align="center">
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.11+" /></a>
+  <a href="https://pypi.org/project/continuum-agent/"><img src="https://img.shields.io/pypi/v/continuum-agent?style=flat-square&label=PyPI" alt="PyPI" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache_2.0-blue?style=flat-square" alt="License" /></a>
   <a href="https://pydantic.dev"><img src="https://img.shields.io/badge/pydantic-v2-E92063?style=flat-square&logo=pydantic&logoColor=white" alt="Pydantic v2" /></a>
   <a href="https://continuum-nu-six.vercel.app/"><img src="https://img.shields.io/badge/website-live_demo-E06D53?style=flat-square" alt="Website Demo" /></a>
@@ -44,12 +45,13 @@ CONTINUUM asks a narrower, harder question: can an agent resume from a compact s
 
 ## Quick Start
 
-Not published to PyPI yet, so everything below pulls straight from this repository. Release tags additionally ship built wheels attached to [GitHub Releases](https://github.com/Cyrax321/CONTINUUM/releases).
+Published to PyPI as `continuum-agent` 0.1.0 — `pip install continuum-agent` (`pip install continuum-agent==0.1.0` to pin). Release tags additionally ship built wheels attached to [GitHub Releases](https://github.com/Cyrax321/CONTINUUM/releases).
 
 Zero-setup paths (no clone, no install, nothing published anywhere):
 
 | Path | How |
 |:--|:--|
+| Install from PyPI | `pip install continuum-agent==0.1.0` — then `continuum --help` |
 | Watch crash recovery happen end to end | `docker run --rm ghcr.io/cyrax321/continuum` |
 | Use the CLI through Docker | `docker run --rm ghcr.io/cyrax321/continuum continuum --help` |
 | Run the CLI without cloning | `uvx --from git+https://github.com/Cyrax321/CONTINUUM.git continuum --help` |
@@ -436,7 +438,7 @@ CONTINUUM sits at the overlap of durable execution, idempotent side-effect track
 ## Status and limitations
 
 - **Tested**: 1,360 passed + 23 skipped in a full run at the 2026-08-24 audit of this tree; CI enforces the suite on Python 3.11, 3.12, and 3.13, and counts vary by platform and optional services such as Postgres (see [STATUS.md](STATUS.md)). The MCP surface has also been audited adversarially over the live protocol; see [test.md](test.md).
-- **Not on PyPI.** Install from a clone, a git URL, a release wheel, or Docker (see Quick Start).
+- **On PyPI as `continuum-agent` 0.1.0** (`pip install continuum-agent`; clone still works via `pip install .` see Quick Start).
 - **MCP caller authentication is opt-in per deployment.** When `CONTINUUM_MCP_TOKEN` is set, the server refuses every mutating tool unless the caller presents that shared secret in the `initialize` handshake's `_meta.authToken`; per-caller secrets are available via `CONTINUUM_MCP_CLIENT_TOKENS` (`name:secret` pairs). Without any token configured, authorization is by declared identity only (the historical default, preserved for local single-user use).
 - **Confirming self-reported state over MCP requires a separate secret.** `continuum_confirm` refuses every caller until the operator sets `CONTINUUM_MCP_CONFIRM_TOKEN`, because an agent allowed to record progress must not also be able to confirm it. The default path stays human-driven: run `continuum confirm <run_id>` on the host.
 - **Unbuilt components**: Cloud API (Phase 13).
