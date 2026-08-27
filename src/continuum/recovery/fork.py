@@ -254,9 +254,7 @@ def _raise_if_blocked(
                     "sequence": item.sequence,
                     "subject": item.subject,
                 }
-                for item in sorted(
-                    unaccounted.unsettled_authorizations, key=lambda x: x.sequence
-                )
+                for item in sorted(unaccounted.unsettled_authorizations, key=lambda x: x.sequence)
             ],
             "depended_results": [
                 {
@@ -282,9 +280,7 @@ def _raise_if_blocked(
         if unaccounted.unsettled_authorizations:
             ids = ", ".join(
                 f"{item.approval_id} at sequence {item.sequence}"
-                for item in sorted(
-                    unaccounted.unsettled_authorizations, key=lambda x: x.sequence
-                )
+                for item in sorted(unaccounted.unsettled_authorizations, key=lambda x: x.sequence)
             )
             parts.append(
                 f"{len(unaccounted.unsettled_authorizations)} unsettled authorization(s): {ids}"
@@ -302,9 +298,7 @@ def _raise_if_blocked(
                 f"{item.action_id} (key {item.key}, status {item.status}) at sequence {item.sequence}"
                 for item in sorted(unaccounted.uncertain_slots, key=lambda x: x.sequence)
             )
-            parts.append(
-                f"{len(unaccounted.uncertain_slots)} uncertain slot(s) still open: {ids}"
-            )
+            parts.append(f"{len(unaccounted.uncertain_slots)} uncertain slot(s) still open: {ids}")
         message = (
             "fork refused: preconditions in (divergence, head] are unaccounted for: "
             + "; ".join(parts)
