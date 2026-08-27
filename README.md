@@ -267,7 +267,7 @@ CONTINUUM is organised around one invariant: **every fact carries its origin, an
 
 Any agent harness connects through exactly one of these; no framework cooperation is required.
 
-```
+```text
 Seam 1: In-process adapters     GenericAgentAdapter.intercept_action(...);
          Python frameworks       wrap_tool(key_fn=...) on LangChain/LangGraph,
                                  OpenAI Agents SDK hooks
@@ -285,7 +285,7 @@ Seam 5: OpenTelemetry bridge    make_span_processor(storage)
 
 The gate-to-observe pipeline closes the durability gap at the harness boundary:
 
-```
+```text
 PreToolUse hook                    PostToolUse hook
     |                                    |
     v                                    v
@@ -310,7 +310,7 @@ claim settled from reality
 
 The recovery engine evaluates signals in severity order and returns the maximum:
 
-```
+```text
 RESUME < REPAIR_AND_RESUME < REPLAN < WAIT < REQUEST_HUMAN < ROLLBACK < ABORT
 ```
 
