@@ -35,14 +35,26 @@ Configs written before the section existed load unchanged and read as unbound,
 which is exactly today's behaviour. ``get_remaining``, ``increment`` and
 ``would_refuse`` read and maintain entries purely; ``save_budgets`` persists
 them. Nothing gates on the section yet (that wiring lands with issue #413).
+
+Where the registry asks for an integer it means one: JSON ``true`` is refused
+rather than read as a silent cap of 1 (issue #429), and a rejection names the
+offending value and its type (issue #326). ``save_budgets`` stages and renames
+rather than truncating in place, so a process that dies mid-write costs at most
+the last increment, never the registry (issue #427); the staged file inherits
+the target's permissions and the rename is flushed, so replacing the registry
+neither locks other readers out of it nor can be lost by the crash it guards
+against.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
+import tempfile
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
 __all__ = [
     "DEFAULT_BUDGETS_PATH",
@@ -67,9 +79,37 @@ AUTHORIZATION_BOUND_KEY = "authorization_bound"
 #: Fallback when neither the action type nor the registry sets a limit.
 FALLBACK_MAX_ATTEMPTS = 3
 
+#: Where Linux publishes the process umask (kernel 4.7+). Absent elsewhere, and
+#: named rather than inlined so a test can take the fallback path on any platform.
+_UMASK_STATUS_PATH = "/proc/self/status"
+
 
 class BudgetConfigError(ValueError):
     """The budget registry exists but cannot be honoured."""
+
+
+def _is_int(value: Any) -> TypeGuard[int]:
+    """Whether ``value`` is an integer *and not* a JSON boolean (issue #429).
+
+    ``isinstance(True, int)`` holds in Python, so every plain int check in this
+    file used to pass for JSON ``true``: it silently meant a cap of 1 as a
+    ``max_attempts``, and a ``counter`` of ``true`` became 2 after one
+    increment. A registry whose contract elsewhere is to fail loudly instead
+    quietly meant something other than what was written, so booleans are
+    refused here rather than coerced.
+    """
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _offending(value: Any) -> str:
+    """Name the value and its type, so a rejection says what was wrong (issue #326).
+
+    A registry hand-converted from YAML arrives with ``3.0`` where ``3`` was
+    meant; the bare "needs a positive integer" the operator used to get is the
+    same sentence for a missing field, a float, a string and a boolean, and it
+    never points at the token to change.
+    """
+    return f", got {value!r} ({type(value).__name__})"
 
 
 def load_budgets(path: Path) -> dict[str, Any]:
@@ -90,18 +130,17 @@ def load_budgets(path: Path) -> dict[str, Any]:
     if not isinstance(action_types, dict):
         raise BudgetConfigError(f"{location}: 'action_types' must be an object")
     for name, spec in action_types.items():
-        entry = (
-            spec
-            if isinstance(spec, int)
-            else (spec.get("max_attempts") if isinstance(spec, dict) else None)
-        )
-        if not isinstance(entry, int) or entry < 1:
+        entry = spec.get("max_attempts") if isinstance(spec, dict) else spec
+        if not _is_int(entry) or entry < 1:
             raise BudgetConfigError(
-                f"{path}: action type {name!r} needs a positive integer 'max_attempts'"
+                f"{location}: action type {name!r} needs a positive integer "
+                f"'max_attempts'{_offending(entry)}"
             )
     default_max = raw.get("default_max_attempts")
-    if default_max is not None and (not isinstance(default_max, int) or default_max < 1):
-        raise BudgetConfigError(f"{location}: 'default_max_attempts' must be >= 1")
+    if default_max is not None and (not _is_int(default_max) or default_max < 1):
+        raise BudgetConfigError(
+            f"{location}: 'default_max_attempts' must be >= 1{_offending(default_max)}"
+        )
     _validate_authorization_bound(raw, location)
     return raw
 
@@ -110,7 +149,10 @@ def _max_for(action_type: str, raw: Mapping[str, Any]) -> int:
     per_type = raw.get("action_types", {})
     spec = per_type.get(action_type)
     if isinstance(spec, int):
-        return spec
+        # int(), not the value itself: :func:`load_budgets` refuses booleans, but
+        # this stays reachable with a hand-built mapping, and a bool leaking out
+        # here renders as JSON ``true`` in the `continuum budget` report.
+        return int(spec)
     if isinstance(spec, dict) and isinstance(spec.get("max_attempts"), int):
         return int(spec["max_attempts"])
     fallback = raw.get("default_max_attempts", FALLBACK_MAX_ATTEMPTS)
@@ -224,23 +266,151 @@ def _validate_authorization_bound(raw: Mapping[str, Any], location: Path) -> Non
             if not isinstance(entry, dict):
                 raise BudgetConfigError(f"{label} must be an object")
             counter = entry.get("counter", 0)
-            if not isinstance(counter, int) or counter < 0:
-                raise BudgetConfigError(f"{label} needs a non-negative integer 'counter'")
+            if not _is_int(counter) or counter < 0:
+                raise BudgetConfigError(
+                    f"{label} needs a non-negative integer 'counter'{_offending(counter)}"
+                )
             max_attempts = entry.get("max_attempts")
-            if not isinstance(max_attempts, int) or max_attempts < 1:
-                raise BudgetConfigError(f"{label} needs a positive integer 'max_attempts'")
+            if not _is_int(max_attempts) or max_attempts < 1:
+                raise BudgetConfigError(
+                    f"{label} needs a positive integer 'max_attempts'{_offending(max_attempts)}"
+                )
+
+
+def _process_umask() -> int | None:
+    """The process umask, or ``None`` when it cannot be read.
+
+    :func:`os.umask` is a swap, not a getter, so the portable read is
+    set-then-restore, which publishes a different mask to every other thread for
+    the width of two calls. Linux exposes the value in ``/proc/self/status``
+    (since 4.7), so prefer that and fall back to the swap. A missing or garbled
+    ``Umask:`` line takes the fallback rather than raising: this is a permission
+    hint, not the registry. The placeholder in the fallback is deliberately
+    *narrower* than any plausible real umask, so if another thread does create a
+    file inside that window it lands too private rather than world-writable.
+    """
+    try:
+        with open(_UMASK_STATUS_PATH, encoding="ascii") as status:
+            for line in status:
+                if line.startswith("Umask:"):
+                    return int(line.split()[1], 8)
+    except (OSError, ValueError, IndexError):
+        pass
+    try:
+        mask = os.umask(0o077)
+        os.umask(mask)
+    except OSError:  # pragma: no cover - os.umask exists on every supported platform
+        return None
+    return mask
+
+
+def _staged_mode(path: Path) -> int | None:
+    """Permissions a rewritten registry should end up with, or ``None`` if unknown.
+
+    :func:`tempfile.mkstemp` creates its staging file 0600 and :func:`os.replace`
+    carries those bits onto the target, so an atomic rewrite would quietly narrow
+    a registry that :meth:`Path.write_text` left readable: overwriting preserved
+    whatever mode the file already had, and creating honoured the process umask.
+    This registry is read by hooks, sidecars and CI steps that may run under
+    another uid or gid, and #413 makes a write happen per claim attempt, so the
+    first save would lock them out for the rest of the run. That is a worse
+    failure than the truncation the staging file exists to prevent.
+
+    An existing target's own bits win, because they are the operator's decision
+    and resetting them on every save is the other half of the same bug. Only the
+    permission bits are copied: setuid, setgid and sticky are not carried onto a
+    file the saving process newly owns.
+    """
+    try:
+        return path.stat().st_mode & 0o777
+    except FileNotFoundError:
+        pass
+    except OSError:
+        return None
+    mask = _process_umask()
+    if mask is None:
+        return None
+    # 0o666, not 0o644: that is the mode open() passes for a new text file, so a
+    # first save reproduces what write_text produced under the same umask.
+    return 0o666 & ~mask
+
+
+def _fsync_directory(directory: Path) -> None:
+    """Flush the directory entry a preceding :func:`os.replace` created.
+
+    Fsyncing the staged file commits its *contents*; the rename itself is a
+    change to the parent directory, so without this a crash immediately after a
+    successful save could still lose the new registry and leave the previous one
+    in place. Nothing is corrupted by that - the old file is complete and
+    loadable - but durability across power loss is the guarantee
+    :func:`save_budgets` exists to make.
+
+    Best effort. Windows cannot open a directory as a file descriptor, and some
+    filesystems refuse ``fsync`` on one; both cases leave the write no less
+    durable than it was before this call existed, so failing the save over it
+    would trade a narrow durability gap for a refused claim.
+    """
+    try:
+        fd = os.open(directory, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
 
 
 def save_budgets(path: Path, data: Mapping[str, Any]) -> None:
-    """Write ``data`` back to the registry as readable JSON.
+    """Write ``data`` back to the registry as readable JSON, atomically.
 
     Insertion order is preserved so editing one entry does not churn the whole
     file, and the trailing newline matches how hand-maintained registries end.
     Keys the loader does not know pass through untouched, exactly as when the
     file is edited by hand.
+
+    The bytes land in a sibling temporary file that is flushed and fsynced, then
+    moved over the target with :func:`os.replace`, which is atomic within a
+    filesystem on both POSIX and Windows (issue #427). Writing in place would
+    truncate first, so a crash, an OOM kill or power loss between truncation and
+    flush left a zero-length or half-written registry; every later
+    :func:`load_budgets` then raises, which is fail-closed, so a budget-gated
+    claim refused until an operator repaired the file by hand. Losing the last
+    increment on an abrupt exit is an acceptable price for a counter registry.
+    Losing the registry is not, and #413 makes this a write per claim attempt.
+
+    Staging is not allowed to change *who can read* the registry
+    (:func:`_staged_mode`) or to leave the rename itself unflushed
+    (:func:`_fsync_directory`): a rewrite that survives a crash but locks a hook
+    out of the file, or that is lost by the crash it guards against, has not
+    delivered what the staging file was added for.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    body = json.dumps(data, indent=2) + "\n"
+    # Read before the replace, while the target is still the file being replaced.
+    mode = _staged_mode(path)
+    # Same directory as the target: os.replace is only atomic within one
+    # filesystem, and the system temp dir is routinely on another.
+    handle, name = tempfile.mkstemp(dir=path.parent, prefix=f"{path.name}.", suffix=".tmp")
+    tmp: Path | None = Path(name)
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as stream:
+            stream.write(body)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if mode is not None:
+            # A filesystem without permission bits keeps mkstemp's 0600: too
+            # private is recoverable by hand, a failed save is not.
+            with contextlib.suppress(OSError):
+                os.chmod(name, mode)
+        os.replace(name, path)
+        tmp = None  # Consumed by the replace; there is nothing left to clean up.
+        _fsync_directory(path.parent)
+    finally:
+        if tmp is not None:
+            # A failed save leaves the previous registry in place and no litter.
+            tmp.unlink(missing_ok=True)
 
 
 def _bound_entry(
