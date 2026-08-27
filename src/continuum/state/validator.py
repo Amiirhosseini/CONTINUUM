@@ -105,13 +105,25 @@ class StateValidator:
     starts; a caller who genuinely tolerates uncertainty can opt out.
     """
 
-    def __init__(self, *, strict_unknown: bool = True, confirmed: bool = False) -> None:
+    def __init__(
+        self, *, strict_unknown: bool = True, confirmed: bool | Iterable[str] = False
+    ) -> None:
         self.strict_unknown = strict_unknown
         # Set when a human has explicitly confirmed the run's self-reported
         # goal/progress (via a REVIEW_CONFIRMED event). Confirmation clears the
         # REQUIRES_REVIEW that self-certified origins would otherwise force, so
         # an externally-driven run can be resumed after a human has eyeballed it.
-        self.confirmed = confirmed
+        # Scoped confirm (issue #394) narrows this to named components only;
+        # a boolean True still means both goal and progress, while an iterable
+        # names the confirmed subset.
+        if isinstance(confirmed, bool):
+            self.confirmed: set[str] = {"goal", "progress"} if confirmed else set()
+        else:
+            # Back-compat: a future caller may pass an iterable directly.
+            self.confirmed = set(confirmed)
+        # Keep the legacy boolean attribute for any external reader that
+        # checks truthiness, but the per-component checks below use the set.
+        self._legacy_confirmed = bool(self.confirmed)
 
     def validate(
         self,
@@ -121,10 +133,14 @@ class StateValidator:
         checkpoint_environment: EnvironmentSnapshot | None = None,
         checkpoint_version: int = 0,
         expected_model: str | None = None,
-        confirmed: bool = False,
+        confirmed: bool | Iterable[str] = False,
         scope: Iterable[str] | None = None,
     ) -> ValidationOutcome:
-        self.confirmed = confirmed
+        if isinstance(confirmed, bool):
+            self.confirmed = {"goal", "progress"} if confirmed else set()
+        else:
+            self.confirmed = set(confirmed)
+        self._legacy_confirmed = bool(self.confirmed)
         environment_diff = diff_environments(checkpoint_environment, current_environment)
         entries: list[ComponentValidationEntry] = []
 
@@ -343,7 +359,7 @@ class StateValidator:
 
     def _check_goal(self, state: SemanticState, entries: list[ComponentValidationEntry]) -> None:
         origin = state.goal.provenance.origin
-        if origin.self_certified and not self.confirmed:
+        if origin.self_certified and "goal" not in self.confirmed:
             entries.append(
                 ComponentValidationEntry(
                     component=Component.GOAL,
@@ -375,7 +391,7 @@ class StateValidator:
         # it, so it cannot count as verified state. A human confirmation
         # (REVIEW_CONFIRMED) clears this so the run can resume.
         origin = progress.provenance.origin
-        if origin.self_certified and not self.confirmed:
+        if origin.self_certified and "progress" not in self.confirmed:
             status = StateStatus.REQUIRES_REVIEW
             detail = (
                 f"{progress.completed} completed, self-reported by {origin.value} "
@@ -527,7 +543,7 @@ def validate_state(
     checkpoint_version: int = 0,
     expected_model: str | None = None,
     strict_unknown: bool = True,
-    confirmed: bool = False,
+    confirmed: bool | Iterable[str] = False,
     scope: Iterable[str] | None = None,
 ) -> ValidationOutcome:
     """Validate a state against the current environment.
@@ -535,6 +551,9 @@ def validate_state(
     When ``scope`` names specific dependency resources, only those resources are
     re-checked and only their derivation subtree may go stale; the rest of the
     state keeps its recorded status (localized recovery).
+
+    ``confirmed`` may be a boolean (True means both goal and progress) or an
+    iterable of component names for scoped confirm (issue #394).
     """
     return StateValidator(strict_unknown=strict_unknown, confirmed=confirmed).validate(
         state,

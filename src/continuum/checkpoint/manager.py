@@ -21,9 +21,12 @@ is the failure that would actually cause data loss.
 
 from __future__ import annotations
 
+import contextlib
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Literal
 
 from continuum.checkpoint.policy import (
@@ -42,6 +45,10 @@ from continuum.models import (
 )
 from continuum.state.semantic import project
 from continuum.storage.base import Storage
+
+# Resume banner persistence (issue #394): written on every checkpoint so a
+# SessionStart hook can inject a banner without opening the database.
+_RESUME_JSON = ".continuum/resume.json"
 
 __all__ = ["CheckpointManager", "RestoredRun", "CheckpointError"]
 
@@ -201,6 +208,11 @@ class CheckpointManager:
         self._last_checkpoint_at[run_id] = stored.created_at
         self._last_state[run_id] = stored.state
         self._annotation_sequence[run_id] = annotation.sequence
+        # Instant resume detection (issue #394): persist a tiny file the
+        # SessionStart hook can read without touching SQLite. Best effort;
+        # a failure here must not break checkpointing itself.
+        with contextlib.suppress(Exception):
+            _write_resume_json(run_id, stored)
         return stored
 
     def _cursor_for(self, checkpoint: StateCheckpoint) -> int:
@@ -356,3 +368,28 @@ class CheckpointManager:
             self.storage.delete_checkpoint(c.checkpoint_id)
             deleted.append(c.checkpoint_id)
         return deleted
+
+
+def _write_resume_json(run_id: str, checkpoint: StateCheckpoint) -> None:
+    """Persist a tiny file for SessionStart instant detection (issue #394)."""
+    path = Path(_RESUME_JSON)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "run_id": run_id,
+        "checkpoint_id": checkpoint.checkpoint_id,
+        "version": checkpoint.version,
+        "goal": checkpoint.state.goal.description,
+        "progress": {
+            "completed": checkpoint.state.progress.completed,
+            "total": checkpoint.state.progress.total,
+            "pending": checkpoint.state.progress.pending,
+            "failed": checkpoint.state.progress.failed,
+        },
+        "updated_at": checkpoint.created_at.isoformat()
+        if hasattr(checkpoint, "created_at")
+        else utcnow().isoformat(),
+    }
+    # Atomic write via temp file then replace to avoid torn reads.
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    tmp.replace(path)
