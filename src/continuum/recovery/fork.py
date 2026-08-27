@@ -47,7 +47,7 @@ fail-closed:
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -217,7 +217,7 @@ def _raise_if_blocked(
     parent_run_id: str,
     divergence: int,
     *,
-    carry_forward: Sequence[str] | Collection[str] | None,
+    carry_forward: Collection[str] | None,
 ) -> tuple[Any, set[str], dict[str, Any]]:
     """Derive preconditions for ``(divergence, head]`` and raise if blocked.
 
@@ -319,7 +319,7 @@ def approve_fork(
     *,
     reason: str,
     child_run_id: str | None = None,
-    carry_forward: Sequence[str] | Collection[str] | None = None,
+    carry_forward: Collection[str] | None = None,
 ) -> Run:
     """Create an approved divergent continuation of ``parent_run_id``.
 

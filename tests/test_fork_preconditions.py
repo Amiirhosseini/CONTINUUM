@@ -253,29 +253,25 @@ def test_fork_gate_is_deterministic_and_pure() -> None:
 
 
 def test_empty_span_never_blocks_even_with_later_events() -> None:
-    """When divergence equals head, the span is empty and fork is benign."""
+    """When divergence equals head, items before anchor do not block."""
     storage = _make_storage()
     try:
-        # create an uncertain slot after the checkpoint, then fork from head
         ledger = ActionLedger(storage, "run_1")
         ledger.claim("slack.notify", {"channel": "#ops"}, key="k_old")
-        # checkpoint at anchor: the fork will derive from anchor to head,
-        # so only events after anchor are in scope. Create a new slot after.
         from continuum.checkpoint import CheckpointManager
 
         CheckpointManager(storage).checkpoint("run_1", trigger="test")
-        # After checkpoint, divergence is checkpoint source_sequence == anchor
-        # A benign fork right at divergence with no events after should pass;
-        # we test that the gate uses candidate == divergence when head == divergence.
-        # First, verify head == divergence by checking no new events after checkpoint
-        # aside from the checkpoint itself which is not an event stream entry.
-        # For this test we just ensure a fork with no outstanding items after anchor passes.
+        # The uncertain slot is now before the divergence anchor, so it is
+        # out of span and must not block the fork.
+        child = approve_fork(storage, "run_1", reason="empty span")
+        assert child.run_id.endswith("_fork1")
+
+        # A fresh run checkpointed with no outstanding items also passes.
         storage3 = _make_storage()
         try:
-            # no extra events, checkpoint then immediate fork
             CheckpointManager(storage3).checkpoint("run_1", trigger="t")
-            child = approve_fork(storage3, "run_1", reason="empty span")
-            assert child.run_id.endswith("_fork1")
+            child2 = approve_fork(storage3, "run_1", reason="empty span fresh")
+            assert child2.run_id.endswith("_fork1")
         finally:
             storage3.close()
 
