@@ -20,6 +20,9 @@ def _isolate_budget_registry(tmp_path, monkeypatch):  # type: ignore[no-untyped-
     # Both modules import the constant at load time; patch both to an
     # absolute per-test path that matches the layout tests create via
     # monkeypatch.chdir(tmp_path) + Path(".continuum/budgets.json").
+    # Also export via env so subprocess workers (test_reconciliation) inherit
+    # the same per-test file instead of sharing the repo-root global.
     monkeypatch.setattr("continuum.budgets.DEFAULT_BUDGETS_PATH", str(fake))
     monkeypatch.setattr("continuum.actions.ledger.DEFAULT_BUDGETS_PATH", str(fake))
+    monkeypatch.setenv("CONTINUUM_BUDGETS_PATH", str(fake))
     yield
