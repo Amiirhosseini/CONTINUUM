@@ -438,7 +438,7 @@ class ActionLedger:
             raw = load_budgets(path)
         except BudgetConfigError as exc:
             raise LedgerError(f"budget registry invalid: {exc}") from exc
-        ensure_authorization_entry(raw, action_type, authorization_id)
+        entry = ensure_authorization_entry(raw, action_type, authorization_id)
         refused, reason = would_refuse(raw, action_type, authorization_id)
         if refused:
             remaining = 0
@@ -448,9 +448,12 @@ class ActionLedger:
                 remaining = _get_rem(raw, action_type, authorization_id) or 0
             except Exception:
                 remaining = 0
+            counter = int(entry.get("counter", 0))
+            max_attempts = int(entry.get("max_attempts", 0))
             raise LedgerError(
                 f"budget exhausted for {action_type!r} / {authorization_id!r} "
-                f"({reason}, remaining {remaining})"
+                f"({counter} of {max_attempts} used, {remaining} remaining; "
+                f"{reason})"
             )
         increment(raw, action_type, authorization_id)
         save_budgets(path, raw)

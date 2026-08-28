@@ -1196,6 +1196,7 @@ def build_server(
         """Claim an action in the ledger and report whether to proceed."""
         from continuum.actions.grants import GrantDenied, normalize_grant
         from continuum.actions.idempotency import idempotency_key
+        from continuum.actions.ledger import LedgerError
         from continuum.pinning import normalize_pinning
 
         pinning_clean = normalize_pinning(pinning)
@@ -1305,6 +1306,10 @@ def build_server(
                     ),
                 }
             )
+        except LedgerError as exc:
+            from mcp.server.mcpserver.exceptions import ToolError
+
+            raise ToolError(str(exc)) from exc
         except UnknownSideEffect as exc:
             return _json(
                 {
