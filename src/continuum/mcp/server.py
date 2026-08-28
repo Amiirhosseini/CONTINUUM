@@ -846,6 +846,84 @@ def build_server(
             }
         )
 
+    @server.tool(
+        name="continuum_record_plan",
+        description=(
+            "Record a structured plan milestone update. Call as you define or complete units "
+            "so the run can resume with exact remaining work. One call per unit status change. "
+            "Payload is {plan_id, units: [{id, title, status, depends_on}]} where status is "
+            "pending, working, done, or blocked. Creates the run if needed. Mutating."
+        ),
+        annotations=mutating,
+    )
+    @guard
+    def continuum_record_plan(
+        run_id: str,
+        plan_id: str,
+        units: list[dict[str, Any]],
+    ) -> str:
+        """Record a plan upsert (issue #312)."""
+        if not isinstance(plan_id, str) or not plan_id.strip():
+            raise ValueError("plan_id must be a non-empty string")
+        if not isinstance(units, list) or not units:
+            raise ValueError("units must be a non-empty list")
+        seen: set[str] = set()
+        sorted_units: list[dict[str, Any]] = []
+        for raw in units:
+            if not isinstance(raw, dict):
+                raise ValueError("each unit must be an object")
+            unit_id = raw.get("id")
+            if not isinstance(unit_id, str) or not unit_id.strip():
+                raise ValueError("unit id must be non-empty")
+            if unit_id in seen:
+                raise ValueError(f"duplicate unit id {unit_id!r}")
+            seen.add(unit_id)
+            title = raw.get("title")
+            if not isinstance(title, str):
+                raise ValueError(f"unit {unit_id!r} title must be a string")
+            status = raw.get("status", "pending")
+            if status not in ("pending", "working", "done", "blocked"):
+                raise ValueError(
+                    f"unit {unit_id!r} status must be pending, working, done, or blocked"
+                )
+            depends = raw.get("depends_on", [])
+            if not isinstance(depends, list):
+                raise ValueError(f"unit {unit_id!r} depends_on must be a list")
+            for d in depends:
+                if not isinstance(d, str) or not d.strip():
+                    raise ValueError(
+                        f"unit {unit_id!r} depends_on entries must be non-empty strings"
+                    )
+            sorted_units.append(
+                {
+                    "id": unit_id,
+                    "title": title,
+                    "status": status,
+                    "depends_on": [str(d) for d in depends],
+                }
+            )
+        sorted_units.sort(key=lambda u: u["id"])
+        ctx.ensure_run(run_id)
+        payload = {"plan_id": plan_id, "units": sorted_units}
+        state, event = _append_projectable(ctx, run_id, EventType.PLAN_UPSERT, payload)
+        return _json(
+            {
+                "run_id": run_id,
+                "plan_id": plan_id,
+                "units": len(sorted_units),
+                "sequence": event.sequence,
+                "plan": [
+                    {
+                        "id": p.step_id,
+                        "title": p.description,
+                        "status": p.status.value,
+                        "depends_on": p.depends_on,
+                    }
+                    for p in state.plan
+                ],
+            }
+        )
+
     # -- validation ------------------------------------------------------- #
 
     @server.tool(

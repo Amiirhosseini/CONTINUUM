@@ -115,6 +115,12 @@ class EventType(StrEnum):
     # authority (issue #269): a claim tried to reuse a consumed single-use grant
     GRANT_DENIED = "GRANT_DENIED"
 
+    # structured attempt memory (issue #313): durable falsification lesson
+    ATTEMPT_LESSON = "ATTEMPT_LESSON"
+
+    # structured plan (issue #312): durable milestones for long-horizon recovery
+    PLAN_UPSERT = "PLAN_UPSERT"
+
 
 class AppendOnlyViolation(RuntimeError):
     """Raised when an operation would rewrite history."""

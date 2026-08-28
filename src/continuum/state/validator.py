@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from continuum.environment.diff import EnvironmentDiff, ResourceChange, diff_environments
 from continuum.models import (
@@ -159,6 +160,7 @@ class StateValidator:
             state = self._propagate(state, broken, entries)
             self._check_goal(state, entries)
             self._check_progress(state, entries)
+            self._check_plan(state, entries)
             self._check_approvals(state, entries)
             self._check_model(state, expected_model, entries)
             self._check_evidence(state, entries)
@@ -413,6 +415,128 @@ class StateValidator:
                 detail=detail or f"{progress.completed} completed",
             )
         )
+
+    def _check_plan(self, state: SemanticState, entries: list[ComponentValidationEntry]) -> None:
+        if not state.plan:
+            return
+        seen: set[str] = set()
+        by_id: dict[str, Any] = {}
+        for step in state.plan:
+            if not step.step_id or not step.step_id.strip():
+                entries.append(
+                    ComponentValidationEntry(
+                        component=Component.PLAN,
+                        component_id=step.step_id,
+                        status=StateStatus.CONFLICTED,
+                        detail="plan unit id must be non-empty",
+                    )
+                )
+                continue
+            if step.step_id in seen:
+                entries.append(
+                    ComponentValidationEntry(
+                        component=Component.PLAN,
+                        component_id=step.step_id,
+                        status=StateStatus.CONFLICTED,
+                        detail=f"duplicate plan unit id {step.step_id!r}",
+                    )
+                )
+            seen.add(step.step_id)
+            by_id[step.step_id] = step
+        for step in state.plan:
+            for dep in step.depends_on:
+                if dep not in by_id:
+                    entries.append(
+                        ComponentValidationEntry(
+                            component=Component.PLAN,
+                            component_id=step.step_id,
+                            status=StateStatus.CONFLICTED,
+                            detail=f"depends_on {dep!r} not in plan",
+                        )
+                    )
+        visiting: set[str] = set()
+        visited: set[str] = set()
+        stack: list[str] = []
+        cycle: list[str] | None = None
+
+        def dfs(node: str) -> bool:
+            nonlocal cycle
+            if node in visited:
+                return False
+            if node in visiting:
+                idx = stack.index(node) if node in stack else 0
+                cycle = stack[idx:] + [node]
+                return True
+            if node not in by_id:
+                return False
+            visiting.add(node)
+            stack.append(node)
+            for dep in by_id[node].depends_on:
+                if dfs(dep):
+                    return True
+            stack.pop()
+            visiting.remove(node)
+            visited.add(node)
+            return False
+
+        for sid in list(by_id):
+            if sid not in visited and dfs(sid):
+                break
+        if cycle:
+            detail = f"cycle detected: {' -> '.join(cycle)}"
+            for sid in cycle:
+                entries.append(
+                    ComponentValidationEntry(
+                        component=Component.PLAN,
+                        component_id=sid,
+                        status=StateStatus.CONFLICTED,
+                        detail=detail,
+                    )
+                )
+        for step in state.plan:
+            if step.provenance.origin.self_certified:
+                entries.append(
+                    ComponentValidationEntry(
+                        component=Component.PLAN,
+                        component_id=step.step_id,
+                        status=StateStatus.REQUIRES_REVIEW,
+                        detail=f"plan unit {step.step_id!r} asserted by {step.provenance.origin.value}",
+                    )
+                )
+        stale_ids: set[str] = set()
+        for e in entries:
+            if (
+                e.component is Component.PLAN
+                and e.status
+                in (
+                    StateStatus.STALE,
+                    StateStatus.CONFLICTED,
+                    StateStatus.REQUIRES_REVIEW,
+                    StateStatus.INVALID,
+                )
+                and e.component_id
+            ):
+                stale_ids.add(e.component_id)
+        changed = True
+        while changed:
+            changed = False
+            for step in state.plan:
+                if step.step_id in stale_ids:
+                    continue
+                for dep in step.depends_on:
+                    if dep in stale_ids:
+                        if step.step_id not in stale_ids:
+                            stale_ids.add(step.step_id)
+                            entries.append(
+                                ComponentValidationEntry(
+                                    component=Component.PLAN,
+                                    component_id=step.step_id,
+                                    status=StateStatus.STALE,
+                                    detail=f"depends on stale plan unit {dep!r}",
+                                )
+                            )
+                            changed = True
+                        break
 
     @staticmethod
     def _check_approvals(state: SemanticState, entries: list[ComponentValidationEntry]) -> None:
