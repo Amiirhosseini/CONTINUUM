@@ -899,16 +899,16 @@ def cmd_budget(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
                 max_attempts = int(entry.get("max_attempts", 0))
                 rem = get_remaining(raw, atype, auth_id)
                 remaining = rem if rem is not None else max(0, max_attempts - counter)
-            auth_rows.append(
-                {
-                    "action_type": atype,
-                    "authorization_id": auth_id,
-                    "counter": counter,
-                    "max_attempts": max_attempts,
-                    "remaining": remaining,
-                    "exhausted": remaining == 0,
-                }
-            )
+                auth_rows.append(
+                    {
+                        "action_type": atype,
+                        "authorization_id": auth_id,
+                        "counter": counter,
+                        "max_attempts": max_attempts,
+                        "remaining": remaining,
+                        "exhausted": remaining == 0,
+                    }
+                )
     payload: dict[str, Any] = {"run_id": args.run_id, "budgets": rows}
     if auth_rows:
         payload["authorization_budgets"] = auth_rows
