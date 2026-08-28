@@ -315,6 +315,135 @@ def _degraded_lines(state: SemanticState) -> list[str]:
     ]
 
 
+def cmd_record_plan(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Record a structured plan upsert (issue #312). Mutates storage."""
+    from continuum.events import Event, EventType
+    from continuum.models import Origin
+    from continuum.state.semantic import project
+
+    plan_id = getattr(args, "plan_id", None) or getattr(args, "plan", None)
+    if not plan_id or not isinstance(plan_id, str) or not plan_id.strip():
+        print("error: --plan-id is required and must be non-empty", file=err)
+        return ExitCode.ERROR
+    raw_units: Any = None
+    if getattr(args, "file", None):
+        try:
+            text = Path(args.file).read_text(encoding="utf-8")
+            data = json.loads(text)
+            if isinstance(data, dict) and "units" in data:
+                raw_units = data["units"]
+                if not plan_id and isinstance(data.get("plan_id"), str):
+                    plan_id = data["plan_id"]
+            elif isinstance(data, list):
+                raw_units = data
+            else:
+                raw_units = data
+        except Exception as exc:
+            print(f"error: cannot read plan file: {exc}", file=err)
+            return ExitCode.ERROR
+    elif getattr(args, "units", None):
+        try:
+            raw_units = json.loads(args.units)
+        except Exception as exc:
+            print(f"error: --units is not valid JSON: {exc}", file=err)
+            return ExitCode.ERROR
+    else:
+        print("error: provide --file <path> or --units '<json>'", file=err)
+        return ExitCode.ERROR
+    if not isinstance(raw_units, list):
+        print("error: units must be a JSON array", file=err)
+        return ExitCode.ERROR
+    seen: set[str] = set()
+    sorted_units: list[dict[str, Any]] = []
+    for raw in raw_units:
+        if not isinstance(raw, dict):
+            print("error: each unit must be an object", file=err)
+            return ExitCode.ERROR
+        unit_id = raw.get("id")
+        if not isinstance(unit_id, str) or not unit_id.strip():
+            print("error: unit id must be non-empty", file=err)
+            return ExitCode.ERROR
+        if unit_id in seen:
+            print(f"error: duplicate unit id {unit_id!r}", file=err)
+            return ExitCode.ERROR
+        seen.add(unit_id)
+        title = raw.get("title")
+        if not isinstance(title, str):
+            print(f"error: unit {unit_id!r} title must be a string", file=err)
+            return ExitCode.ERROR
+        status = raw.get("status", "pending")
+        if status not in ("pending", "working", "done", "blocked"):
+            print(
+                f"error: unit {unit_id!r} status must be pending, working, done, or blocked",
+                file=err,
+            )
+            return ExitCode.ERROR
+        depends = raw.get("depends_on", [])
+        if not isinstance(depends, list):
+            print(f"error: unit {unit_id!r} depends_on must be a list", file=err)
+            return ExitCode.ERROR
+        for d in depends:
+            if not isinstance(d, str) or not d.strip():
+                print(
+                    f"error: unit {unit_id!r} depends_on entries must be non-empty strings",
+                    file=err,
+                )
+                return ExitCode.ERROR
+        sorted_units.append(
+            {
+                "id": unit_id,
+                "title": title,
+                "status": status,
+                "depends_on": [str(d) for d in depends],
+            }
+        )
+    sorted_units.sort(key=lambda u: u["id"])
+    try:
+        storage.get_run(args.run_id)
+    except Exception as exc:
+        print(f"error: {exc}", file=err)
+        return ExitCode.NOT_FOUND
+    payload = {"plan_id": plan_id, "units": sorted_units}
+    history = list(storage.read_events(args.run_id))
+    head = history[-1].sequence if history else 0
+    candidate = Event(
+        run_id=args.run_id,
+        sequence=head + 1,
+        type=EventType.PLAN_UPSERT,
+        payload=dict(payload),
+        source=Origin.HUMAN,
+    )
+    try:
+        project(args.run_id, [*history, candidate])
+    except Exception as exc:
+        print(f"error: plan would leave run unprojectable and was not recorded: {exc}", file=err)
+        return ExitCode.ERROR
+    event = storage.append_event(args.run_id, EventType.PLAN_UPSERT, payload, source=Origin.HUMAN)
+    state = project(args.run_id, storage.read_events(args.run_id))
+    _emit(
+        {
+            "run_id": args.run_id,
+            "plan_id": plan_id,
+            "units": len(sorted_units),
+            "sequence": event.sequence,
+            "plan": [
+                {
+                    "id": p.step_id,
+                    "title": p.description,
+                    "status": p.status.value,
+                    "depends_on": p.depends_on,
+                }
+                for p in state.plan
+            ],
+        },
+        f"Plan {plan_id!r} upserted {len(sorted_units)} unit(s) at seq {event.sequence} (plan now {len(state.plan)} units)",
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
+    )
+    return ExitCode.OK
+
+
 def cmd_inspect(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
     """Show semantic state, optionally at a past version."""
     if args.version is not None:
@@ -335,6 +464,13 @@ def cmd_inspect(args: argparse.Namespace, storage: Storage, out: Any, err: Any) 
         f"evidence:    {len(state.evidence)}",
         f"pending:     {len(state.open_work())} task(s)",
     ]
+    if state.plan:
+        lines.append(f"plan:       {len(state.plan)} unit(s)")
+        for pp in state.plan:
+            deps = f" deps:{','.join(pp.depends_on)}" if pp.depends_on else ""
+            lines.append(f"  - {pp.step_id}: {pp.description} [{pp.status.value}]{deps}")
+    else:
+        lines.append("plan:       (none)")
     if state.external_dependencies:
         lines.append("dependencies:")
         lines += [
@@ -2357,6 +2493,15 @@ def build_parser() -> argparse.ArgumentParser:
     checkpoint = with_env(with_run(add("checkpoint", cmd_checkpoint, "Force a checkpoint.")))
     checkpoint.add_argument("--trigger", default="manual")
     checkpoint.add_argument("--reason", default="")
+
+    record_plan = with_run(
+        add("record-plan", cmd_record_plan, "Record a structured plan upsert. Mutates storage.")
+    )
+    record_plan.add_argument("--plan-id", dest="plan_id", required=True, help="plan identifier")
+    record_plan.add_argument(
+        "--file", dest="file", help="JSON file containing units array or {plan_id, units}"
+    )
+    record_plan.add_argument("--units", help="JSON array of units")
 
     observe = add("observe", cmd_observe, "Record one observed tool completion. Mutates storage.")
     observe.add_argument(

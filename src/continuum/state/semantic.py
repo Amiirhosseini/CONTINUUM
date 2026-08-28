@@ -432,6 +432,64 @@ class _Accumulator:
             if constraint_id not in self.unmatched_pin_retractions:
                 self.unmatched_pin_retractions.append(constraint_id)
 
+    def plan_upsert(self, event: Event) -> None:
+        payload = event.payload
+        plan_id = payload.get("plan_id")
+        if not isinstance(plan_id, str) or not plan_id.strip():
+            raise ProjectionError(f"event {event.event_id}: PLAN_UPSERT missing non-empty plan_id")
+        units = payload.get("units")
+        if not isinstance(units, list):
+            raise ProjectionError(f"event {event.event_id}: PLAN_UPSERT units must be a list")
+        seen: set[str] = set()
+        status_map = {
+            "pending": "pending",
+            "working": "in_progress",
+            "done": "completed",
+            "blocked": "blocked",
+        }
+        by_id: dict[str, Any] = {p.step_id: p for p in self.plan}
+        for raw in units:
+            if not isinstance(raw, dict):
+                raise ProjectionError(f"event {event.event_id}: PLAN_UPSERT unit must be an object")
+            unit_id = raw.get("id")
+            if not isinstance(unit_id, str) or not unit_id.strip():
+                raise ProjectionError(
+                    f"event {event.event_id}: PLAN_UPSERT unit id must be non-empty"
+                )
+            if unit_id in seen:
+                raise ProjectionError(
+                    f"event {event.event_id}: duplicate unit id {unit_id!r} in same PLAN_UPSERT"
+                )
+            seen.add(unit_id)
+            title = raw.get("title")
+            if not isinstance(title, str):
+                raise ProjectionError(
+                    f"event {event.event_id}: unit {unit_id!r} title must be a string"
+                )
+            raw_status = raw.get("status", "pending")
+            if not isinstance(raw_status, str) or raw_status not in status_map:
+                raise ProjectionError(
+                    f"event {event.event_id}: unit {unit_id!r} status must be one of {sorted(status_map)}"
+                )
+            status = status_map[raw_status]
+            depends = raw.get("depends_on", [])
+            if not isinstance(depends, list):
+                raise ProjectionError(
+                    f"event {event.event_id}: unit {unit_id!r} depends_on must be a list"
+                )
+            depends_list = [str(d) for d in depends]
+            from continuum.models import PlanStep, PlanStepStatus
+
+            step = PlanStep(
+                step_id=unit_id,
+                description=title,
+                status=PlanStepStatus(status),
+                depends_on=depends_list,
+                provenance=_provenance(event),
+            )
+            by_id[unit_id] = step
+        self.plan = sorted(by_id.values(), key=lambda p: p.step_id)
+
     # -- finish ----------------------------------------------------------- #
 
     def build(self) -> SemanticState:
@@ -532,6 +590,8 @@ def _dispatch(acc: _Accumulator, event: Event) -> bool:
             acc.constraint_pinned(event)
         case EventType.CONSTRAINT_RETRACTED:
             acc.constraint_retracted(event)
+        case EventType.PLAN_UPSERT:
+            acc.plan_upsert(event)
         case _:
             return False
     return True
