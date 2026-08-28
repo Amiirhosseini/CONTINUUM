@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Literal
 
 from continuum.events import Event, EventType
@@ -904,3 +904,54 @@ def check_pin_accounting(
             if info["status"] == "absent" and info["past_grace"] and strict:
                 should_escalate = True
     return accounting, flags, should_escalate
+
+
+def constraint_pins_payload(
+    state: SemanticState,
+    context: str,
+    *,
+    grace_seconds: int | None = None,
+    now: datetime | None = None,
+    strict: bool = False,
+) -> dict[str, Any]:
+    """Build the JSON block surfaced in resume and validate responses.
+
+    Read-only display over the accounting output (issue #419). No gating
+    logic lives here; strict escalation is decided in #418 and reused
+    only to compute per-pin deadline and past_grace, not to change mode.
+    The caller supplies the already rendered recovery context, so this
+    function never rebuilds markers itself, it only classifies what the
+    context actually contains.
+    """
+    accounting = account_pins_in_context(
+        state, context, grace_seconds=grace_seconds, now=now, strict=strict
+    )
+    pins: dict[str, dict[str, Any]] = {}
+    flagged: list[str] = []
+    for pin_id in sorted(accounting.keys()):
+        info = accounting[pin_id]
+        pinned_at = info["pinned_at"]
+        grace_deadline = None
+        if pinned_at is not None and grace_seconds is not None:
+            try:
+                deadline = pinned_at + timedelta(seconds=grace_seconds)
+                grace_deadline = deadline.isoformat()
+            except Exception:
+                grace_deadline = None
+        pinned_at_iso = pinned_at.isoformat() if pinned_at is not None else None
+        pins[pin_id] = {
+            "status": info["status"],
+            "sha256": info["sha256"],
+            "sha256_prefix": info["sha256_prefix"],
+            "pinned_at": pinned_at_iso,
+            "grace_deadline": grace_deadline,
+            "past_grace": bool(info["past_grace"]),
+            "flag": info["flag"],
+        }
+        if info["status"] != "present":
+            flagged.append(pin_id)
+    return {
+        "pins": pins,
+        "flagged": sorted(flagged),
+        "grace_seconds": grace_seconds,
+    }

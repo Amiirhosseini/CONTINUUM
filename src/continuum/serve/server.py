@@ -373,6 +373,14 @@ def _write(stream: TextIO, payload: dict[str, Any]) -> None:
 
 def _decision_payload(decision: Any, *, goal: str) -> dict[str, Any]:
     report = decision.validation.report
+    try:
+        from continuum.checkpoint.context import build_recovery_context
+        from continuum.state.semantic import constraint_pins_payload
+
+        rendered = build_recovery_context(decision.state).render()
+        constraint_pins = constraint_pins_payload(decision.state, rendered)
+    except Exception:
+        constraint_pins = {"pins": {}, "flagged": [], "grace_seconds": None}
     return {
         "checkpoint_version": report.checkpoint_version,
         "validation_reason": report.reason,
@@ -410,6 +418,7 @@ def _decision_payload(decision: Any, *, goal: str) -> dict[str, Any]:
         "report": decision.render(),
         "environment_changes": [d.render() for d in decision.environment_diff.breaking],
         **self_report_guidance(decision),
+        "constraint_pins": constraint_pins,
     }
 
 
@@ -481,6 +490,14 @@ def _h_validate(server: SidecarServer, params: dict[str, Any]) -> dict[str, Any]
         expected_model=params.get("expected_model"),
     )
     report = decision.validation.report
+    try:
+        from continuum.checkpoint.context import build_recovery_context
+        from continuum.state.semantic import constraint_pins_payload
+
+        rendered = build_recovery_context(decision.state).render()
+        constraint_pins = constraint_pins_payload(decision.state, rendered)
+    except Exception:
+        constraint_pins = {"pins": {}, "flagged": [], "grace_seconds": None}
     return {
         "run_id": run_id,
         "safe": decision.safe,
@@ -497,6 +514,7 @@ def _h_validate(server: SidecarServer, params: dict[str, Any]) -> dict[str, Any]
             for e in report.statuses
         ],
         "environment_changes": [d.render() for d in decision.environment_diff.breaking],
+        "constraint_pins": constraint_pins,
     }
 
 

@@ -703,6 +703,47 @@ def _human_steps(decision: Any, run_id: str) -> list[str]:
     )
 
 
+def _constraint_pins_block(decision: Any) -> dict[str, Any]:
+    """Build the constraint_pins JSON block for resume and validate.
+
+    Read-only display over reconstruction accounting (issue #419). Uses the
+    already projected state and the rendered recovery context, never
+    re-deriving pins. Fail closed on accounting errors by returning an
+    empty block rather than crashing the read-only command.
+    """
+    try:
+        from continuum.checkpoint.context import build_recovery_context
+        from continuum.state.semantic import constraint_pins_payload
+
+        state = decision.state
+        ctx = build_recovery_context(state)
+        rendered = ctx.render()
+        return constraint_pins_payload(state, rendered)
+    except Exception:
+        return {"pins": {}, "flagged": [], "grace_seconds": None}
+
+
+def _constraint_pins_text(block: dict[str, Any]) -> str | None:
+    """Render flagged pins prominently for CLI text output.
+
+    Uses the [!!] marker so the TTY colouriser can highlight it, while
+    piped output stays byte-identical modulo colour codes.
+    """
+    flagged = block.get("flagged", [])
+    pins = block.get("pins", {})
+    if not flagged:
+        return None
+    lines = ["CONSTRAINT PINS: flagged pins require attention"]
+    for pin_id in sorted(flagged):
+        info = pins.get(pin_id, {}) if isinstance(pins, dict) else {}
+        status = info.get("status", "unknown")
+        prefix = info.get("sha256_prefix", "????????")
+        flag = info.get("flag")
+        suffix = f" -- {flag}" if flag else ""
+        lines.append(f"  [!!] {pin_id}:{prefix} {status}{suffix}")
+    return "\n".join(lines)
+
+
 def cmd_validate(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
     """Assess a run without touching it. Exit code carries the verdict."""
     decision = RecoveryEngine(storage, strict_unknown=not args.tolerate_unknown).assess(
@@ -715,6 +756,8 @@ def cmd_validate(args: argparse.Namespace, storage: Storage, out: Any, err: Any)
         out.flush()
         return exit_code_for(decision.mode)
     steps = _human_steps(decision, args.run_id)
+    constraint_pins = _constraint_pins_block(decision)
+    pins_text = _constraint_pins_text(constraint_pins)
     if steps:
         text = (
             decision.render()
@@ -723,6 +766,8 @@ def cmd_validate(args: argparse.Namespace, storage: Storage, out: Any, err: Any)
         )
     else:
         text = decision.render()
+    if pins_text:
+        text += "\n\n" + pins_text
     payload = {
         "run_id": decision.run_id,
         "mode": decision.mode.value,
@@ -731,6 +776,7 @@ def cmd_validate(args: argparse.Namespace, storage: Storage, out: Any, err: Any)
         "rationale": list(decision.rationale),
         "repairs": [s.action_name for s in decision.plan.steps],
         "human_steps": steps,
+        "constraint_pins": constraint_pins,
     }
     # Advisory health is intentionally not part of the payload above; use
     # dedicated health command or resume advisory key for the score.
@@ -878,6 +924,10 @@ def cmd_resume(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
         advisory = trust_over_prefix(decision.state)
     except Exception:
         advisory = {"trust_score": 1.0, "breakdown": {"role": 1.0, "goal": 1.0, "evidence": 1.0}}
+    constraint_pins = _constraint_pins_block(decision)
+    pins_text = _constraint_pins_text(constraint_pins)
+    if pins_text:
+        text += "\n\n" + pins_text
     payload = {
         "run_id": decision.run_id,
         "goal": storage.get_run(run_id).goal,
@@ -897,6 +947,7 @@ def cmd_resume(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
             "failed": decision.state.progress.failed,
         },
         "advisory": advisory,
+        "constraint_pins": constraint_pins,
     }
     _emit(
         payload,

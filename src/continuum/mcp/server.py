@@ -948,6 +948,14 @@ def build_server(
             expected_model=expected_model,
         )
         report = decision.validation.report
+        try:
+            from continuum.checkpoint.context import build_recovery_context
+            from continuum.state.semantic import constraint_pins_payload
+
+            ctx_rendered = build_recovery_context(decision.state).render()
+            constraint_pins = constraint_pins_payload(decision.state, ctx_rendered)
+        except Exception:
+            constraint_pins = {"pins": {}, "flagged": [], "grace_seconds": None}
         return _json(
             {
                 "run_id": run_id,
@@ -965,6 +973,7 @@ def build_server(
                     for e in report.statuses
                 ],
                 "environment_changes": [d.render() for d in decision.environment_diff.breaking],
+                "constraint_pins": constraint_pins,
             }
         )
 
@@ -1036,6 +1045,14 @@ def build_server(
         uncertain_keys = {
             action.action_id: key for key, action in ctx.ledger(run_id).folded().items()
         }
+        try:
+            from continuum.checkpoint.context import build_recovery_context
+            from continuum.state.semantic import constraint_pins_payload
+
+            ctx_rendered = build_recovery_context(decision.state).render()
+            constraint_pins = constraint_pins_payload(decision.state, ctx_rendered)
+        except Exception:
+            constraint_pins = {"pins": {}, "flagged": [], "grace_seconds": None}
         return _json(
             {
                 "run_id": run_id,
@@ -1076,6 +1093,7 @@ def build_server(
                 "contract_text": render_contract(decision.contract),
                 "report": decision.render(),
                 **self_report_guidance(decision),
+                "constraint_pins": constraint_pins,
             }
         )
 
