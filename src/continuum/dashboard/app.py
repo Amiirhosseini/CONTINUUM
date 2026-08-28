@@ -53,6 +53,34 @@ def _run_exists(storage: Storage, run_id: str) -> bool:
     return True
 
 
+def _advisory_trust_html(storage: Storage, run_id: str) -> str:
+    """Small read-only advisory display for prefix trust (issue #401)."""
+    try:
+        from continuum.analysis.prefix_trust import trust_over_prefix
+        from continuum.state.semantic import project
+
+        # Use the latest version if present, else project the raw events
+        state = storage.latest_version(run_id)
+        if state is None:
+            try:
+                state = project(run_id, storage.read_events(run_id))
+            except Exception:
+                return ""
+        advisory = trust_over_prefix(state)
+        breakdown = advisory.get("breakdown", {})
+        score = advisory.get("trust_score", 1.0)
+        return (
+            f'<div style="margin:8px 0;padding:8px;border:1px solid #ccc">'
+            f"<b>Advisory prefix trust:</b> {score:.3f} "
+            f"(role={breakdown.get('role', 1.0):.3f} "
+            f"goal={breakdown.get('goal', 1.0):.3f} "
+            f"evidence={breakdown.get('evidence', 1.0):.3f})"
+            f"</div>"
+        )
+    except Exception:
+        return ""
+
+
 def render_run_detail_html(storage: Storage, run_id: str) -> str:
     try:
         run = storage.get_run(run_id)
@@ -68,9 +96,11 @@ def render_run_detail_html(storage: Storage, run_id: str) -> str:
         )
         ledger_html = f"<pre>{contract_html}</pre>"
         validation_html = f'<table border="1" cellpadding="4"><tr><th>Component</th><th>Status</th><th>Detail</th></tr>{validation_rows}</table>'
+        advisory_html = _advisory_trust_html(storage, run_id)
     except Exception as exc:
         ledger_html = f"<p>{html.escape(str(exc))}</p>"
         validation_html = ""
+        advisory_html = ""
     events = storage.read_events(run_id)
     events_rows = "".join(
         f"<tr><td>{e.sequence}</td><td>{html.escape(e.type.value)}</td><td>{html.escape(str(e.payload))}</td></tr>"
@@ -133,6 +163,7 @@ def render_run_detail_html(storage: Storage, run_id: str) -> str:
 <html><head><meta charset=\"utf-8\"><title>Run {html.escape(run_id)}</title></head>
 <body><h1>Run {html.escape(run_id)}</h1>
 <p>Goal: {html.escape(run.goal)} | Status: {html.escape(run.status.value)}</p>
+{advisory_html}
 {hitl_html}
 <h2>Contract</h2>{ledger_html}
 <h2>Validation</h2>{validation_html}

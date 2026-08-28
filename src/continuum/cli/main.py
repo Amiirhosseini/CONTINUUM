@@ -596,6 +596,8 @@ def cmd_validate(args: argparse.Namespace, storage: Storage, out: Any, err: Any)
         "repairs": [s.action_name for s in decision.plan.steps],
         "human_steps": steps,
     }
+    # Advisory health is intentionally not part of the payload above; use
+    # dedicated health command or resume advisory key for the score.
     _emit(
         payload,
         text,
@@ -604,6 +606,60 @@ def cmd_validate(args: argparse.Namespace, storage: Storage, out: Any, err: Any)
         palette=getattr(args, "_palette", None),
     )
     return exit_code_for(decision.mode)
+
+
+def cmd_health(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Advisory prefix-trust health check (issue #401). Read-only."""
+    # Health is advisory only: it never moves mode, never gates, never changes
+    # exit code. It reports the trust score for the projected prefix.
+    run_id = getattr(args, "run_id", None)
+    if not run_id:
+        active = storage.get_active_run()
+        if active is None:
+            _emit(
+                {
+                    "advisory": {
+                        "trust_score": 1.0,
+                        "breakdown": {"role": 1.0, "goal": 1.0, "evidence": 1.0},
+                    }
+                },
+                "No active run for health check.",
+                as_json=args.json,
+                stream=out,
+                palette=getattr(args, "_palette", None),
+            )
+            return ExitCode.OK
+        run_id = active.run_id
+    try:
+        from continuum.analysis.prefix_trust import trust_over_prefix
+
+        state = storage.latest_version(run_id)
+        if state is None:
+            # Fall back to projecting the raw events when no version exists
+            from continuum.state.semantic import project
+
+            state = project(run_id, storage.read_events(run_id))
+        advisory = trust_over_prefix(state)
+    except Exception as exc:
+        _emit(
+            {"error": str(exc), "advisory": {"trust_score": 0.0, "breakdown": {}}},
+            f"health check failed: {exc}",
+            as_json=args.json,
+            stream=out,
+            palette=getattr(args, "_palette", None),
+        )
+        return ExitCode.OK
+    _emit(
+        {"run_id": run_id, "advisory": advisory},
+        f"trust_score: {advisory['trust_score']} "
+        f"(role={advisory['breakdown']['role']} "
+        f"goal={advisory['breakdown']['goal']} "
+        f"evidence={advisory['breakdown']['evidence']})",
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
+    )
+    return ExitCode.OK
 
 
 def cmd_resume(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
@@ -679,6 +735,13 @@ def cmd_resume(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
         else decision.mode.value
     )
     presented_safe = decision.safe and not (family_blocked and decision.mode.value == "resume")
+    # Advisory prefix-trust (issue #401): deterministic, read-only, never gates.
+    try:
+        from continuum.analysis.prefix_trust import trust_over_prefix
+
+        advisory = trust_over_prefix(decision.state)
+    except Exception:
+        advisory = {"trust_score": 1.0, "breakdown": {"role": 1.0, "goal": 1.0, "evidence": 1.0}}
     payload = {
         "run_id": decision.run_id,
         "goal": storage.get_run(run_id).goal,
@@ -697,6 +760,7 @@ def cmd_resume(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
             "pending": decision.state.progress.pending,
             "failed": decision.state.progress.failed,
         },
+        "advisory": advisory,
     }
     _emit(
         payload,
@@ -2180,6 +2244,11 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument(
         "--dashboard", action="store_true", help="render the Phase 14 recovery dashboard"
     )
+
+    health = with_run(add("health", cmd_health, "Advisory prefix-trust health check. Read-only."))
+    health.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+    # health is advisory only; it never gates, never moves mode, never changes exit code
+    # (issue #401). It reports trust_score with per-dimension breakdown.
 
     resume = with_env(add("resume", cmd_resume, "Decide how a run may resume."))
     resume.add_argument(
