@@ -65,3 +65,8 @@ continuum attest-verify run_42 --attest run_42.attest.json
 Most commands accept `--db` (storage path or URL) and `--json`. Colour is
 TTY-aware and respects `NO_COLOR`; piped output is byte-identical to uncoloured
 output.
+
+`resume --json` and `validate --json` include a `constraint_pins` block
+with per-pin status (`present`, `absent`, `unverifiable`), grace deadline, and
+flagged set. Flagged pins render prominently in human text as `[!!]` lines
+coloured on TTY and plain when piped, byte-identical modulo colour (issue #419).
