@@ -91,6 +91,11 @@ class SQLiteStorage(Storage):
 
     def __init__(self, url: str | Path = ":memory:", *, timeout: float = 30.0) -> None:
         self.path = _resolve_path(url)
+        if self.path != ":memory:":
+            raw = str(url)
+            if raw.startswith("sqlite://"):
+                with suppress(OSError):
+                    Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._connection = sqlite3.connect(
             self.path,
