@@ -70,6 +70,11 @@ MUTATING_CALLS: dict[str, dict[str, Any]] = {
         "run_id": "run_1",
         "plan_stack": ["step"],
     },
+    "continuum_record_plan": {
+        "run_id": "run_1",
+        "plan_id": "plan-1",
+        "units": [{"id": "u1", "title": "t", "status": "pending"}],
+    },
 }
 MUTATING = list(MUTATING_CALLS)
 READ_ONLY = ["continuum_validate", "continuum_resume", "continuum_list_actions"]
