@@ -10,14 +10,14 @@ Decomposition
 Each dimension traces to named fields already present in the projected state
 and recovery contract (cited in docstrings):
 
-* ``role`` — who asserted the facts, from ``SemanticState.*.provenance.origin``
+* ``role``: who asserted the facts, from ``SemanticState.*.provenance.origin``
   and ``Origin`` classes (``DETERMINISTIC`` vs ``EXTERNAL_AGENT``/``LLM``)
   across ``goal``, ``progress``, ``evidence``, ``findings``, ``decisions``.
 
-* ``goal`` — the run's intent, from ``SemanticState.goal`` and
+* ``goal``: the run's intent, from ``SemanticState.goal`` and
   ``Goal.provenance`` / ``Goal.description`` / ``Goal.version``.
 
-* ``evidence`` — what the run observed, from ``SemanticState.evidence``,
+* ``evidence``: what the run observed, from ``SemanticState.evidence``,
   ``Evidence.provenance``, ``Evidence.source`` / ``Evidence.checksum``,
   and ``ExternalDependency`` freshness via ``StateStatus`` and
   ``RecoveryContract.verified`` / ``invalidated``.
