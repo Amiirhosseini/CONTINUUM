@@ -68,17 +68,19 @@ The repository ships a minimal `compose.yaml` that starts Postgres 16 with the s
 
 ```bash
 # 1. Start Postgres 16 in the background (same image, credentials and DB as CI)
-docker compose up -d
+docker compose up -d --wait
 
 # 2. Point the contract tests at it and run with the postgres extra
+# Wait for the healthcheck (pg_isready) if --wait is not available on your Compose version:
+# until docker compose exec postgres pg_isready -U continuum -d continuum_test; do sleep 1; done
 export CONTINUUM_TEST_POSTGRES_DSN=postgresql://continuum:continuum@localhost:5432/continuum_test
-uv run --extra "dev,postgres" pytest tests/test_storage_postgres.py tests/test_action_index.py -q
+uv run --extra dev --extra postgres pytest tests/test_storage_postgres.py tests/test_action_index.py -q
 ```
 
 Notes:
 
-- `compose.yaml` uses `postgres:16`, `POSTGRES_USER=continuum`, `POSTGRES_PASSWORD=continuum`, `POSTGRES_DB=continuum_test`, and host port `5432`, matching `.github/workflows/ci.yml`. The documented `CONTINUUM_TEST_POSTGRES_DSN` variable is exactly what `tests/test_storage_postgres.py` reads via `os.environ.get("CONTINUUM_TEST_POSTGRES_DSN")`.
-- Any Postgres 16 works, the compose file is just the shortest path. Manual equivalent: `docker run -d -p 5432:5432 -e POSTGRES_USER=continuum -e POSTGRES_PASSWORD=continuum -e POSTGRES_DB=continuum_test postgres:16`.
+- `compose.yaml` uses `postgres:16`, `POSTGRES_USER=continuum`, `POSTGRES_PASSWORD=continuum`, `POSTGRES_DB=continuum_test`, and host port `127.0.0.1:5432` bound to localhost, matching `.github/workflows/ci.yml`. The documented `CONTINUUM_TEST_POSTGRES_DSN` variable is exactly what `tests/test_storage_postgres.py` reads via `os.environ.get("CONTINUUM_TEST_POSTGRES_DSN")`.
+- Any Postgres 16 works, the compose file is just the shortest path. Manual equivalent: `docker run -d -p 127.0.0.1:5432:5432 -e POSTGRES_USER=continuum -e POSTGRES_PASSWORD=continuum -e POSTGRES_DB=continuum_test postgres:16`.
 - Tear down with `docker compose down` (add `-v` to drop the throwaway `pgdata` volume).
 - Compose is not required for any other workflow. All core tests run on the bundled SQLite store with no Docker.
 
