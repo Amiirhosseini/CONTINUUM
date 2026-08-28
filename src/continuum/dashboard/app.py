@@ -81,6 +81,47 @@ def _advisory_trust_html(storage: Storage, run_id: str) -> str:
         return ""
 
 
+def _pins_html(storage: Storage, run_id: str) -> str:
+    """Read-only advisory display for constraint pins (issue #419)."""
+    try:
+        from continuum.checkpoint.context import build_recovery_context
+        from continuum.state.semantic import constraint_pins_payload, project
+
+        state = storage.latest_version(run_id)
+        if state is None:
+            try:
+                state = project(run_id, storage.read_events(run_id))
+            except Exception:
+                return ""
+        if not state.pins:
+            return ""
+        ctx = build_recovery_context(state).render()
+        block = constraint_pins_payload(state, ctx)
+        pins = block.get("pins", {})
+        flagged = block.get("flagged", [])
+        if not pins:
+            return ""
+        rows = ""
+        for pin_id in sorted(pins.keys()):
+            info = pins[pin_id]
+            status = html.escape(str(info.get("status", "")))
+            prefix = html.escape(str(info.get("sha256_prefix", "")))
+            is_flagged = " flagged" if pin_id in flagged else ""
+            rows += (
+                f"<tr><td>{html.escape(pin_id)}</td>"
+                f"<td>{status}</td><td>{prefix}</td><td>{is_flagged}</td></tr>"
+            )
+        flagged_str = ", ".join(html.escape(p) for p in flagged) if flagged else "none"
+        return (
+            f'<div style="margin:8px 0;padding:8px;border:1px solid #c00">'
+            f"<b>Constraint pins:</b> flagged: {flagged_str}"
+            f'<table border="1" cellpadding="4"><tr><th>Pin</th><th>Status</th>'
+            f"<th>Prefix</th><th>Flag</th></tr>{rows}</table></div>"
+        )
+    except Exception:
+        return ""
+
+
 def render_run_detail_html(storage: Storage, run_id: str) -> str:
     try:
         run = storage.get_run(run_id)
@@ -97,6 +138,7 @@ def render_run_detail_html(storage: Storage, run_id: str) -> str:
         ledger_html = f"<pre>{contract_html}</pre>"
         validation_html = f'<table border="1" cellpadding="4"><tr><th>Component</th><th>Status</th><th>Detail</th></tr>{validation_rows}</table>'
         advisory_html = _advisory_trust_html(storage, run_id)
+        pins_html = _pins_html(storage, run_id)
     except Exception as exc:
         ledger_html = f"<p>{html.escape(str(exc))}</p>"
         validation_html = ""
@@ -164,6 +206,7 @@ def render_run_detail_html(storage: Storage, run_id: str) -> str:
 <body><h1>Run {html.escape(run_id)}</h1>
 <p>Goal: {html.escape(run.goal)} | Status: {html.escape(run.status.value)}</p>
 {advisory_html}
+{pins_html}
 {hitl_html}
 <h2>Contract</h2>{ledger_html}
 <h2>Validation</h2>{validation_html}
