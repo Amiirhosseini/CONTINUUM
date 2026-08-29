@@ -43,6 +43,14 @@ fail-closed:
 * allowed forks stamp the derivation summary and the explicit
   carry-forward assertion onto the ``RUN_FORKED`` lineage event so the
   audit shows why the edit was safe.
+
+Gate reuse (#408)
+-----------------
+
+The precondition enforcement is now the shared gate in
+``src/continuum/recovery/gate.py``, reused by restore and merge with
+identical refusal shape and lineage stamping. Fork delegates to that gate
+with ``edit_type="fork"`` so all three edits share one decision point.
 """
 
 from __future__ import annotations
@@ -54,6 +62,10 @@ from typing import Any
 from continuum.actions.idempotency import identity_tokens
 from continuum.events import EventType
 from continuum.models import Action, Origin, Run
+from continuum.recovery.gate import (
+    ForkPreconditionError as _GateForkError,
+)
+from continuum.recovery.gate import check_preconditions as _gate_check
 from continuum.storage.base import Storage
 
 __all__ = [
@@ -62,6 +74,8 @@ __all__ = [
     "detect_fork_candidates",
     "approve_fork",
 ]
+
+ForkPreconditionError = _GateForkError
 
 
 @dataclass(frozen=True)
@@ -74,23 +88,6 @@ class ForkNeighbour:
     status: str
     external_id: str | None
     shared_tokens: tuple[str, ...]
-
-
-class ForkPreconditionError(ValueError):
-    """Fork refused because preconditions in the edit span are unaccounted for."""
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        derivation: Any,
-        unaccounted: Any,
-        rationale: dict[str, Any],
-    ) -> None:
-        super().__init__(message)
-        self.derivation = derivation
-        self.unaccounted = unaccounted
-        self.rationale = rationale
 
 
 def _action_tokens(action: Action) -> frozenset[str]:
@@ -106,11 +103,7 @@ def detect_fork_candidates(
     tool_input: Mapping[str, Any],
     actions_by_key: Mapping[str, Action],
 ) -> list[ForkNeighbour]:
-    """Journalled same-type actions sharing a resource token with this call.
-
-    Deterministic: candidates sort by (number of shared tokens desc, key),
-    so identical ledgers yield identical refusal envelopes.
-    """
+    """Journalled same-type actions sharing a resource token with this call."""
     incoming = identity_tokens(arguments=dict(tool_input))
     if not incoming:
         return []
@@ -136,82 +129,6 @@ def detect_fork_candidates(
     return neighbours
 
 
-def _summary_payload(derivation: Any) -> dict[str, Any]:
-    """JSON-native summary of a derivation for the lineage event."""
-    return {
-        "unsettled_authorizations": sorted(
-            [
-                {
-                    "approval_id": item.approval_id,
-                    "subject": item.subject,
-                    "sequence": item.sequence,
-                }
-                for item in derivation.unsettled_authorizations
-            ],
-            key=lambda d: d["sequence"],
-        ),
-        "depended_results": sorted(
-            [
-                {
-                    "key": item.key,
-                    "action_id": item.action_id,
-                    "action_type": item.action_type,
-                    "sequence": item.sequence,
-                }
-                for item in derivation.depended_results
-            ],
-            key=lambda d: d["sequence"],
-        ),
-        "uncertain_slots": sorted(
-            [
-                {
-                    "key": item.key,
-                    "action_id": item.action_id,
-                    "action_type": item.action_type,
-                    "status": item.status,
-                    "sequence": item.sequence,
-                }
-                for item in derivation.uncertain_slots
-            ],
-            key=lambda d: d["sequence"],
-        ),
-    }
-
-
-def _is_carried(candidates: Collection[str], carry_set: set[str]) -> bool:
-    """True when any candidate identifier is explicitly carried."""
-    return any(c in carry_set for c in candidates)
-
-
-def _unaccounted_sets(
-    derivation: Any,
-    carry_set: set[str],
-) -> Any:
-    """Derivation subset that remains unaccounted after carry_forward."""
-    from continuum.recovery.preconditions import DerivationResult
-
-    unsettled = frozenset(
-        item
-        for item in derivation.unsettled_authorizations
-        if not _is_carried({item.approval_id, str(item.sequence)}, carry_set)
-    )
-    depended = frozenset(
-        item
-        for item in derivation.depended_results
-        if not _is_carried({item.key, item.action_id, str(item.sequence)}, carry_set)
-    )
-    uncertain = frozenset(
-        item
-        for item in derivation.uncertain_slots
-        if not _is_carried({item.key, item.action_id, str(item.sequence)}, carry_set)
-    )
-    return DerivationResult(
-        unsettled_authorizations=unsettled,
-        depended_results=depended,
-        uncertain_slots=uncertain,
-    )
-
-
 def _raise_if_blocked(
     storage: Storage,
     parent_run_id: str,
@@ -219,98 +136,14 @@ def _raise_if_blocked(
     *,
     carry_forward: Collection[str] | None,
 ) -> tuple[Any, set[str], dict[str, Any]]:
-    """Derive preconditions for ``(divergence, head]`` and raise if blocked.
-
-    Returns the full derivation, the normalized carry set and the summary
-    payload when the edit is allowed. Raises :class:`ForkPreconditionError`
-    with machine-readable rationale otherwise.
-    """
-    from continuum.recovery.preconditions import EditPoint, derive
-
-    head = storage.last_sequence(parent_run_id)
-    if divergence > head:
-        head = divergence
-    point = EditPoint(
-        run_id=parent_run_id,
-        anchor_sequence=divergence,
-        candidate_sequence=head,
+    """Derive preconditions for ``(divergence, head]`` and raise if blocked."""
+    return _gate_check(
+        storage,
+        parent_run_id,
+        divergence,
+        edit_type="fork",
+        carry_forward=carry_forward,
     )
-    derivation = derive(storage, point)
-    carry_set = {str(x) for x in (carry_forward or ())}
-    unaccounted = _unaccounted_sets(derivation, carry_set)
-
-    if (
-        unaccounted.unsettled_authorizations
-        or unaccounted.depended_results
-        or unaccounted.uncertain_slots
-    ):
-        parts: list[str] = []
-        rationale: dict[str, Any] = {
-            "divergence_sequence": divergence,
-            "candidate_sequence": head,
-            "unsettled_authorizations": [
-                {
-                    "approval_id": item.approval_id,
-                    "sequence": item.sequence,
-                    "subject": item.subject,
-                }
-                for item in sorted(unaccounted.unsettled_authorizations, key=lambda x: x.sequence)
-            ],
-            "depended_results": [
-                {
-                    "key": item.key,
-                    "action_id": item.action_id,
-                    "action_type": item.action_type,
-                    "sequence": item.sequence,
-                }
-                for item in sorted(unaccounted.depended_results, key=lambda x: x.sequence)
-            ],
-            "uncertain_slots": [
-                {
-                    "key": item.key,
-                    "action_id": item.action_id,
-                    "action_type": item.action_type,
-                    "status": item.status,
-                    "sequence": item.sequence,
-                }
-                for item in sorted(unaccounted.uncertain_slots, key=lambda x: x.sequence)
-            ],
-            "carry_forward": sorted(carry_set),
-        }
-        if unaccounted.unsettled_authorizations:
-            ids = ", ".join(
-                f"{item.approval_id} at sequence {item.sequence}"
-                for item in sorted(unaccounted.unsettled_authorizations, key=lambda x: x.sequence)
-            )
-            parts.append(
-                f"{len(unaccounted.unsettled_authorizations)} unsettled authorization(s): {ids}"
-            )
-        if unaccounted.depended_results:
-            ids = ", ".join(
-                f"{item.action_id} (key {item.key}) at sequence {item.sequence}"
-                for item in sorted(unaccounted.depended_results, key=lambda x: x.sequence)
-            )
-            parts.append(
-                f"{len(unaccounted.depended_results)} depended result(s) would be stranded: {ids}"
-            )
-        if unaccounted.uncertain_slots:
-            ids = ", ".join(
-                f"{item.action_id} (key {item.key}, status {item.status}) at sequence {item.sequence}"
-                for item in sorted(unaccounted.uncertain_slots, key=lambda x: x.sequence)
-            )
-            parts.append(f"{len(unaccounted.uncertain_slots)} uncertain slot(s) still open: {ids}")
-        message = (
-            "fork refused: preconditions in (divergence, head] are unaccounted for: "
-            + "; ".join(parts)
-            + ". Pass carry_forward with the identifiers you intend to carry, or reconcile first."
-        )
-        raise ForkPreconditionError(
-            message,
-            derivation=derivation,
-            unaccounted=unaccounted,
-            rationale=rationale,
-        )
-    return derivation, carry_set, _summary_payload(derivation)
 
 
 def approve_fork(
@@ -321,23 +154,7 @@ def approve_fork(
     child_run_id: str | None = None,
     carry_forward: Collection[str] | None = None,
 ) -> Run:
-    """Create an approved divergent continuation of ``parent_run_id``.
-
-    Writes ``RUN_FORKED`` to the parent log (Origin.HUMAN: a human approved
-    this branch) and creates the linked child run with ``parent_run_id``
-    set, so #243's aggregation and ``continuum tree`` see it without any new
-    machinery. The child starts empty: it inherits nothing mutable from the
-    parent, by the same rule that keeps siblings independent.
-
-    Precondition gate (#407): the span ``(divergence, head]`` is derived via
-    :func:`continuum.recovery.preconditions.derive`. Any
-    unsettled authorizations, depended results or uncertain slots in that span
-    blocks the fork unless each offending item's identifier appears in
-    ``carry_forward``. The refusal carries machine-readable rationale naming
-    sequence numbers and action or approval ids. Allowed forks stamp the
-    derivation summary and the carry-forward assertion onto the lineage event
-    payload for auditability.
-    """
+    """Create an approved divergent continuation of ``parent_run_id``."""
     parent = storage.get_run(parent_run_id)
     if not reason or not reason.strip():
         raise ValueError("a fork needs a stated reason; the reason is the audit")
@@ -381,22 +198,7 @@ def approve_fork(
             "fork_parent_sequence": divergence,
         },
     )
-    # create_run_started, not create_run: the child needs its own RUN_STARTED or
-    # it has a row and an empty log, which nothing downstream can read. project()
-    # refuses a log that never recorded RUN_STARTED, so `resume`, `tree`,
-    # `replay` and `inspect` all fail on the child -- including the exact command
-    # this function's own caller prints as the next step. Same defect class as
-    # #47, which fixed it for the OpenAI adapter. The row and its first event are
-    # one fact, so they are written in one transaction.
-    #
-    # Origin.HUMAN matches the RUN_FORKED event below: a person approved this
-    # branch, and the child's goal is inherited from a run a human already
-    # stated, so it is not an agent self-report.
     storage.create_run_started(child, source=Origin.HUMAN)
-    # Stash derivation summary and explicit carry-forward on the lineage event.
-    # Multiple keys are written for forward compatibility: "preconditions",
-    # "precondition_summary" and "derivation" all carry the same payload so
-    # readers keying on any one name see the audit.
     payload: dict[str, Any] = {
         "child_run_id": child.run_id,
         "reason": reason.strip(),
@@ -407,6 +209,9 @@ def approve_fork(
         "derivation_summary": summary,
         "carry_forward": sorted(carry_set),
     }
+    payload["edit_type"] = "fork"
+    payload["anchor_sequence"] = divergence
+    payload["candidate_sequence"] = storage.last_sequence(parent_run_id)
     storage.append_event(
         parent_run_id,
         EventType.RUN_FORKED,

@@ -59,6 +59,8 @@ class EventType(StrEnum):
 
     # lineage (issue #259): a divergent continuation was approved off this run
     RUN_FORKED = "RUN_FORKED"
+    RUN_RESTORED = "RUN_RESTORED"
+    RUN_MERGED = "RUN_MERGED"
 
     # tools
     TOOL_CALLED = "TOOL_CALLED"

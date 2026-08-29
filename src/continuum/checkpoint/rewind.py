@@ -70,6 +70,21 @@ def rewind_to_checkpoint(
     dry_run: bool = False,
 ) -> RewindResult:
     target = resolve_checkpoint(storage, run_id, to)
+    # Gate wiring (#408): restore must pass the shared precondition gate
+    # before it discards (anchor, head]. The rewind discards history, so the
+    # same unsettled-authorization and uncertain-slot checks that block fork
+    # must block rewind, with per-edit filtering for depended_results.
+    from continuum.recovery.gate import check_preconditions
+
+    try:
+        check_preconditions(
+            storage,
+            run_id,
+            target.state.source_sequence,
+            edit_type="restore",
+        )
+    except Exception as exc:
+        raise RewindError(str(exc)) from exc
     _ = project(run_id, storage.read_events(run_id), upto=target.state.source_sequence)
     all_tool_events = _collect_tool_completed(storage, run_id)
     checkpoint_seq = target.state.source_sequence
