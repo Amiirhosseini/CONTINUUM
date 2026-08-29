@@ -194,5 +194,5 @@ added to the release workflow.
 
 ## Code of Conduct
 
-Be kind. Review others' PRs as you would want yours reviewed. Participation in
+Be kind. Review others' PRs as you would want yours reviewed. Pair programming is welcome, please use `Co-authored-by` trailers to credit your pair. Participation in
 this project is governed by the [Contributor Covenant](CODE_OF_CONDUCT.md).
