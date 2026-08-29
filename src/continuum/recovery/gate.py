@@ -56,6 +56,8 @@ __all__ = [
     "EditType",
     "check_preconditions",
     "enforce",
+    "render_preserved_summary",
+    "render_refusal_text",
     "summary_payload",
 ]
 
@@ -396,6 +398,111 @@ def check_preconditions(
 
 
 enforce = check_preconditions
+
+
+def render_preserved_summary(
+    summary: dict[str, Any],
+    carry_set: set[str] | None = None,
+    *,
+    anchor: int | None = None,
+    edit_type: EditType | None = None,
+) -> str:
+    """One-liner carried-forward and preserved summary from a lineage summary.
+
+    Built from the derivation summary that is stamped onto RUN_FORKED,
+    RUN_RESTORED and RUN_MERGED events, so the text a human sees on success
+    is exactly the audit trail the log carries. Counts are taken from the
+    summary payload, not recomputed, and carry_forward is rendered verbatim
+    so the audit shows what the operator asserted.
+    """
+    unsettled = summary.get("unsettled_authorizations", []) or []
+    depended = summary.get("depended_results", []) or []
+    uncertain = summary.get("uncertain_slots", []) or []
+    carried = sorted(carry_set) if carry_set is not None else []
+    carried_text = ", ".join(carried) if carried else "none"
+    base = (
+        f"preserved preconditions: {len(unsettled)} unsettled, "
+        f"{len(depended)} depended, {len(uncertain)} uncertain; "
+        f"carried forward: {carried_text}"
+    )
+    if anchor is not None and edit_type is not None:
+        base = f"{edit_type} {base} at anchor {anchor}"
+    elif anchor is not None:
+        base = f"{base} at anchor {anchor}"
+    return base
+
+
+def render_refusal_text(
+    rationale: dict[str, Any],
+    *,
+    run_id: str | None = None,
+) -> str:
+    """Human-readable refusal with named sequence numbers and reconcile hints.
+
+    Every offending item is printed with its sequence number and primary
+    identifier (approval_id, action_id or key) so a human can name the event
+    to inspect. A short reconcile or carry-forward suggestion follows each
+    block, because a refusal that names the problem but not the next step
+    leaves the operator guessing. The text is produced once and colourised
+    afterwards, so piped output stays byte-identical modulo colour codes.
+    """
+    edit_type = rationale.get("edit_type", "edit")
+    anchor = rationale.get("anchor_sequence", rationale.get("divergence_sequence", "?"))
+    candidate = rationale.get("candidate_sequence", "?")
+    lines: list[str] = []
+    header = f"[!!] {edit_type} refused: preconditions in (anchor {anchor}, head {candidate}] are unaccounted for"
+    if run_id:
+        header += f" for run {run_id}"
+    lines.append(header)
+    unsettled = rationale.get("unsettled_authorizations", []) or []
+    if unsettled:
+        lines.append(f"  [!!] {len(unsettled)} unsettled authorization(s):")
+        for item in sorted(unsettled, key=lambda x: x.get("sequence", 0)):
+            approval_id = item.get("approval_id", "?")
+            seq = item.get("sequence", "?")
+            subject = item.get("subject", "")
+            detail = f" subject {subject!r}" if subject else ""
+            lines.append(f"    - {approval_id} at sequence {seq}{detail}")
+        lines.append(
+            "    suggestion: revoke with APPROVAL_REVOKED or carry with --carry-forward <approval_id|sequence>"
+        )
+    depended = rationale.get("depended_results", []) or []
+    if depended:
+        lines.append(f"  [!!] {len(depended)} depended result(s) would be stranded:")
+        for item in sorted(depended, key=lambda x: x.get("sequence", 0)):
+            key = item.get("key", "?")
+            action_id = item.get("action_id", "?")
+            action_type = item.get("action_type", "?")
+            seq = item.get("sequence", "?")
+            lines.append(f"    - {action_id} (key {key}, type {action_type}) at sequence {seq}")
+        lines.append(
+            "    suggestion: carry with --carry-forward <key|action_id|sequence> if the result must survive the edit"
+        )
+    uncertain = rationale.get("uncertain_slots", []) or []
+    if uncertain:
+        lines.append(f"  [!!] {len(uncertain)} uncertain slot(s) still open:")
+        for item in sorted(uncertain, key=lambda x: x.get("sequence", 0)):
+            key = item.get("key", "?")
+            action_id = item.get("action_id", "?")
+            action_type = item.get("action_type", "?")
+            status = item.get("status", "?")
+            seq = item.get("sequence", "?")
+            lines.append(
+                f"    - {action_id} (key {key}, type {action_type}, status {status}) at sequence {seq}"
+            )
+        target = f" {run_id}" if run_id else ""
+        lines.append(
+            f"    suggestion: reconcile with `continuum reconcile{target}` or carry with --carry-forward <key|action_id>"
+        )
+    if not (unsettled or depended or uncertain):
+        lines.append("  (no unaccounted items, rationale present for audit)")
+    carry = rationale.get("carry_forward", []) or []
+    if carry:
+        lines.append(f"  carried forward so far: {', '.join(str(c) for c in carry)}")
+    lines.append(
+        "  hint: pass --carry-forward with the identifiers you intend to carry, or reconcile first."
+    )
+    return "\n".join(lines)
 
 
 def stamp_lineage(

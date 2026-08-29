@@ -750,6 +750,35 @@ def _constraint_pins_text(block: dict[str, Any]) -> str | None:
     return "\n".join(lines)
 
 
+def _precondition_refusal_text(rationale: dict[str, Any], run_id: str) -> str:
+    """Render a precondition refusal for CLI text output (issue #409).
+
+    Delegates to the shared gate renderer so the refusal a human sees and the
+    rationale stored in the lineage event stay in lockstep. The [!!] marker
+    lets the TTY colouriser highlight the block while piped output stays
+    byte-identical modulo colour codes.
+    """
+    try:
+        from continuum.recovery.gate import render_refusal_text
+
+        return render_refusal_text(rationale, run_id=run_id)
+    except Exception:
+        return f"[!!] {rationale.get('edit_type', 'edit')} refused for run {run_id}: {rationale}"
+
+
+def _precondition_preserved_line(
+    summary: dict[str, Any], carry_set: set[str], anchor: int, edit_type: str
+) -> str:
+    """One-liner preserved and carried-forward summary from a lineage event."""
+    try:
+        from continuum.recovery.gate import render_preserved_summary
+
+        return render_preserved_summary(summary, carry_set, anchor=anchor, edit_type=edit_type)  # type: ignore[arg-type]
+    except Exception:
+        carried = ", ".join(sorted(carry_set)) if carry_set else "none"
+        return f"{edit_type} preserved preconditions: carried forward: {carried} at anchor {anchor}"
+
+
 def cmd_validate(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
     """Assess a run without touching it. Exit code carries the verdict."""
     decision = RecoveryEngine(storage, strict_unknown=not args.tolerate_unknown).assess(
@@ -1286,36 +1315,253 @@ def cmd_complete(args: argparse.Namespace, storage: Storage, out: Any, err: Any)
 
 
 def cmd_fork(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
-    """Approve a divergent continuation of a run (issue #259).
+    """Approve a divergent continuation of a run (issue #259, rendered in #409).
 
     The third outcome of replay-or-fork: when the gate surfaces fork
     candidates on an unclaimed call, this records the human decision to
     branch rather than block. Writes RUN_FORKED to the parent log
-    (Origin.HUMAN) and creates the linked child run.
+    (Origin.HUMAN) and creates the linked child run. Refusals render the
+    named sequence numbers and reconcile hints and exit non-zero per the
+    house contract; success renders the preserved and carried-forward
+    one-liner from the lineage event.
     """
     from continuum.recovery.fork import approve_fork
+    from continuum.recovery.gate import EditPreconditionError
 
     storage.get_run(args.run_id)  # raises RunNotFound -> NOT_FOUND by the dispatcher
+    carry_forward = list(getattr(args, "carry_forward", None) or [])
     try:
         child = approve_fork(
             storage,
             args.run_id,
             reason=args.reason or "",
             child_run_id=args.child,
+            carry_forward=carry_forward,
         )
+    except EditPreconditionError as exc:
+        rationale: dict[str, Any] = dict(exc.rationale)
+        refusal_text = _precondition_refusal_text(rationale, args.run_id)
+        payload: dict[str, Any] = {
+            "run_id": args.run_id,
+            "edit_type": exc.edit_type,
+            "refused": True,
+            "rationale": rationale,
+            "error": str(exc),
+        }
+        _emit(
+            payload,
+            refusal_text,
+            as_json=args.json,
+            stream=out,
+            palette=getattr(args, "_palette", None),
+        )
+        return ExitCode.ERROR
     except ValueError as exc:
         print(f"error: {exc}", file=err)
         return ExitCode.ERROR
 
-    _emit(
-        {"parent": args.run_id, "child": child.run_id, "reason": child.metadata["fork_reason"]},
+    lineage_payload: dict[str, Any] = {}
+    summary: dict[str, Any] = {}
+    carry_set: set[str] = set(carry_forward)
+    anchor = 0
+    try:
+        events = storage.read_events(args.run_id)
+        lineage = [e for e in events if e.type is EventType.RUN_FORKED]
+        if lineage:
+            last = lineage[-1]
+            lineage_payload = dict(last.payload)
+            summary = dict(lineage_payload.get("preconditions", {}) or {})
+            carry_set = set(lineage_payload.get("carry_forward", []) or carry_forward)
+            anchor = int(
+                lineage_payload.get(
+                    "divergence_sequence", lineage_payload.get("anchor_sequence", 0)
+                )
+                or 0
+            )
+    except Exception:
+        pass
+    preserved_line = _precondition_preserved_line(summary, carry_set, anchor, "fork")
+    text = (
         f"Forked {args.run_id} into {child.run_id}.\n"
         f"Resume it independently: continuum resume {child.run_id}\n"
-        f"Lineage: continuum tree {args.run_id}",
+        f"Lineage: continuum tree {args.run_id}\n"
+        f"[ok] {preserved_line}"
+    )
+    payload = {
+        "parent": args.run_id,
+        "child": child.run_id,
+        "reason": child.metadata["fork_reason"],
+        "preconditions": summary,
+        "carry_forward": sorted(carry_set),
+        "preserved_summary": preserved_line,
+        "lineage_event": lineage_payload,
+    }
+    _emit(
+        payload,
+        text,
         as_json=args.json,
         stream=out,
         palette=getattr(args, "_palette", None),
     )
+    return ExitCode.OK
+
+
+def cmd_restore(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Restore a run to an anchor checkpoint (issue #408, rendered in #409).
+
+    Reactivates history at the anchor and discards (anchor, head]. Refusals
+    render the same named sequence numbers and reconcile hints as fork, with
+    identical exit-code handling; success renders the preserved one-liner
+    from the RUN_RESTORED lineage event.
+    """
+    from continuum.recovery.gate import EditPreconditionError
+    from continuum.recovery.restore import approve_restore
+
+    storage.get_run(args.run_id)
+    carry_forward = list(getattr(args, "carry_forward", None) or [])
+    target = getattr(args, "target", None)
+    anchor = getattr(args, "anchor", None)
+    anchor_seq = int(anchor) if anchor is not None else None
+    try:
+        result = approve_restore(
+            storage,
+            args.run_id,
+            reason=args.reason or "",
+            target=target,
+            anchor_sequence=anchor_seq,
+            carry_forward=carry_forward,
+        )
+    except EditPreconditionError as exc:
+        rationale: dict[str, Any] = dict(exc.rationale)
+        refusal_text = _precondition_refusal_text(rationale, args.run_id)
+        payload = {
+            "run_id": args.run_id,
+            "edit_type": exc.edit_type,
+            "refused": True,
+            "rationale": rationale,
+            "error": str(exc),
+        }
+        _emit(
+            payload,
+            refusal_text,
+            as_json=args.json,
+            stream=out,
+            palette=getattr(args, "_palette", None),
+        )
+        return ExitCode.ERROR
+    except ValueError as exc:
+        print(f"error: {exc}", file=err)
+        return ExitCode.ERROR
+
+    lineage_payload: dict[str, Any] = {}
+    summary: dict[str, Any] = {}
+    carry_set: set[str] = set(carry_forward)
+    anchor_val = anchor_seq if anchor_seq is not None else 0
+    try:
+        events = storage.read_events(args.run_id)
+        lineage = [e for e in events if e.type is EventType.RUN_RESTORED]
+        if lineage:
+            last = lineage[-1]
+            lineage_payload = dict(last.payload)
+            summary = dict(lineage_payload.get("preconditions", {}) or {})
+            carry_set = set(lineage_payload.get("carry_forward", []) or carry_forward)
+            anchor_val = int(lineage_payload.get("anchor_sequence", anchor_val) or anchor_val)
+    except Exception:
+        pass
+    preserved_line = _precondition_preserved_line(summary, carry_set, anchor_val, "restore")
+    text = (
+        f"Restored {args.run_id} to anchor {anchor_val}.\n"
+        f"[ok] {preserved_line}\n"
+        f"Lineage: RUN_RESTORED at anchor {anchor_val}"
+    )
+    payload = {
+        "run_id": result.run_id,
+        "anchor_sequence": anchor_val,
+        "reason": getattr(args, "reason", ""),
+        "preconditions": summary,
+        "carry_forward": sorted(carry_set),
+        "preserved_summary": preserved_line,
+        "lineage_event": lineage_payload,
+    }
+    _emit(payload, text, as_json=args.json, stream=out, palette=getattr(args, "_palette", None))
+    return ExitCode.OK
+
+
+def cmd_merge(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Merge into a run at an anchor (issue #408, rendered in #409).
+
+    Same gate, same refusal shape and lineage stamping as fork and restore.
+    """
+    from continuum.recovery.gate import EditPreconditionError
+    from continuum.recovery.merge import approve_merge
+
+    storage.get_run(args.run_id)
+    carry_forward = list(getattr(args, "carry_forward", None) or [])
+    anchor = getattr(args, "anchor", None)
+    anchor_seq = int(anchor) if anchor is not None else None
+    source = getattr(args, "source", None)
+    try:
+        result = approve_merge(
+            storage,
+            args.run_id,
+            reason=args.reason or "",
+            source_run_id=source,
+            anchor_sequence=anchor_seq,
+            carry_forward=carry_forward,
+        )
+    except EditPreconditionError as exc:
+        rationale: dict[str, Any] = dict(exc.rationale)
+        refusal_text = _precondition_refusal_text(rationale, args.run_id)
+        payload = {
+            "run_id": args.run_id,
+            "edit_type": exc.edit_type,
+            "refused": True,
+            "rationale": rationale,
+            "error": str(exc),
+        }
+        _emit(
+            payload,
+            refusal_text,
+            as_json=args.json,
+            stream=out,
+            palette=getattr(args, "_palette", None),
+        )
+        return ExitCode.ERROR
+    except ValueError as exc:
+        print(f"error: {exc}", file=err)
+        return ExitCode.ERROR
+
+    lineage_payload: dict[str, Any] = {}
+    summary: dict[str, Any] = {}
+    carry_set: set[str] = set(carry_forward)
+    anchor_val = anchor_seq if anchor_seq is not None else 0
+    try:
+        events = storage.read_events(args.run_id)
+        lineage = [e for e in events if e.type is EventType.RUN_MERGED]
+        if lineage:
+            last = lineage[-1]
+            lineage_payload = dict(last.payload)
+            summary = dict(lineage_payload.get("preconditions", {}) or {})
+            carry_set = set(lineage_payload.get("carry_forward", []) or carry_forward)
+            anchor_val = int(lineage_payload.get("anchor_sequence", anchor_val) or anchor_val)
+    except Exception:
+        pass
+    preserved_line = _precondition_preserved_line(summary, carry_set, anchor_val, "merge")
+    text = (
+        f"Merged into {args.run_id} at anchor {anchor_val}.\n"
+        f"[ok] {preserved_line}\n"
+        f"Lineage: RUN_MERGED at anchor {anchor_val}"
+    )
+    payload = {
+        "run_id": result.run_id,
+        "anchor_sequence": anchor_val,
+        "reason": getattr(args, "reason", ""),
+        "preconditions": summary,
+        "carry_forward": sorted(carry_set),
+        "preserved_summary": preserved_line,
+        "lineage_event": lineage_payload,
+    }
+    _emit(payload, text, as_json=args.json, stream=out, palette=getattr(args, "_palette", None))
     return ExitCode.OK
 
 
@@ -2613,6 +2859,48 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fork_cmd.add_argument("--reason", required=True, help="why this divergence is legitimate.")
     fork_cmd.add_argument("--child", default=None, help="run id for the fork (default: auto).")
+    fork_cmd.add_argument(
+        "--carry-forward",
+        dest="carry_forward",
+        action="append",
+        default=None,
+        help="identifier to carry forward (repeatable: approval_id, key, action_id or sequence).",
+    )
+
+    restore_cmd = with_run(
+        add("restore", cmd_restore, "Restore a run to an anchor checkpoint. Mutates storage.")
+    )
+    restore_cmd.add_argument("--reason", required=True, help="why this restore is legitimate.")
+    restore_cmd.add_argument(
+        "--to",
+        dest="target",
+        default=None,
+        help="checkpoint id, version or source_sequence to restore to.",
+    )
+    restore_cmd.add_argument(
+        "--anchor", type=int, default=None, help="anchor sequence to restore to."
+    )
+    restore_cmd.add_argument(
+        "--carry-forward",
+        dest="carry_forward",
+        action="append",
+        default=None,
+        help="identifier to carry forward (repeatable: approval_id, key, action_id or sequence).",
+    )
+
+    merge_cmd = with_run(add("merge", cmd_merge, "Merge into a run at an anchor. Mutates storage."))
+    merge_cmd.add_argument("--reason", required=True, help="why this merge is legitimate.")
+    merge_cmd.add_argument(
+        "--source", dest="source", default=None, help="source run id for the merge (optional)."
+    )
+    merge_cmd.add_argument("--anchor", type=int, default=None, help="anchor sequence to merge at.")
+    merge_cmd.add_argument(
+        "--carry-forward",
+        dest="carry_forward",
+        action="append",
+        default=None,
+        help="identifier to carry forward (repeatable: approval_id, key, action_id or sequence).",
+    )
 
     compact = with_run(
         add("compact", cmd_compact, "Archive the pre-anchor log prefix. Mutates storage.")
