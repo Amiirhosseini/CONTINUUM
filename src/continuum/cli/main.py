@@ -1490,7 +1490,7 @@ def cmd_observe(args: argparse.Namespace, storage: Storage, out: Any, err: Any) 
             "event_id": event.event_id,
             **payload,
         },
-        f"Observed {payload.get('tool')} -> {run_id} (seq {event.sequence})",
+        f"Observed {payload.get('tool') if payload.get('tool') != 'unknown' else '(no tool name)'} -> {run_id} (seq {event.sequence})",
         as_json=args.json,
         stream=out,
         palette=getattr(args, "_palette", None),
