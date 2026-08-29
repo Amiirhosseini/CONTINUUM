@@ -131,7 +131,6 @@ def test_shared_emitter_schema_with_fault_injection() -> None:
 
     from benchmarks.horizon.emitter import emit_horizon_report
     from benchmarks.horizon.runner import run_horizon_suite
-
     from continuum.benchmark.phase6.metrics import RecoveryOutcome, ScenarioResult
 
     horizon_report = run_horizon_suite()

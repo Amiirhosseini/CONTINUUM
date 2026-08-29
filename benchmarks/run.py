@@ -44,9 +44,11 @@ def _regenerate_readme_bench(horizon_report: Any, fault_report: Any | None = Non
     lines.append("<!-- BENCH:START -->")
     lines.append("### Horizon-scale benchmark (real runs, no invented numbers)")
     lines.append("")
-    lines.append(f"Generated: {horizon_report.generated_at.isoformat()}  "
-                 f"Horizon scenarios: {h_summary.get('total', 0)}  "
-                 f"Passed: {h_summary.get('passed', 0)}  Failed: {h_summary.get('failed', 0)}")
+    lines.append(
+        f"Generated: {horizon_report.generated_at.isoformat()}  "
+        f"Horizon scenarios: {h_summary.get('total', 0)}  "
+        f"Passed: {h_summary.get('passed', 0)}  Failed: {h_summary.get('failed', 0)}"
+    )
     lines.append("")
     # Six metrics from horizon
     acc = 0.0
@@ -56,13 +58,38 @@ def _regenerate_readme_bench(horizon_report: Any, fault_report: Any | None = Non
     dup_work = 0.0
     comp = 0.0
     if horizon_report.results:
-        acc = round(sum(r.metrics.get("accuracy", 0) for r in horizon_report.results) / len(horizon_report.results), 3)
-        unnec = round(sum(r.metrics.get("unnecessary_human_escalation_rate", 0) for r in horizon_report.results) / len(horizon_report.results), 3)
-        prec = round(sum(r.metrics.get("repair_precision", 0) for r in horizon_report.results) / len(horizon_report.results), 3)
+        acc = round(
+            sum(r.metrics.get("accuracy", 0) for r in horizon_report.results)
+            / len(horizon_report.results),
+            3,
+        )
+        unnec = round(
+            sum(
+                r.metrics.get("unnecessary_human_escalation_rate", 0)
+                for r in horizon_report.results
+            )
+            / len(horizon_report.results),
+            3,
+        )
+        prec = round(
+            sum(r.metrics.get("repair_precision", 0) for r in horizon_report.results)
+            / len(horizon_report.results),
+            3,
+        )
         dup_side = sum(r.metrics.get("duplicate_side_effects", 0) for r in horizon_report.results)
-        dup_work = round(sum(r.metrics.get("duplicate_work", 0) for r in horizon_report.results) / len(horizon_report.results), 3)
-        comp = round(sum(r.metrics.get("compression_ratio", 0) for r in horizon_report.results) / len(horizon_report.results), 3)
-    lines.append(f"Accuracy: {acc}  Unnecessary escalation: {unnec}  Repair precision: {prec}  Duplicate side effects: {dup_side}  Duplicate work: {dup_work}  Compression: {comp}")
+        dup_work = round(
+            sum(r.metrics.get("duplicate_work", 0) for r in horizon_report.results)
+            / len(horizon_report.results),
+            3,
+        )
+        comp = round(
+            sum(r.metrics.get("compression_ratio", 0) for r in horizon_report.results)
+            / len(horizon_report.results),
+            3,
+        )
+    lines.append(
+        f"Accuracy: {acc}  Unnecessary escalation: {unnec}  Repair precision: {prec}  Duplicate side effects: {dup_side}  Duplicate work: {dup_work}  Compression: {comp}"
+    )
     lines.append("")
     lines.append("| Scenario | Cycles | Years | Correct | Actual | Accuracy |")
     lines.append("| --- | --- | --- | --- | --- | --- |")
@@ -76,7 +103,9 @@ def _regenerate_readme_bench(horizon_report: Any, fault_report: Any | None = Non
     if fault_report is not None:
         f_summary = fault_report.summary()
         lines.append("")
-        lines.append(f"Fault-injection: {f_summary.get('total', 0)} scenarios, detection {f_summary.get('detection_rate', 0)}, unsafe {f_summary.get('unsafe_resume_rate', 0)}")
+        lines.append(
+            f"Fault-injection: {f_summary.get('total', 0)} scenarios, detection {f_summary.get('detection_rate', 0)}, unsafe {f_summary.get('unsafe_resume_rate', 0)}"
+        )
     lines.append("<!-- BENCH:END -->")
     table = "\n".join(lines)
     if "<!-- BENCH:START -->" in text and "<!-- BENCH:END -->" in text:
@@ -136,7 +165,9 @@ def main() -> None:
         print(f"horizon json: {horizon_json}")
         print(f"horizon md:   {horizon_md}")
         # Regenerate README bench section from real numbers (no invented numbers)
-        _regenerate_readme_bench(horizon_report, fault_report if 'fault_report' in locals() else None)
+        _regenerate_readme_bench(
+            horizon_report, fault_report if "fault_report" in locals() else None
+        )
     except Exception as exc:  # noqa: BLE001 - don't let horizon break phase6
         print(f"horizon benchmark failed: {exc}")
         import traceback

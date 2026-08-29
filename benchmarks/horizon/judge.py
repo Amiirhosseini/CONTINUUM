@@ -10,8 +10,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from continuum.models import RecoveryMode
-
 from .scenarios import HorizonScenario
 
 

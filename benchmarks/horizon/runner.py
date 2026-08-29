@@ -7,15 +7,14 @@ envelope.
 
 from __future__ import annotations
 
+import contextlib
 import time
 from datetime import datetime
 from typing import Any
 
 from continuum.benchmark.phase6.metrics import BenchmarkReport, RecoveryOutcome, ScenarioResult
 from continuum.events import EventType
-from continuum.models import Run
 from continuum.recovery import RecoveryEngine
-from continuum.storage import SQLiteStorage
 
 from .driver import run_horizon_scenario
 from .judge import judge
@@ -57,9 +56,11 @@ def run_single_horizon(scenario_name: str) -> ScenarioResult:
         # Map engine modes to judge's simplified modes
         # engine has: resume, repair_and_resume, request_human, replan, rollback, abort, wait
         # judge expects: resume, repair, request_human, abort
-        if actual_mode == "repair_and_resume":
-            actual_mode = "repair"
-        elif actual_mode in ("replan", "rollback", "wait"):
+        if actual_mode == "repair_and_resume" or actual_mode in (
+            "replan",
+            "rollback",
+            "wait",
+        ):
             actual_mode = "repair"
     except Exception as exc:
         actual_mode = "abort"
@@ -74,8 +75,6 @@ def run_single_horizon(scenario_name: str) -> ScenarioResult:
     # Compute the six metrics
     # Duplicate side effects and work are 0 for horizon (no side effects in driver)
     # Compression ratio is full log tokens / briefing tokens
-    from continuum.benchmark.phase6.harness import ScenarioContext
-
     # Use the judge's scoring for the first three, driver for the last three
     metrics: dict[str, Any] = {
         "accuracy": 1.0 if result.passed else 0.0,
@@ -84,7 +83,9 @@ def run_single_horizon(scenario_name: str) -> ScenarioResult:
         "duplicate_side_effects": 0,
         "duplicate_work": 0.0,
         "compression_ratio": round(
-            len(horizon.storage.read_events(horizon.run_id)) / max(1, horizon.reconstruction_cycles), 3
+            len(horizon.storage.read_events(horizon.run_id))
+            / max(1, horizon.reconstruction_cycles),
+            3,
         ),
         "reconstruction_cycles": horizon.reconstruction_cycles,
         "years_elapsed": round(horizon.clock.years_elapsed(), 2),
@@ -94,10 +95,8 @@ def run_single_horizon(scenario_name: str) -> ScenarioResult:
     # Also compute suite-level aggregates later
     outcome = RecoveryOutcome.PASS if result.passed else RecoveryOutcome.FAIL
     # Close storage
-    try:
+    with contextlib.suppress(Exception):
         horizon.storage.close()
-    except Exception:
-        pass
     return ScenarioResult(
         scenario=f"horizon_{scen.name}",
         outcome=outcome,

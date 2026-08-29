@@ -41,8 +41,6 @@ def emit_horizon_report(
 
     summary = report.summary()
     # Compute horizon aggregates
-    total = summary.get("total", 0)
-    passed = summary.get("passed", 0)
     # Aggregate six metrics
     accuracies = []
     unnecessary_rates = []
@@ -64,10 +62,14 @@ def emit_horizon_report(
         horizon_summary["unnecessary_human_escalation_rate"] = round(
             sum(unnecessary_rates) / len(unnecessary_rates), 3
         )
-        horizon_summary["repair_precision"] = round(sum(repair_precisions) / len(repair_precisions), 3)
+        horizon_summary["repair_precision"] = round(
+            sum(repair_precisions) / len(repair_precisions), 3
+        )
         horizon_summary["duplicate_side_effects"] = sum(dup_sides)
         horizon_summary["duplicate_work"] = round(sum(dup_works) / len(dup_works), 3)
-        horizon_summary["compression_ratio"] = round(sum(compressions) / len(compressions), 3) if compressions else 0
+        horizon_summary["compression_ratio"] = (
+            round(sum(compressions) / len(compressions), 3) if compressions else 0
+        )
 
     envelope = {
         "benchmark": benchmark_name,
@@ -81,7 +83,9 @@ def emit_horizon_report(
     lines = [f"# Horizon benchmark report ({benchmark_name})", ""]
     lines.append(f"Generated: {report.generated_at.isoformat()}")
     lines.append("")
-    lines.append(f"Total: {horizon_summary.get('total', 0)}  Passed: {horizon_summary.get('passed', 0)}  Failed: {horizon_summary.get('failed', 0)}")
+    lines.append(
+        f"Total: {horizon_summary.get('total', 0)}  Passed: {horizon_summary.get('passed', 0)}  Failed: {horizon_summary.get('failed', 0)}"
+    )
     lines.append(
         f"Accuracy: {horizon_summary.get('accuracy', 0)}  Unnecessary escalation: {horizon_summary.get('unnecessary_human_escalation_rate', 0)}  Repair precision: {horizon_summary.get('repair_precision', 0)}"
     )
@@ -89,7 +93,9 @@ def emit_horizon_report(
         f"Duplicate side effects: {horizon_summary.get('duplicate_side_effects', 0)}  Duplicate work: {horizon_summary.get('duplicate_work', 0)}  Compression: {horizon_summary.get('compression_ratio', 0)}"
     )
     lines.append("")
-    lines.append("| Scenario | Outcome | Cycles | Years | Correct | Actual | Acc | Unnec | Repair | DupSide | DupWork | Compress | Notes |")
+    lines.append(
+        "| Scenario | Outcome | Cycles | Years | Correct | Actual | Acc | Unnec | Repair | DupSide | DupWork | Compress | Notes |"
+    )
     lines.append("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
     for r in report.results:
         cycles = r.metrics.get("reconstruction_cycles", "")
