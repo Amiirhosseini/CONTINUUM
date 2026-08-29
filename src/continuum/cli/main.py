@@ -1334,6 +1334,111 @@ def cmd_checkpoint(args: argparse.Namespace, storage: Storage, out: Any, err: An
     return ExitCode.OK
 
 
+def cmd_rewind(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Rewind workspace and projection to a checkpoint (issue #292)."""
+    from continuum.checkpoint.rewind import RewindError, rewind_to_checkpoint
+
+    storage.get_run(args.run_id)
+    try:
+        result = rewind_to_checkpoint(
+            storage, args.run_id, args.to, force=args.force, dry_run=args.dry_run
+        )
+    except RewindError as exc:
+        print(f"error: {exc}", file=err)
+        return ExitCode.ERROR
+    except Exception as exc:
+        print(f"error: rewind failed: {exc}", file=err)
+        return ExitCode.ERROR
+    if args.dry_run:
+        payload: dict[str, Any] = {
+            "run_id": result.run_id,
+            "target_checkpoint": result.target_checkpoint.checkpoint_id,
+            "target_version": result.target_checkpoint.version,
+            "dry_run": True,
+            "reverted_files": list(result.reverted_files),
+            "deleted_files": list(result.deleted_files),
+            "conflicts": list(result.conflicts),
+            "unrecoverable": list(result.unrecoverable),
+            "state_version": result.state_version,
+        }
+        lines = [
+            f"Dry run rewind of {result.run_id} to {result.target_checkpoint.checkpoint_id} (v{result.target_checkpoint.version})"
+        ]
+        if result.reverted_files:
+            lines.append(
+                f"would revert {len(result.reverted_files)} file(s): {', '.join(result.reverted_files[:5])}"
+            )
+        if result.deleted_files:
+            lines.append(
+                f"would delete {len(result.deleted_files)} file(s): {', '.join(result.deleted_files[:5])}"
+            )
+        if result.conflicts:
+            lines.append(f"conflicts ({len(result.conflicts)}): {'; '.join(result.conflicts[:3])}")
+        if result.unrecoverable:
+            lines.append(
+                f"unrecoverable ({len(result.unrecoverable)}): {'; '.join(result.unrecoverable[:3])}"
+            )
+        _emit(
+            payload,
+            "\n".join(lines) or "Dry run: nothing to revert.",
+            as_json=args.json,
+            stream=out,
+            palette=getattr(args, "_palette", None),
+        )
+        return ExitCode.OK
+    if result.conflicts or result.unrecoverable:
+        payload = {
+            "run_id": result.run_id,
+            "target_checkpoint": result.target_checkpoint.checkpoint_id,
+            "target_version": result.target_checkpoint.version,
+            "reverted_files": list(result.reverted_files),
+            "deleted_files": list(result.deleted_files),
+            "conflicts": list(result.conflicts),
+            "unrecoverable": list(result.unrecoverable),
+        }
+        lines = [
+            f"Rewind of {result.run_id} to {result.target_checkpoint.checkpoint_id} (v{result.target_checkpoint.version}) has conflicts"
+        ]
+        if result.conflicts:
+            lines.append(f"conflicts ({len(result.conflicts)}): {'; '.join(result.conflicts[:3])}")
+        if result.unrecoverable:
+            lines.append(
+                f"unrecoverable ({len(result.unrecoverable)}): {'; '.join(result.unrecoverable[:3])}"
+            )
+        lines.append("Use --force to proceed or resolve conflicts and retry.")
+        _emit(
+            payload,
+            "\n".join(lines),
+            as_json=args.json,
+            stream=out,
+            palette=getattr(args, "_palette", None),
+        )
+        return ExitCode.ERROR
+    payload = {
+        "run_id": result.run_id,
+        "target_checkpoint": result.target_checkpoint.checkpoint_id,
+        "target_version": result.target_checkpoint.version,
+        "state_version": result.state_version,
+        "reverted_files": list(result.reverted_files),
+        "deleted_files": list(result.deleted_files),
+        "resume_mode": result.resume_mode,
+        "resume_safe": result.resume_safe,
+    }
+    lines = [
+        f"Rewound {result.run_id} to checkpoint {result.target_checkpoint.checkpoint_id} (v{result.target_checkpoint.version})",
+        f"  reverted {len(result.reverted_files)} file(s), deleted {len(result.deleted_files)} file(s)",
+        f"  state now at v{result.state_version}, resume mode {result.resume_mode} (safe={result.resume_safe})",
+    ]
+    _emit(
+        payload,
+        "\n".join(lines),
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
+    )
+    return ExitCode.OK
+
+
 def cmd_observe(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
     """Record one observed tool completion as durable evidence (issue #207).
 
@@ -2493,6 +2598,22 @@ def build_parser() -> argparse.ArgumentParser:
     checkpoint = with_env(with_run(add("checkpoint", cmd_checkpoint, "Force a checkpoint.")))
     checkpoint.add_argument("--trigger", default="manual")
     checkpoint.add_argument("--reason", default="")
+
+    rewind = with_run(add("rewind", cmd_rewind, "Rewind workspace and projection to a checkpoint."))
+    rewind.add_argument(
+        "--to",
+        dest="to",
+        required=True,
+        help="checkpoint id, version or source_sequence to rewind to",
+    )
+    rewind.add_argument(
+        "--force", action="store_true", help="proceed despite conflicts or unrecoverable files"
+    )
+    rewind.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="report what would be reverted without touching files",
+    )
 
     record_plan = with_run(
         add("record-plan", cmd_record_plan, "Record a structured plan upsert. Mutates storage.")
