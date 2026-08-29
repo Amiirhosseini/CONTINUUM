@@ -471,6 +471,12 @@ def cmd_inspect(args: argparse.Namespace, storage: Storage, out: Any, err: Any) 
             lines.append(f"  - {pp.step_id}: {pp.description} [{pp.status.value}]{deps}")
     else:
         lines.append("plan:       (none)")
+    if state.attempt_lessons:
+        lines.append(f"lessons:   {len(state.attempt_lessons)}")
+        for lesson in state.attempt_lessons:
+            lines.append(f"  - {lesson.attempt_id}: {lesson.falsified[:80]}")
+            if lesson.next_avoid:
+                lines.append(f"    avoid: {lesson.next_avoid}")
     if state.external_dependencies:
         lines.append("dependencies:")
         lines += [
@@ -939,6 +945,9 @@ def cmd_resume(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
         "children": [c.__dict__ for c in child_statuses],
         "pinning_drift": drift_lines,
         "informed_retry": decision.informed_retry,
+        "attempt_lessons": [
+            lesson.model_dump(mode="json") for lesson in decision.state.attempt_lessons
+        ],
         "contract": decision.contract.model_dump(mode="json"),
         "repairs": [s.action_name for s in decision.plan.steps],
         "progress": {
@@ -972,6 +981,13 @@ def cmd_resume(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
                 "plan": [step.model_dump() for step in decision.plan.steps],
             },
         )
+        # Structured attempt memory (issue #313): one lesson per repair, deterministic.
+        try:
+            from continuum.recovery.summary import record_attempt_lesson
+
+            record_attempt_lesson(storage, run_id, decision)
+        except Exception:
+            pass
         print(
             f"\nRepair plan recorded ({len(decision.plan.steps)} step(s)). "
             f"Rerun resume to confirm progress.",
@@ -1629,6 +1645,13 @@ def cmd_briefing(args: argparse.Namespace, storage: Storage, out: Any, err: Any)
 
         lines.append("what previous attempts changed (engine-recorded):")
         lines += [f"  {line}" for line in render_informed_retry(decision.informed_retry)]
+    # Structured attempt memory (issue #313): after verified state before open questions.
+    if state.attempt_lessons:
+        from continuum.recovery.summary import render_attempt_lesson
+
+        lines.append("attempt lessons (system-derived):")
+        for lesson in state.attempt_lessons:
+            lines += [f"  {line}" for line in render_attempt_lesson(lesson)]
     if steps:
         lines.append("next steps:")
         lines += [f"  {i}. {t}" for i, t in enumerate(steps, 1)]
@@ -1642,6 +1665,7 @@ def cmd_briefing(args: argparse.Namespace, storage: Storage, out: Any, err: Any)
             "safe": decision.safe,
             "context": context,
             "human_steps": steps,
+            "attempt_lessons": [lesson.model_dump(mode="json") for lesson in state.attempt_lessons],
             "hookSpecificOutput": {
                 "hookEventName": args.hook_event_name,
                 "additionalContext": context,

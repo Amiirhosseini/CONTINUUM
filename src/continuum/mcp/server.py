@@ -1089,6 +1089,9 @@ def build_server(
                 },
                 "tail_evidence": tail_evidence,
                 "informed_retry": decision.informed_retry,
+                "attempt_lessons": [
+                    lesson.model_dump(mode="json") for lesson in decision.state.attempt_lessons
+                ],
                 "contract": decision.contract.model_dump(mode="json"),
                 "contract_text": render_contract(decision.contract),
                 "report": decision.render(),

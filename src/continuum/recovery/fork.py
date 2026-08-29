@@ -218,4 +218,58 @@ def approve_fork(
         payload,
         source=Origin.HUMAN,
     )
+    try:
+        from continuum.models import AttemptLesson
+        from continuum.recovery.summary import ATTEMPT_LESSON_FIELD_CAP
+        from continuum.security.hashing import stable_hash
+
+        def _trunc(text: str) -> str:
+            return text[:ATTEMPT_LESSON_FIELD_CAP] if len(text) > ATTEMPT_LESSON_FIELD_CAP else text
+
+        scar_ids = [str(item.get("action_id", "")) for item in summary.get("uncertain_slots", [])]
+        scar_ids = [sid for sid in scar_ids if sid][:16]
+        evidence: list[str] = []
+        for item in summary.get("unsettled_authorizations", []):
+            evidence.append(f"{item.get('approval_id', '')}: {item.get('subject', '')}".strip(": "))
+        for item in summary.get("depended_results", []):
+            evidence.append(f"{item.get('action_id', '')} ({item.get('key', '')})")
+        evidence = [_trunc(str(ev)) for ev in evidence if ev][:8]
+        attempt_id = stable_hash(
+            {"parent": parent_run_id, "child": child.run_id, "divergence": divergence}
+        )[:16]
+        lesson = AttemptLesson(
+            attempt_id=_trunc(attempt_id),
+            falsified=_trunc(reason.strip()),
+            env_delta="",
+            scar_action_ids=scar_ids,
+            next_avoid="",
+            source_evidence=evidence,
+            created_at=storage.get_run(parent_run_id).updated_at,
+        )
+        import json as _json
+
+        while len(_json.dumps(lesson.model_dump(mode="json"), sort_keys=True).encode()) > 2048:
+            if lesson.source_evidence:
+                lesson = lesson.model_copy(update={"source_evidence": lesson.source_evidence[:-1]})
+                continue
+            if lesson.falsified:
+                lesson = lesson.model_copy(
+                    update={"falsified": lesson.falsified[: max(len(lesson.falsified) // 2, 0)]}
+                )
+                continue
+            break
+        storage.append_event(
+            parent_run_id,
+            EventType.ATTEMPT_LESSON,
+            lesson.model_dump(mode="json"),
+            source=Origin.DETERMINISTIC,
+        )
+        storage.append_event(
+            child.run_id,
+            EventType.ATTEMPT_LESSON,
+            lesson.model_dump(mode="json"),
+            source=Origin.DETERMINISTIC,
+        )
+    except Exception:
+        pass
     return child

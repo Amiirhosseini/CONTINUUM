@@ -50,6 +50,7 @@ __all__ = [
     "ConstraintPinned",
     "ConstraintRetracted",
     "ConstraintPin",
+    "AttemptLesson",
     "ModelSpecificState",
     "ModelState",
     "Run",
@@ -493,6 +494,43 @@ class ConstraintPin(BaseModel):
         return value
 
 
+class AttemptLesson(BaseModel):
+    """Durable lesson from a failed attempt (issue #313).
+
+    System-derived from RecoveryDecision.rationale, RecoveryLedger and
+    ActionLedger, never from LLM. Bounded to 512 chars per field and 2KB
+    total so it survives as an artifact without becoming a transcript dump.
+    Origin.DETERMINISTIC, hash-chained via ATTEMPT_LESSON event.
+    """
+
+    model_config = Frozen
+
+    attempt_id: str = Field(min_length=1)
+    falsified: str = Field(default="")
+    env_delta: str = Field(default="")
+    scar_action_ids: list[str] = Field(default_factory=list)
+    next_avoid: str = Field(default="")
+    source_evidence: list[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=utcnow)
+
+    @field_validator("falsified", "env_delta", "next_avoid")
+    @classmethod
+    def _field_bounded(cls, value: str) -> str:
+        if len(value) > 512:
+            return value[:512]
+        return value
+
+    @field_validator("source_evidence")
+    @classmethod
+    def _evidence_bounded(cls, value: list[str]) -> list[str]:
+        return [str(v)[:512] for v in value]
+
+    @field_validator("scar_action_ids")
+    @classmethod
+    def _scar_bounded(cls, value: list[str]) -> list[str]:
+        return [str(v) for v in value]
+
+
 class ModelSpecificState(BaseModel):
     """An assumption tied to a specific model; switching models must revalidate."""
 
@@ -548,6 +586,8 @@ class SemanticState(BaseModel):
     is noted here so the operator can see a mismatch without the fold
     guessing whether the pin lived in an archived prefix or never existed.
     """
+    attempt_lessons: list[AttemptLesson] = Field(default_factory=list)
+    """Structured lessons from failed attempts (issue #313), sorted by created_at."""
     model: ModelState | None = None
     version: int = 0
     source_sequence: int = 0
