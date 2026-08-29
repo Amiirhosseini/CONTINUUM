@@ -2457,9 +2457,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=f"continuum {__version__}")
     parser.add_argument(
-        "--db", default=_DEFAULT_DB, help=f"storage URL or path (default: {_DEFAULT_DB})"
+        "--db", default=_DEFAULT_DB, help=f"storage URL or path (default: {_DEFAULT_DB})."
     )
-    parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    parser.add_argument("--json", action="store_true", help="emit machine-readable JSON.")
     colour = parser.add_mutually_exclusive_group()
     colour.add_argument(
         "--color",
@@ -2467,14 +2467,14 @@ def build_parser() -> argparse.ArgumentParser:
         dest="color",
         action="store_true",
         default=None,
-        help="force colour even when not writing to a terminal",
+        help="force colour even when not writing to a terminal.",
     )
     colour.add_argument(
         "--no-color",
         "--no-colour",
         dest="color",
         action="store_false",
-        help="disable colour",
+        help="disable colour.",
     )
 
     sub = parser.add_subparsers(dest="command", metavar="COMMAND")
@@ -2485,7 +2485,7 @@ def build_parser() -> argparse.ArgumentParser:
         return p
 
     def with_run(p: argparse.ArgumentParser) -> argparse.ArgumentParser:
-        p.add_argument("run_id", help="the run to operate on")
+        p.add_argument("run_id", help="the run to operate on.")
         return p
 
     def with_env(p: argparse.ArgumentParser) -> argparse.ArgumentParser:
@@ -2493,7 +2493,7 @@ def build_parser() -> argparse.ArgumentParser:
             "--env",
             action="append",
             metavar="NAME=VERSION",
-            help="declare a current environment resource (repeatable)",
+            help="declare a current environment resource (repeatable).",
         )
         return p
 
@@ -2501,23 +2501,23 @@ def build_parser() -> argparse.ArgumentParser:
     add("runs", cmd_runs, "List runs.").add_argument("--limit", type=int, default=20)
 
     start = with_run(add("start", cmd_start, "Create a run with a goal. Mutates storage."))
-    start.add_argument("--goal", required=True, help="what the run is trying to achieve")
-    start.add_argument("--parent", default=None, help="attach as a child of this run")
+    start.add_argument("--goal", required=True, help="what the run is trying to achieve.")
+    start.add_argument("--parent", default=None, help="attach as a child of this run.")
     start.add_argument(
         "--a2a-task",
         dest="a2a_task",
         default=None,
-        help="external A2A task id to record in metadata",
+        help="external A2A task id to record in metadata.",
     )
 
     inspect = with_run(add("inspect", cmd_inspect, "Show semantic state."))
-    inspect.add_argument("--version", type=int, dest="version", help="inspect a past version")
+    inspect.add_argument("--version", type=int, dest="version", help="inspect a past version.")
 
     status = with_run(add("status", cmd_status, "Show run status."))
     status.add_argument(
         "--provenance",
         action="store_true",
-        help="render the canonical provenance view (issue #148)",
+        help="render the canonical provenance view (issue #148).",
     )
 
     with_run(add("history", cmd_history, "List state versions and checkpoints."))
@@ -2531,10 +2531,10 @@ def build_parser() -> argparse.ArgumentParser:
     diff.add_argument("to_version", type=int)
 
     validate = with_env(with_run(add("validate", cmd_validate, "Validate state. Read-only.")))
-    validate.add_argument("--model", help="model that will run the resumed agent")
+    validate.add_argument("--model", help="model that will run the resumed agent.")
     validate.add_argument("--tolerate-unknown", action="store_true")
     validate.add_argument(
-        "--dashboard", action="store_true", help="render the Phase 14 recovery dashboard"
+        "--dashboard", action="store_true", help="render the Phase 14 recovery dashboard."
     )
 
     health = with_run(add("health", cmd_health, "Advisory prefix-trust health check. Read-only."))
@@ -2547,38 +2547,38 @@ def build_parser() -> argparse.ArgumentParser:
         "run_id",
         nargs="?",
         default=None,
-        help="the run to resume; omit to resume the most recently active run",
+        help="the run to resume; omit to resume the most recently active run.",
     )
-    resume.add_argument("--model", help="model that will run the resumed agent")
+    resume.add_argument("--model", help="model that will run the resumed agent.")
     resume.add_argument("--tolerate-unknown", action="store_true")
-    resume.add_argument("--repair", action="store_true", help="record the repair plan")
+    resume.add_argument("--repair", action="store_true", help="record the repair plan.")
     resume.add_argument(
         "--pinning",
         default=None,
-        help="JSON object of environment pins to diff against the run (issue #241)",
+        help="JSON object of environment pins to diff against the run (issue #241).",
     )
 
     confirm = with_env(
         with_run(add("confirm", cmd_confirm, "Confirm self-reported state so the run may resume."))
     )
-    confirm.add_argument("--model", help="model that will run the resumed agent")
+    confirm.add_argument("--model", help="model that will run the resumed agent.")
     confirm.add_argument("--tolerate-unknown", action="store_true")
     confirm.add_argument(
         "--scope",
         nargs="+",
         choices=["goal", "progress"],
         default=None,
-        help="confirm only these components (default: goal and progress)",
+        help="confirm only these components (default: goal and progress).",
     )
 
     complete = with_run(add("complete", cmd_complete, "Close a run as done. Mutates storage."))
-    complete.add_argument("--summary", default=None, help="one-line closing note")
+    complete.add_argument("--summary", default=None, help="one-line closing note.")
 
     budget_cmd = with_run(add("budget", cmd_budget, "Retry-budget usage per action type."))
     budget_cmd.add_argument(
         "--config",
         default=None,
-        help="budget registry path (default: .continuum/budgets.json)",
+        help="budget registry path (default: .continuum/budgets.json).",
     )
 
     tree_parser = with_run(add("tree", cmd_tree, "Show a parent run and its children."))
@@ -2587,13 +2587,13 @@ def build_parser() -> argparse.ArgumentParser:
     fork_cmd = with_run(
         add("fork", cmd_fork, "Approve a divergent continuation as a child run. Mutates storage.")
     )
-    fork_cmd.add_argument("--reason", required=True, help="why this divergence is legitimate")
-    fork_cmd.add_argument("--child", default=None, help="run id for the fork (default: auto)")
+    fork_cmd.add_argument("--reason", required=True, help="why this divergence is legitimate.")
+    fork_cmd.add_argument("--child", default=None, help="run id for the fork (default: auto).")
 
     compact = with_run(
         add("compact", cmd_compact, "Archive the pre-anchor log prefix. Mutates storage.")
     )
-    compact.add_argument("--force", action="store_true", help="apply without confirmation")
+    compact.add_argument("--force", action="store_true", help="apply without confirmation.")
 
     checkpoint = with_env(with_run(add("checkpoint", cmd_checkpoint, "Force a checkpoint.")))
     checkpoint.add_argument("--trigger", default="manual")
@@ -2604,36 +2604,36 @@ def build_parser() -> argparse.ArgumentParser:
         "--to",
         dest="to",
         required=True,
-        help="checkpoint id, version or source_sequence to rewind to",
+        help="checkpoint id, version or source_sequence to rewind to.",
     )
     rewind.add_argument(
-        "--force", action="store_true", help="proceed despite conflicts or unrecoverable files"
+        "--force", action="store_true", help="proceed despite conflicts or unrecoverable files."
     )
     rewind.add_argument(
         "--dry-run",
         action="store_true",
-        help="report what would be reverted without touching files",
+        help="report what would be reverted without touching files.",
     )
 
     record_plan = with_run(
         add("record-plan", cmd_record_plan, "Record a structured plan upsert. Mutates storage.")
     )
-    record_plan.add_argument("--plan-id", dest="plan_id", required=True, help="plan identifier")
+    record_plan.add_argument("--plan-id", dest="plan_id", required=True, help="plan identifier.")
     record_plan.add_argument(
-        "--file", dest="file", help="JSON file containing units array or {plan_id, units}"
+        "--file", dest="file", help="JSON file containing units array or {plan_id, units}."
     )
-    record_plan.add_argument("--units", help="JSON array of units")
+    record_plan.add_argument("--units", help="JSON array of units.")
 
     observe = add("observe", cmd_observe, "Record one observed tool completion. Mutates storage.")
     observe.add_argument(
         "--run-id",
         default=None,
-        help="target run (default: the most recently active non-terminal run)",
+        help="target run (default: the most recently active non-terminal run).",
     )
     observe.add_argument(
         "--payload-file",
         default=None,
-        help="read the hook payload from this file instead of stdin",
+        help="read the hook payload from this file instead of stdin.",
     )
 
     gateway_cmd = add(
@@ -2646,7 +2646,7 @@ def build_parser() -> argparse.ArgumentParser:
     gateway_cmd.add_argument(
         "--config",
         default=None,
-        help="route registry path (default: .continuum/gateway.json)",
+        help="route registry path (default: .continuum/gateway.json).",
     )
 
     briefing = add(
@@ -2657,7 +2657,7 @@ def build_parser() -> argparse.ArgumentParser:
     briefing.add_argument(
         "--run-id",
         default=None,
-        help="run to brief on (default: the most recently active non-terminal run)",
+        help="run to brief on (default: the most recently active non-terminal run).",
     )
     briefing.add_argument(
         "--hook-event-name",
@@ -2674,17 +2674,17 @@ def build_parser() -> argparse.ArgumentParser:
     gate.add_argument(
         "--run-id",
         default=None,
-        help="target run (default: the most recently active non-terminal run)",
+        help="target run (default: the most recently active non-terminal run).",
     )
     gate.add_argument(
         "--payload-file",
         default=None,
-        help="read the hook payload from this file instead of stdin",
+        help="read the hook payload from this file instead of stdin.",
     )
     gate.add_argument(
         "--config",
         default=None,
-        help=f"gate registry path (default: {DEFAULT_GATE_CONFIG_PATH})",
+        help=f"gate registry path (default: {DEFAULT_GATE_CONFIG_PATH}).",
     )
 
     hooks = add("hooks", cmd_hooks_install, "Manage host-side observation hooks.")
@@ -2694,12 +2694,12 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument(
             "client",
             choices=tuple(CLIENT_PROFILES),
-            help="which client to configure (claude-code, gemini, codex)",
+            help="which client to configure (claude-code, gemini, codex).",
         )
         p.add_argument(
             "--settings",
             default=None,
-            help="path to the client's settings file (default: per client profile)",
+            help="path to the client's settings file (default: per client profile).",
         )
         p.set_defaults(func=func)
 
@@ -2709,12 +2709,12 @@ def build_parser() -> argparse.ArgumentParser:
     install.add_argument(
         "--db",
         default=None,
-        help="bake a specific database path into the hook command",
+        help="bake a specific database path into the hook command.",
     )
     install.add_argument(
         "--with-gate",
         action="store_true",
-        help="also install a PreToolUse gate that denies unclaimed side-effect calls",
+        help="also install a PreToolUse gate that denies unclaimed side-effect calls.",
     )
     hooks_client(install, cmd_hooks_install)
 
@@ -2725,12 +2725,12 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument(
         "--index",
         action="store_true",
-        help="also compare the derived action index against the log (issue #216)",
+        help="also compare the derived action index against the log (issue #216).",
     )
     verify.add_argument(
         "--repair-index",
         action="store_true",
-        help="rebuild drifted index rows from the log (requires --index)",
+        help="rebuild drifted index rows from the log (requires --index).",
     )
 
     reconcile_auto = with_run(
@@ -2741,12 +2741,12 @@ def build_parser() -> argparse.ArgumentParser:
         )
     )
     reconcile_auto.add_argument(
-        "--dry-run", action="store_true", help="report what probes would settle, write nothing"
+        "--dry-run", action="store_true", help="report what probes would settle, write nothing."
     )
     reconcile_auto.add_argument(
         "--config",
         default=None,
-        help="probe registry path (default: .continuum/reconcilers.json)",
+        help="probe registry path (default: .continuum/reconcilers.json).",
     )
     with_run(add("actions", cmd_actions, "List external side effects."))
     with_env(with_run(add("show-contract", cmd_contract, "Print the recovery contract.")))
@@ -2763,17 +2763,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     add("benchmark", cmd_benchmark, "Run CONTINUUM-Bench (minimal harness).").add_argument(
-        "--total", type=int, default=200, help="documents processed per run (default: 200)"
+        "--total", type=int, default=200, help="documents processed per run (default: 200)."
     )
 
     attest_keygen = add("attest-keygen", cmd_attest_keygen, "Generate an Ed25519 signer key pair.")
-    attest_keygen.add_argument("--out", help="private key PEM path (default: signer.pem)")
-    attest_keygen.add_argument("--pub", help="public key PEM path (default: signer.pem.pub)")
+    attest_keygen.add_argument("--out", help="private key PEM path (default: signer.pem).")
+    attest_keygen.add_argument("--pub", help="public key PEM path (default: signer.pem.pub).")
 
     attest = with_run(add("attest", cmd_attest, "Sign an event-chain attestation."))
-    attest.add_argument("--key", help="private key PEM path (or CONTINUUM_SIGNER_KEY)")
-    attest.add_argument("--signer", help="signer name (or CONTINUUM_SIGNER env)")
-    attest.add_argument("--out", help="write attestation JSON here (default: stdout)")
+    attest.add_argument("--key", help="private key PEM path (or CONTINUUM_SIGNER_KEY).")
+    attest.add_argument("--signer", help="signer name (or CONTINUUM_SIGNER env).")
+    attest.add_argument("--out", help="write attestation JSON here (default: stdout).")
 
     attest_verify = with_run(
         add(
@@ -2782,16 +2782,16 @@ def build_parser() -> argparse.ArgumentParser:
             "Verify a signed attestation against the live chain.",
         )
     )
-    attest_verify.add_argument("--attest", required=True, help="path to attestation JSON")
+    attest_verify.add_argument("--attest", required=True, help="path to attestation JSON.")
 
     serve = add("serve", cmd_serve, "Run the CONTINUUM sidecar (JSON wire protocol over stdio).")
     serve.add_argument(
         "--transport",
         default="stdio",
         choices=("stdio", "http"),
-        help="wire transport (default: stdio; http serves POST /<method> JSON)",
+        help="wire transport (default: stdio; http serves POST /<method> JSON).",
     )
-    serve.add_argument("--port", type=int, default=8765, help="port for --transport http")
+    serve.add_argument("--port", type=int, default=8765, help="port for --transport http.")
 
     def cmd_dashboard(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
         from continuum.dashboard import serve_dashboard as _serve
@@ -2802,12 +2802,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     dashboard = add("dashboard", cmd_dashboard, "Serve the dashboard (presentation over run data).")
     dashboard.add_argument(
-        "--port", type=int, default=8000, help="port to listen on (default: 8000)"
+        "--port", type=int, default=8000, help="port to listen on (default: 8000)."
     )
     dashboard.add_argument(
         "--host",
         default="127.0.0.1",
-        help="bind address (default: 127.0.0.1; 0.0.0.0 exposes recovery data)",
+        help="bind address (default: 127.0.0.1; 0.0.0.0 exposes recovery data).",
     )
 
     return parser
