@@ -413,6 +413,9 @@ def _decision_payload(decision: Any, *, goal: str) -> dict[str, Any]:
         },
         "tail_evidence": decision.tail_evidence,
         "informed_retry": getattr(decision, "informed_retry", None),
+        "attempt_lessons": [
+            lesson.model_dump(mode="json") for lesson in decision.state.attempt_lessons
+        ],
         "contract": decision.contract.model_dump(mode="json"),
         "contract_text": render_contract(decision.contract),
         "report": decision.render(),
