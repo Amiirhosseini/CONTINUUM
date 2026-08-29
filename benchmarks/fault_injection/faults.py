@@ -77,10 +77,18 @@ FAULT_BY_NAME: dict[str, FaultClass] = {f.name: f for f in FAULT_CLASSES}
 # CI corpus: classes testable today without feature gates.
 # Scaffold originally had three reliably detectable classes; after #390
 # the fresh-key reissuance class is also testable (authorization-bound
-# budgets at 4a4d76e). Dropped constraint and laundered lesson remain
-# scaffolded until their features land.
+# budgets at 4a4d76e). After #391 (pinning) the dropped-constraint class
+# is testable via hash-tagged markers and grace escalation. Laundered
+# lesson remains scaffolded until its feature lands.
 CI_FAULTS: list[FaultClass] = [
     f
     for f in FAULT_CLASSES
-    if f.name in {"fabricated_progress", "drifted_path_argument", "tampered_history", "fresh_key_reissuance"}
+    if f.name
+    in {
+        "fabricated_progress",
+        "drifted_path_argument",
+        "tampered_history",
+        "fresh_key_reissuance",
+        "dropped_constraint",
+    }
 ]

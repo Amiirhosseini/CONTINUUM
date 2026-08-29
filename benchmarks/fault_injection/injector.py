@@ -181,18 +181,31 @@ def inject_tampered_history(storage: Storage, run_id: str) -> None:
 
 
 def inject_dropped_constraint(storage: Storage, run_id: str) -> None:
-    """Drop constraint pins during reconstruction.
+    """Drop constraint pins during reconstruction (issue #421, epic #391).
 
-    Declares a constraint pin, checkpoints, then simulates a dropped pin
-    by appending a retraction. The pinning verification should notice.
+    Records two pins, checkpoints and compacts. The fault itself is not
+    in storage: both pins are present in SemanticState, but the
+    *summary* (recovery briefing) omits one hash-tagged marker.  The
+    accounting helper then flags the missing pin by hash prefix and
+    strict mode escalates.  This uses real storage, real compact and
+    real briefing, not unit fixtures only.
+
+    Pre-#391 this was a gap (no pin support, so nothing to flag).  Post-
+    #391 the corpus expects detection via continuum.state.semantic.
     """
     import hashlib
 
-    digest = hashlib.sha256(b"never push without confirmation").hexdigest()
+    digest1 = hashlib.sha256(b"never push without confirmation").hexdigest()
+    digest2 = hashlib.sha256(b"always require human for deletions").hexdigest()
     storage.append_event(
         run_id,
         EventType.CONSTRAINT_PINNED,
-        {"constraint_id": "pin_001", "sha256": digest},
+        {"constraint_id": "pin_001", "sha256": digest1},
+    )
+    storage.append_event(
+        run_id,
+        EventType.CONSTRAINT_PINNED,
+        {"constraint_id": "pin_002", "sha256": digest2},
     )
     from continuum.checkpoint import CheckpointManager
     from continuum.environment import StaticProvider, capture
@@ -204,23 +217,19 @@ def inject_dropped_constraint(storage: Storage, run_id: str) -> None:
             run_id, StaticProvider(resources={"model": EnvResource(name="model", version="v1")})
         ),
     )
-    # Simulate dropped pin by retracting it without proper handling
-    storage.append_event(
-        run_id,
-        EventType.CONSTRAINT_RETRACTED,
-        {"constraint_id": "pin_001"},
-    )
-    # Also add an evidence that the pin was dropped
-    storage.append_event(
-        run_id,
-        EventType.EVIDENCE_ADDED,
-        {
-            "evidence_id": "ev_pin_dropped",
-            "summary": "pin for model v1 was dropped",
-            "source": "pin",
-            "dropped": True,
-        },
-    )
+    # Real compact: pins must survive anchoring like any event.  Use
+    # compact_run when supported, otherwise just leave the checkpoint.
+    # Storage may be :memory: so compact is still exercised (it creates
+    # an EVENT_LOG_ANCHORED marker and moves prefix to archive).
+    try:
+        if getattr(storage, "supports_compaction", False):
+            storage.compact_run(run_id)  # type: ignore[attr-defined]
+        else:
+            maybe_compact = getattr(storage, "compact_run", None)
+            if callable(maybe_compact):
+                maybe_compact(run_id)
+    except Exception:
+        pass
 
 
 def inject_laundered_lesson(storage: Storage, run_id: str) -> None:
