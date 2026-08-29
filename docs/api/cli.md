@@ -54,7 +54,7 @@ continuum --json <command>      # machine-readable output
 continuum resume run_42
 
 # What changed since the last checkpoint?
-continuum diff run_42
+continuum diff run_42 1 2
 
 # Prove the chain is untampered, then capture a signed attestation
 continuum verify run_42
