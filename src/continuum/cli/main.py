@@ -285,7 +285,7 @@ def cmd_runs(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> 
     ]
     lines = [f"{'RUN':<24} {'STATUS':<12} {'EVENTS':>7}  GOAL"]
     lines += [
-        f"{r.run_id:<24} {r.status.value:<12} {storage.last_sequence(r.run_id):>7}  {r.goal[:44]}"
+        f"{r.run_id:<24} {r.status.value:<12} {storage.last_sequence(r.run_id):>7}  {(r.goal[:41] + '...' if len(r.goal) > 44 else r.goal)}"
         for r in runs
     ]
     _emit(
@@ -1149,7 +1149,7 @@ def cmd_tree(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> 
             mark = "ok " if d.safe else "!! "
             lines.append(
                 f"  {mark}{fork_mark}{child.run_id}  [{d.mode.value}, "
-                f"uncertain={len(d.uncertain_actions)}]  {child.goal[:44]}"
+                f"uncertain={len(d.uncertain_actions)}]  {(child.goal[:41] + '...' if len(child.goal) > 44 else child.goal)}"
             )
         except Exception as exc:
             lines.append(f"  !! {fork_mark}{child.run_id}  [assess error: {exc}]")
