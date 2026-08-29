@@ -32,6 +32,7 @@ from continuum.events import Event, EventType
 from continuum.models import (
     Approval,
     ApprovalStatus,
+    AttemptLesson,
     ConstraintPin,
     ConstraintPinned,
     ConstraintRetracted,
@@ -154,6 +155,9 @@ class _Accumulator:
         self.pins: dict[str, ConstraintPin] = dict(base.pins) if base else {}
         self.unmatched_pin_retractions: list[str] = (
             list(base.unmatched_pin_retractions) if base else []
+        )
+        self.attempt_lessons: list[AttemptLesson] = (
+            list(base.attempt_lessons) if base and base.attempt_lessons else []
         )
         self.model: ModelState | None = base.model if base else None
         self.created_at: datetime | None = base.created_at if base else None
@@ -432,6 +436,13 @@ class _Accumulator:
             if constraint_id not in self.unmatched_pin_retractions:
                 self.unmatched_pin_retractions.append(constraint_id)
 
+    def attempt_lesson(self, event: Event) -> None:
+        lesson = AttemptLesson.model_validate(event.payload)
+        if any(existing.attempt_id == lesson.attempt_id for existing in self.attempt_lessons):
+            return
+        self.attempt_lessons.append(lesson)
+        self.attempt_lessons.sort(key=lambda existing: existing.created_at)
+
     def plan_upsert(self, event: Event) -> None:
         payload = event.payload
         plan_id = payload.get("plan_id")
@@ -541,6 +552,7 @@ class _Accumulator:
             external_dependencies=self.dependencies,
             pins=dict(self.pins),
             unmatched_pin_retractions=list(self.unmatched_pin_retractions),
+            attempt_lessons=list(self.attempt_lessons),
             model=self.model,
             version=self.version,
             source_sequence=self.source_sequence,
@@ -590,6 +602,8 @@ def _dispatch(acc: _Accumulator, event: Event) -> bool:
             acc.constraint_pinned(event)
         case EventType.CONSTRAINT_RETRACTED:
             acc.constraint_retracted(event)
+        case EventType.ATTEMPT_LESSON:
+            acc.attempt_lesson(event)
         case EventType.PLAN_UPSERT:
             acc.plan_upsert(event)
         case _:
