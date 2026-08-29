@@ -62,7 +62,7 @@ continuum attest run_42 --key signer.pem --out run_42.attest.json
 continuum attest-verify run_42 --attest run_42.attest.json
 ```
 
-Most commands accept `--db` (storage path or URL) and `--json`. Colour is
+Most commands accept `--db` (storage path or URL) and `--json` (machine-readable output, also available as `continuum <command> --help` for each subcommand). Colour is
 TTY-aware and respects `NO_COLOR`; piped output is byte-identical to uncoloured
 output.
 
