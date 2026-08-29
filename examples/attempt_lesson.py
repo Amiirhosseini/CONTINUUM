@@ -15,7 +15,7 @@ from pathlib import Path
 
 from continuum.events import EventType
 from continuum.models import Run
-from continuum.recovery.summary import build_attempt_lesson, record_attempt_lesson
+from continuum.recovery.summary import record_attempt_lesson
 from continuum.state.semantic import project
 from continuum.storage import SQLiteStorage
 
@@ -41,11 +41,13 @@ def _parent_resume(db_path: str, run_id: str) -> None:
     engine = RecoveryEngine(storage)
     decision = engine.assess(run_id)
     print(f"parent: decision mode={decision.mode}, uncertain={len(decision.uncertain_actions)}")
-    lesson = record_attempt_lesson(storage, run_id, decision, uncertain_actions=decision.uncertain_actions)
+    lesson = record_attempt_lesson(
+        storage, run_id, decision, uncertain_actions=decision.uncertain_actions
+    )
     print(f"parent: recorded lesson {lesson.attempt_id}: {lesson.falsified}")
     state = project(run_id, storage.read_events(run_id))
     assert state.attempt_lessons
-    assert any(l.attempt_id == lesson.attempt_id for l in state.attempt_lessons)
+    assert any(item.attempt_id == lesson.attempt_id for item in state.attempt_lessons)
     print(f"parent: project sees {len(state.attempt_lessons)} lesson(s)")
     from continuum.recovery.summary import render_attempt_lesson
 
