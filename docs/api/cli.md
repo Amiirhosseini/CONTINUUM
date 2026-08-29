@@ -40,7 +40,7 @@ continuum --json <command>      # machine-readable output
 | `actions <run_id>` | List recorded side effects and flag uncertain outcomes. |
 | `show-contract <run_id>` | Print the recovery contract for the run. |
 | `replay <run_id>` | Replay events and verify the stored state version. |
-| `benchmark` | Run the CONTINUUM-Bench harness. |
+| `benchmark [--total <n>]` | Run the CONTINUUM-Bench harness (default: 200 documents per run). |
 | `attest-keygen` | Generate an Ed25519 signer key pair (PEM files). |
 | `attest <run_id>` | Sign a run's event chain into an attestation document. |
 | `attest-verify <run_id> --attest <file>` | Verify a signed attestation against the live chain. |
