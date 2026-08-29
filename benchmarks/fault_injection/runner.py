@@ -71,6 +71,89 @@ def _assess_run(
     storage: Storage, run_id: str, fault_name: str | None = None
 ) -> tuple[bool, str | None, list[str], bool]:
     """Assess a run and return (detected, detection_module, notes, unsafe_resume)."""
+    # Dropped-constraint is detected via hash-tagged marker accounting, not
+    # via the normal validator.  Use real storage + real compact + real
+    # briefing: both pins are present in SemanticState, but the rendered
+    # summary omits one marker.  Accounting must flag the missing pin by
+    # hash prefix and strict must escalate.
+    if fault_name == "dropped_constraint":
+        try:
+            from datetime import timedelta
+
+            from continuum.checkpoint.context import build_recovery_context
+            from continuum.state.semantic import (
+                account_pins_in_context,
+                check_pin_accounting,
+                project,
+            )
+
+            # Read live + archived so pins survive compaction like in
+            # production (issue #239).  Fall back to live only for
+            # storages that do not support archiving.
+            try:
+                live = list(storage.read_events(run_id))
+                archived = list(storage.read_archived_events(run_id))  # type: ignore[attr-defined]
+                events = sorted([*archived, *live], key=lambda e: e.sequence)
+            except Exception:
+                events = list(storage.read_events(run_id))
+            state = project(run_id, events)
+            # Need two pins to make the "one dropped" meaningful.
+            if len(state.pins) < 2:
+                return (
+                    False,
+                    None,
+                    [f"expected 2 pins, found {len(state.pins)}"],
+                    True,
+                )
+            ctx = build_recovery_context(state)
+            rendered = ctx.render()
+            # Pick the first pin to drop (deterministic order by constraint_id).
+            first_pin_id = sorted(state.pins.keys())[0]
+            first_pin = state.pins[first_pin_id]
+            marker = f"[pin:{first_pin_id}:{first_pin.sha256[:8]}]"
+            if marker not in rendered:
+                return (
+                    False,
+                    None,
+                    [f"marker {marker} not in rendered context"],
+                    True,
+                )
+            dropped_rendered = rendered.replace(marker, "")
+            # Use grace window so absence is past grace and strict escalates.
+            now = first_pin.pinned_at + timedelta(seconds=100)
+            accounting = account_pins_in_context(state, dropped_rendered, grace_seconds=60, now=now)
+            info = accounting.get(first_pin_id)
+            if info is None or info["status"] != "absent":
+                return False, None, [f"pin {first_pin_id} not flagged as absent"], True
+            flag = info.get("flag") or ""
+            if first_pin_id not in flag or first_pin.sha256[:8] not in flag:
+                return (
+                    False,
+                    None,
+                    [f"flag missing hash prefix: {flag!r}"],
+                    True,
+                )
+            # Strict escalation check.
+            _acc2, _flags, should_escalate = check_pin_accounting(
+                state, dropped_rendered, grace_seconds=60, now=now, strict=True
+            )
+            if not should_escalate:
+                return False, None, ["strict should escalate but did not"], True
+            # Also verify non-strict does not escalate (advisory only).
+            _acc3, _flags3, should_not = check_pin_accounting(
+                state, dropped_rendered, grace_seconds=60, now=now, strict=False
+            )
+            if should_not:
+                return False, None, ["non-strict should not escalate"], True
+            notes = [flag, f"dropped {first_pin_id}:{first_pin.sha256[:8]}"]
+            return True, "continuum.state.semantic", notes, False
+        except Exception as exc:
+            return (
+                True,
+                "continuum.state.semantic",
+                [f"dropped_constraint assess exception: {exc}"],
+                False,
+            )
     engine = RecoveryEngine(storage)
     try:
         from continuum.environment import StaticProvider, capture
@@ -192,7 +275,9 @@ def _assess_fresh_key_reissuance() -> tuple[bool, str | None, list[str], bool]:
 
         tmp_path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path.write_text(
-            json.dumps({"default_max_attempts": 3, "action_types": {"send_invoice": {"max_attempts": 3}}})
+            json.dumps(
+                {"default_max_attempts": 3, "action_types": {"send_invoice": {"max_attempts": 3}}}
+            )
         )
 
         storage = SQLiteStorage(":memory:")
@@ -216,18 +301,42 @@ def _assess_fresh_key_reissuance() -> tuple[bool, str | None, list[str], bool]:
             except Exception as exc:
                 msg = str(exc)
                 if "budget exhausted" not in msg.lower():
-                    return False, None, [f"4th claim refused but reason missing budget exhausted: {msg}"], True
+                    return (
+                        False,
+                        None,
+                        [f"4th claim refused but reason missing budget exhausted: {msg}"],
+                        True,
+                    )
                 if auth_id[:8] not in msg and auth_id not in msg:
-                    return False, None, [f"refusal must name authorization_id {auth_id[:12]}..., got: {msg}"], True
-                if "remaining 0" not in msg and "remaining: 0" not in msg and "0 remaining" not in msg:
+                    return (
+                        False,
+                        None,
+                        [f"refusal must name authorization_id {auth_id[:12]}..., got: {msg}"],
+                        True,
+                    )
+                if (
+                    "remaining 0" not in msg
+                    and "remaining: 0" not in msg
+                    and "0 remaining" not in msg
+                ):
                     if "0" not in msg:
-                        return False, None, [f"refusal should indicate remaining 0, got: {msg}"], True
+                        return (
+                            False,
+                            None,
+                            [f"refusal should indicate remaining 0, got: {msg}"],
+                            True,
+                        )
 
             try:
                 outcome2 = ledger.claim("send_invoice", {"invoice": "INV-002"}, key="fresh-other")
                 assert outcome2.fresh
             except Exception as exc:
-                return False, None, [f"distinct authorization INV-002 should not be blocked: {exc}"], True
+                return (
+                    False,
+                    None,
+                    [f"distinct authorization INV-002 should not be blocked: {exc}"],
+                    True,
+                )
 
             raw = load_budgets(tmp_path)
             rem1 = get_remaining(raw, "send_invoice", auth_id)
@@ -246,7 +355,9 @@ def _assess_fresh_key_reissuance() -> tuple[bool, str | None, list[str], bool]:
                 storage2.append_event(run2, EventType.RUN_STARTED, {"goal": "settle"})
                 ledger2 = ActionLedger(storage2, run2)
                 tmp_path.write_text(
-                    json.dumps({"default_max_attempts": 5, "action_types": {"deploy": {"max_attempts": 5}}})
+                    json.dumps(
+                        {"default_max_attempts": 5, "action_types": {"deploy": {"max_attempts": 5}}}
+                    )
                 )
                 auth_dep = resolve_authorization_id("deploy", None, {"target": "prod-1"})
                 assert auth_dep is not None
@@ -262,13 +373,20 @@ def _assess_fresh_key_reissuance() -> tuple[bool, str | None, list[str], bool]:
                     return (
                         False,
                         None,
-                        [f"settlement should draw down: after claim {rem_after_claim}, after complete {rem_after_complete}"],
+                        [
+                            f"settlement should draw down: after claim {rem_after_claim}, after complete {rem_after_complete}"
+                        ],
                         True,
                     )
             finally:
                 storage2.close()
 
-            return True, "continuum.budgets", [f"fresh-key reissuance correctly blocked at cap for {auth_id[:8]}..."], False
+            return (
+                True,
+                "continuum.budgets",
+                [f"fresh-key reissuance correctly blocked at cap for {auth_id[:8]}..."],
+                False,
+            )
         finally:
             storage.close()
     finally:
