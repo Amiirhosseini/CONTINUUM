@@ -315,6 +315,135 @@ def _degraded_lines(state: SemanticState) -> list[str]:
     ]
 
 
+def cmd_record_plan(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Record a structured plan upsert (issue #312). Mutates storage."""
+    from continuum.events import Event, EventType
+    from continuum.models import Origin
+    from continuum.state.semantic import project
+
+    plan_id = getattr(args, "plan_id", None) or getattr(args, "plan", None)
+    if not plan_id or not isinstance(plan_id, str) or not plan_id.strip():
+        print("error: --plan-id is required and must be non-empty", file=err)
+        return ExitCode.ERROR
+    raw_units: Any = None
+    if getattr(args, "file", None):
+        try:
+            text = Path(args.file).read_text(encoding="utf-8")
+            data = json.loads(text)
+            if isinstance(data, dict) and "units" in data:
+                raw_units = data["units"]
+                if not plan_id and isinstance(data.get("plan_id"), str):
+                    plan_id = data["plan_id"]
+            elif isinstance(data, list):
+                raw_units = data
+            else:
+                raw_units = data
+        except Exception as exc:
+            print(f"error: cannot read plan file: {exc}", file=err)
+            return ExitCode.ERROR
+    elif getattr(args, "units", None):
+        try:
+            raw_units = json.loads(args.units)
+        except Exception as exc:
+            print(f"error: --units is not valid JSON: {exc}", file=err)
+            return ExitCode.ERROR
+    else:
+        print("error: provide --file <path> or --units '<json>'", file=err)
+        return ExitCode.ERROR
+    if not isinstance(raw_units, list):
+        print("error: units must be a JSON array", file=err)
+        return ExitCode.ERROR
+    seen: set[str] = set()
+    sorted_units: list[dict[str, Any]] = []
+    for raw in raw_units:
+        if not isinstance(raw, dict):
+            print("error: each unit must be an object", file=err)
+            return ExitCode.ERROR
+        unit_id = raw.get("id")
+        if not isinstance(unit_id, str) or not unit_id.strip():
+            print("error: unit id must be non-empty", file=err)
+            return ExitCode.ERROR
+        if unit_id in seen:
+            print(f"error: duplicate unit id {unit_id!r}", file=err)
+            return ExitCode.ERROR
+        seen.add(unit_id)
+        title = raw.get("title")
+        if not isinstance(title, str):
+            print(f"error: unit {unit_id!r} title must be a string", file=err)
+            return ExitCode.ERROR
+        status = raw.get("status", "pending")
+        if status not in ("pending", "working", "done", "blocked"):
+            print(
+                f"error: unit {unit_id!r} status must be pending, working, done, or blocked",
+                file=err,
+            )
+            return ExitCode.ERROR
+        depends = raw.get("depends_on", [])
+        if not isinstance(depends, list):
+            print(f"error: unit {unit_id!r} depends_on must be a list", file=err)
+            return ExitCode.ERROR
+        for d in depends:
+            if not isinstance(d, str) or not d.strip():
+                print(
+                    f"error: unit {unit_id!r} depends_on entries must be non-empty strings",
+                    file=err,
+                )
+                return ExitCode.ERROR
+        sorted_units.append(
+            {
+                "id": unit_id,
+                "title": title,
+                "status": status,
+                "depends_on": [str(d) for d in depends],
+            }
+        )
+    sorted_units.sort(key=lambda u: u["id"])
+    try:
+        storage.get_run(args.run_id)
+    except Exception as exc:
+        print(f"error: {exc}", file=err)
+        return ExitCode.NOT_FOUND
+    payload = {"plan_id": plan_id, "units": sorted_units}
+    history = list(storage.read_events(args.run_id))
+    head = history[-1].sequence if history else 0
+    candidate = Event(
+        run_id=args.run_id,
+        sequence=head + 1,
+        type=EventType.PLAN_UPSERT,
+        payload=dict(payload),
+        source=Origin.HUMAN,
+    )
+    try:
+        project(args.run_id, [*history, candidate])
+    except Exception as exc:
+        print(f"error: plan would leave run unprojectable and was not recorded: {exc}", file=err)
+        return ExitCode.ERROR
+    event = storage.append_event(args.run_id, EventType.PLAN_UPSERT, payload, source=Origin.HUMAN)
+    state = project(args.run_id, storage.read_events(args.run_id))
+    _emit(
+        {
+            "run_id": args.run_id,
+            "plan_id": plan_id,
+            "units": len(sorted_units),
+            "sequence": event.sequence,
+            "plan": [
+                {
+                    "id": p.step_id,
+                    "title": p.description,
+                    "status": p.status.value,
+                    "depends_on": p.depends_on,
+                }
+                for p in state.plan
+            ],
+        },
+        f"Plan {plan_id!r} upserted {len(sorted_units)} unit(s) at seq {event.sequence} (plan now {len(state.plan)} units)",
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
+    )
+    return ExitCode.OK
+
+
 def cmd_inspect(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
     """Show semantic state, optionally at a past version."""
     if args.version is not None:
@@ -335,6 +464,13 @@ def cmd_inspect(args: argparse.Namespace, storage: Storage, out: Any, err: Any) 
         f"evidence:    {len(state.evidence)}",
         f"pending:     {len(state.open_work())} task(s)",
     ]
+    if state.plan:
+        lines.append(f"plan:       {len(state.plan)} unit(s)")
+        for pp in state.plan:
+            deps = f" deps:{','.join(pp.depends_on)}" if pp.depends_on else ""
+            lines.append(f"  - {pp.step_id}: {pp.description} [{pp.status.value}]{deps}")
+    else:
+        lines.append("plan:       (none)")
     if state.external_dependencies:
         lines.append("dependencies:")
         lines += [
@@ -567,6 +703,47 @@ def _human_steps(decision: Any, run_id: str) -> list[str]:
     )
 
 
+def _constraint_pins_block(decision: Any) -> dict[str, Any]:
+    """Build the constraint_pins JSON block for resume and validate.
+
+    Read-only display over reconstruction accounting (issue #419). Uses the
+    already projected state and the rendered recovery context, never
+    re-deriving pins. Fail closed on accounting errors by returning an
+    empty block rather than crashing the read-only command.
+    """
+    try:
+        from continuum.checkpoint.context import build_recovery_context
+        from continuum.state.semantic import constraint_pins_payload
+
+        state = decision.state
+        ctx = build_recovery_context(state)
+        rendered = ctx.render()
+        return constraint_pins_payload(state, rendered)
+    except Exception:
+        return {"pins": {}, "flagged": [], "grace_seconds": None}
+
+
+def _constraint_pins_text(block: dict[str, Any]) -> str | None:
+    """Render flagged pins prominently for CLI text output.
+
+    Uses the [!!] marker so the TTY colouriser can highlight it, while
+    piped output stays byte-identical modulo colour codes.
+    """
+    flagged = block.get("flagged", [])
+    pins = block.get("pins", {})
+    if not flagged:
+        return None
+    lines = ["CONSTRAINT PINS: flagged pins require attention"]
+    for pin_id in sorted(flagged):
+        info = pins.get(pin_id, {}) if isinstance(pins, dict) else {}
+        status = info.get("status", "unknown")
+        prefix = info.get("sha256_prefix", "????????")
+        flag = info.get("flag")
+        suffix = f" -- {flag}" if flag else ""
+        lines.append(f"  [!!] {pin_id}:{prefix} {status}{suffix}")
+    return "\n".join(lines)
+
+
 def cmd_validate(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
     """Assess a run without touching it. Exit code carries the verdict."""
     decision = RecoveryEngine(storage, strict_unknown=not args.tolerate_unknown).assess(
@@ -579,6 +756,8 @@ def cmd_validate(args: argparse.Namespace, storage: Storage, out: Any, err: Any)
         out.flush()
         return exit_code_for(decision.mode)
     steps = _human_steps(decision, args.run_id)
+    constraint_pins = _constraint_pins_block(decision)
+    pins_text = _constraint_pins_text(constraint_pins)
     if steps:
         text = (
             decision.render()
@@ -587,6 +766,8 @@ def cmd_validate(args: argparse.Namespace, storage: Storage, out: Any, err: Any)
         )
     else:
         text = decision.render()
+    if pins_text:
+        text += "\n\n" + pins_text
     payload = {
         "run_id": decision.run_id,
         "mode": decision.mode.value,
@@ -595,7 +776,10 @@ def cmd_validate(args: argparse.Namespace, storage: Storage, out: Any, err: Any)
         "rationale": list(decision.rationale),
         "repairs": [s.action_name for s in decision.plan.steps],
         "human_steps": steps,
+        "constraint_pins": constraint_pins,
     }
+    # Advisory health is intentionally not part of the payload above; use
+    # dedicated health command or resume advisory key for the score.
     _emit(
         payload,
         text,
@@ -604,6 +788,60 @@ def cmd_validate(args: argparse.Namespace, storage: Storage, out: Any, err: Any)
         palette=getattr(args, "_palette", None),
     )
     return exit_code_for(decision.mode)
+
+
+def cmd_health(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Advisory prefix-trust health check (issue #401). Read-only."""
+    # Health is advisory only: it never moves mode, never gates, never changes
+    # exit code. It reports the trust score for the projected prefix.
+    run_id = getattr(args, "run_id", None)
+    if not run_id:
+        active = storage.get_active_run()
+        if active is None:
+            _emit(
+                {
+                    "advisory": {
+                        "trust_score": 1.0,
+                        "breakdown": {"role": 1.0, "goal": 1.0, "evidence": 1.0},
+                    }
+                },
+                "No active run for health check.",
+                as_json=args.json,
+                stream=out,
+                palette=getattr(args, "_palette", None),
+            )
+            return ExitCode.OK
+        run_id = active.run_id
+    try:
+        from continuum.analysis.prefix_trust import trust_over_prefix
+
+        state = storage.latest_version(run_id)
+        if state is None:
+            # Fall back to projecting the raw events when no version exists
+            from continuum.state.semantic import project
+
+            state = project(run_id, storage.read_events(run_id))
+        advisory = trust_over_prefix(state)
+    except Exception as exc:
+        _emit(
+            {"error": str(exc), "advisory": {"trust_score": 0.0, "breakdown": {}}},
+            f"health check failed: {exc}",
+            as_json=args.json,
+            stream=out,
+            palette=getattr(args, "_palette", None),
+        )
+        return ExitCode.OK
+    _emit(
+        {"run_id": run_id, "advisory": advisory},
+        f"trust_score: {advisory['trust_score']} "
+        f"(role={advisory['breakdown']['role']} "
+        f"goal={advisory['breakdown']['goal']} "
+        f"evidence={advisory['breakdown']['evidence']})",
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
+    )
+    return ExitCode.OK
 
 
 def cmd_resume(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
@@ -679,6 +917,17 @@ def cmd_resume(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
         else decision.mode.value
     )
     presented_safe = decision.safe and not (family_blocked and decision.mode.value == "resume")
+    # Advisory prefix-trust (issue #401): deterministic, read-only, never gates.
+    try:
+        from continuum.analysis.prefix_trust import trust_over_prefix
+
+        advisory = trust_over_prefix(decision.state)
+    except Exception:
+        advisory = {"trust_score": 1.0, "breakdown": {"role": 1.0, "goal": 1.0, "evidence": 1.0}}
+    constraint_pins = _constraint_pins_block(decision)
+    pins_text = _constraint_pins_text(constraint_pins)
+    if pins_text:
+        text += "\n\n" + pins_text
     payload = {
         "run_id": decision.run_id,
         "goal": storage.get_run(run_id).goal,
@@ -697,6 +946,8 @@ def cmd_resume(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
             "pending": decision.state.progress.pending,
             "failed": decision.state.progress.failed,
         },
+        "advisory": advisory,
+        "constraint_pins": constraint_pins,
     }
     _emit(
         payload,
@@ -779,11 +1030,13 @@ def cmd_confirm(args: argparse.Namespace, storage: Storage, out: Any, err: Any) 
 
 
 def cmd_budget(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
-    """Report retry-budget usage per action type (issue #240). Read-only."""
+    """Report retry-budget usage per action type (issue #240) and per
+    authorization (issue #413). Read-only."""
     from continuum.budgets import (
         DEFAULT_BUDGETS_PATH,
         attempts_for_type,
         evaluate_budget,
+        get_remaining,
         load_budgets,
     )
 
@@ -817,12 +1070,48 @@ def cmd_budget(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
                 "exhausted": remaining == 0,
             }
         )
-    payload = {"run_id": args.run_id, "budgets": rows}
+    # Authorization-bound budgets (issue #413): per (action_type, authorization_id)
+    # counters that survive fresh-key rotation. Visible here so a settlement's
+    # drawdown is observable without reading the raw JSON.
+    auth_rows: list[dict[str, Any]] = []
+    auth_section = raw.get("authorization_bound")
+    if isinstance(auth_section, dict):
+        for atype, by_auth in sorted(auth_section.items()):
+            if not isinstance(by_auth, dict):
+                continue
+            for auth_id, entry in sorted(by_auth.items()):
+                if not isinstance(entry, dict):
+                    continue
+                counter = int(entry.get("counter", 0))
+                max_attempts = int(entry.get("max_attempts", 0))
+                rem = get_remaining(raw, atype, auth_id)
+                remaining = rem if rem is not None else max(0, max_attempts - counter)
+                auth_rows.append(
+                    {
+                        "action_type": atype,
+                        "authorization_id": auth_id,
+                        "counter": counter,
+                        "max_attempts": max_attempts,
+                        "remaining": remaining,
+                        "exhausted": remaining == 0,
+                    }
+                )
+    payload: dict[str, Any] = {"run_id": args.run_id, "budgets": rows}
+    if auth_rows:
+        payload["authorization_budgets"] = auth_rows
     lines = [f"{'ACTION TYPE':<28} {'ATTEMPTS':>8} {'MAX':>4} {'REMAINING':>10}"]
     for r in rows:
         lines.append(
             f"{r['action_type']:<28} {r['attempts']:>8} {r['max_attempts']:>4} {r['remaining']:>10}"
         )
+    if auth_rows:
+        lines.append("")
+        lines.append(f"{'AUTHORIZATION':<48} {'COUNT':>5} {'MAX':>4} {'REMAINING':>10}")
+        for r in auth_rows:
+            label = f"{r['action_type']}/{r['authorization_id'][:12]}..."
+            lines.append(
+                f"{label:<48} {r['counter']:>5} {r['max_attempts']:>4} {r['remaining']:>10}"
+            )
     _emit(
         payload,
         "\n".join(lines) or "No budgets configured.",
@@ -1041,6 +1330,111 @@ def cmd_checkpoint(args: argparse.Namespace, storage: Storage, out: Any, err: An
         f"({checkpoint.state.progress.completed} completed)",
         as_json=args.json,
         stream=out,
+    )
+    return ExitCode.OK
+
+
+def cmd_rewind(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Rewind workspace and projection to a checkpoint (issue #292)."""
+    from continuum.checkpoint.rewind import RewindError, rewind_to_checkpoint
+
+    storage.get_run(args.run_id)
+    try:
+        result = rewind_to_checkpoint(
+            storage, args.run_id, args.to, force=args.force, dry_run=args.dry_run
+        )
+    except RewindError as exc:
+        print(f"error: {exc}", file=err)
+        return ExitCode.ERROR
+    except Exception as exc:
+        print(f"error: rewind failed: {exc}", file=err)
+        return ExitCode.ERROR
+    if args.dry_run:
+        payload: dict[str, Any] = {
+            "run_id": result.run_id,
+            "target_checkpoint": result.target_checkpoint.checkpoint_id,
+            "target_version": result.target_checkpoint.version,
+            "dry_run": True,
+            "reverted_files": list(result.reverted_files),
+            "deleted_files": list(result.deleted_files),
+            "conflicts": list(result.conflicts),
+            "unrecoverable": list(result.unrecoverable),
+            "state_version": result.state_version,
+        }
+        lines = [
+            f"Dry run rewind of {result.run_id} to {result.target_checkpoint.checkpoint_id} (v{result.target_checkpoint.version})"
+        ]
+        if result.reverted_files:
+            lines.append(
+                f"would revert {len(result.reverted_files)} file(s): {', '.join(result.reverted_files[:5])}"
+            )
+        if result.deleted_files:
+            lines.append(
+                f"would delete {len(result.deleted_files)} file(s): {', '.join(result.deleted_files[:5])}"
+            )
+        if result.conflicts:
+            lines.append(f"conflicts ({len(result.conflicts)}): {'; '.join(result.conflicts[:3])}")
+        if result.unrecoverable:
+            lines.append(
+                f"unrecoverable ({len(result.unrecoverable)}): {'; '.join(result.unrecoverable[:3])}"
+            )
+        _emit(
+            payload,
+            "\n".join(lines) or "Dry run: nothing to revert.",
+            as_json=args.json,
+            stream=out,
+            palette=getattr(args, "_palette", None),
+        )
+        return ExitCode.OK
+    if result.conflicts or result.unrecoverable:
+        payload = {
+            "run_id": result.run_id,
+            "target_checkpoint": result.target_checkpoint.checkpoint_id,
+            "target_version": result.target_checkpoint.version,
+            "reverted_files": list(result.reverted_files),
+            "deleted_files": list(result.deleted_files),
+            "conflicts": list(result.conflicts),
+            "unrecoverable": list(result.unrecoverable),
+        }
+        lines = [
+            f"Rewind of {result.run_id} to {result.target_checkpoint.checkpoint_id} (v{result.target_checkpoint.version}) has conflicts"
+        ]
+        if result.conflicts:
+            lines.append(f"conflicts ({len(result.conflicts)}): {'; '.join(result.conflicts[:3])}")
+        if result.unrecoverable:
+            lines.append(
+                f"unrecoverable ({len(result.unrecoverable)}): {'; '.join(result.unrecoverable[:3])}"
+            )
+        lines.append("Use --force to proceed or resolve conflicts and retry.")
+        _emit(
+            payload,
+            "\n".join(lines),
+            as_json=args.json,
+            stream=out,
+            palette=getattr(args, "_palette", None),
+        )
+        return ExitCode.ERROR
+    payload = {
+        "run_id": result.run_id,
+        "target_checkpoint": result.target_checkpoint.checkpoint_id,
+        "target_version": result.target_checkpoint.version,
+        "state_version": result.state_version,
+        "reverted_files": list(result.reverted_files),
+        "deleted_files": list(result.deleted_files),
+        "resume_mode": result.resume_mode,
+        "resume_safe": result.resume_safe,
+    }
+    lines = [
+        f"Rewound {result.run_id} to checkpoint {result.target_checkpoint.checkpoint_id} (v{result.target_checkpoint.version})",
+        f"  reverted {len(result.reverted_files)} file(s), deleted {len(result.deleted_files)} file(s)",
+        f"  state now at v{result.state_version}, resume mode {result.resume_mode} (safe={result.resume_safe})",
+    ]
+    _emit(
+        payload,
+        "\n".join(lines),
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
     )
     return ExitCode.OK
 
@@ -2143,6 +2537,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--dashboard", action="store_true", help="render the Phase 14 recovery dashboard"
     )
 
+    health = with_run(add("health", cmd_health, "Advisory prefix-trust health check. Read-only."))
+    health.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+    # health is advisory only; it never gates, never moves mode, never changes exit code
+    # (issue #401). It reports trust_score with per-dimension breakdown.
+
     resume = with_env(add("resume", cmd_resume, "Decide how a run may resume."))
     resume.add_argument(
         "run_id",
@@ -2199,6 +2598,31 @@ def build_parser() -> argparse.ArgumentParser:
     checkpoint = with_env(with_run(add("checkpoint", cmd_checkpoint, "Force a checkpoint.")))
     checkpoint.add_argument("--trigger", default="manual")
     checkpoint.add_argument("--reason", default="")
+
+    rewind = with_run(add("rewind", cmd_rewind, "Rewind workspace and projection to a checkpoint."))
+    rewind.add_argument(
+        "--to",
+        dest="to",
+        required=True,
+        help="checkpoint id, version or source_sequence to rewind to",
+    )
+    rewind.add_argument(
+        "--force", action="store_true", help="proceed despite conflicts or unrecoverable files"
+    )
+    rewind.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="report what would be reverted without touching files",
+    )
+
+    record_plan = with_run(
+        add("record-plan", cmd_record_plan, "Record a structured plan upsert. Mutates storage.")
+    )
+    record_plan.add_argument("--plan-id", dest="plan_id", required=True, help="plan identifier")
+    record_plan.add_argument(
+        "--file", dest="file", help="JSON file containing units array or {plan_id, units}"
+    )
+    record_plan.add_argument("--units", help="JSON array of units")
 
     observe = add("observe", cmd_observe, "Record one observed tool completion. Mutates storage.")
     observe.add_argument(

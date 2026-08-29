@@ -19,6 +19,7 @@ import pytest
 from continuum.actions import ActionLedger
 from continuum.budgets import (
     BudgetConfigError,
+    _max_for,
     _process_umask,
     _restore_ownership,
     _staged_attributes,
@@ -1028,3 +1029,79 @@ def test_cli_budget_exhausted_exit_is_reported_not_raised(db: str, tmp_path: Pat
     assert code == ExitCode.OK
     rows = json.loads(out)["budgets"]
     assert any(r["action_type"] == "deploy" and r["attempts"] >= 1 for r in rows)
+
+
+def test_hand_built_authorization_counter_bool_is_rejected() -> None:
+    raw = bound_registry()
+    raw["authorization_bound"]["send_invoice"]["authz:stripe-cust-1"]["counter"] = True
+
+    with pytest.raises(
+        BudgetConfigError,
+        match=r"needs a non-negative integer 'counter', got True \(bool\)",
+    ):
+        get_remaining(raw, "send_invoice", "authz:stripe-cust-1")
+
+    with pytest.raises(
+        BudgetConfigError,
+        match=r"needs a non-negative integer 'counter', got True \(bool\)",
+    ):
+        increment(raw, "send_invoice", "authz:stripe-cust-1")
+
+    with pytest.raises(
+        BudgetConfigError,
+        match=r"needs a non-negative integer 'counter', got True \(bool\)",
+    ):
+        would_refuse(raw, "send_invoice", "authz:stripe-cust-1")
+
+
+def test_hand_built_authorization_max_attempts_bool_is_rejected() -> None:
+    raw = bound_registry()
+    raw["authorization_bound"]["send_invoice"]["authz:stripe-cust-1"]["max_attempts"] = True
+
+    with pytest.raises(
+        BudgetConfigError,
+        match=r"needs a positive integer 'max_attempts', got True \(bool\)",
+    ):
+        get_remaining(raw, "send_invoice", "authz:stripe-cust-1")
+
+    with pytest.raises(
+        BudgetConfigError,
+        match=r"needs a positive integer 'max_attempts', got True \(bool\)",
+    ):
+        increment(raw, "send_invoice", "authz:stripe-cust-1")
+
+    with pytest.raises(
+        BudgetConfigError,
+        match=r"needs a positive integer 'max_attempts', got True \(bool\)",
+    ):
+        would_refuse(raw, "send_invoice", "authz:stripe-cust-1")
+
+
+def test_hand_built_action_type_bool_uses_fallback() -> None:
+    raw = {"default_max_attempts": 3, "action_types": {"send_invoice": True}}
+
+    assert _max_for("send_invoice", raw) == 3
+
+
+def test_hand_built_action_type_object_bool_uses_fallback() -> None:
+    raw = {
+        "default_max_attempts": 3,
+        "action_types": {"send_invoice": {"max_attempts": True}},
+    }
+
+    assert _max_for("send_invoice", raw) == 3
+
+
+def test_hand_built_action_type_int_is_used() -> None:
+    raw = {"default_max_attempts": 3, "action_types": {"send_invoice": 5}}
+
+    assert _max_for("send_invoice", raw) == 5
+
+
+def test_hand_built_action_type_object_int_is_used() -> None:
+    raw = {
+        "default_max_attempts": 3,
+        "action_types": {"send_invoice": {"max_attempts": 5}},
+    }
+
+    assert _max_for("send_invoice", raw) == 5

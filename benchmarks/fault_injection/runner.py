@@ -156,9 +156,157 @@ def _assess_run(
         return True, "continuum.recovery.engine", [f"exception: {exc}"], False
 
 
+def _assess_fresh_key_reissuance() -> tuple[bool, str | None, list[str], bool]:
+    """Check authorization-bound budget amplification fix (#415, epic #390).
+
+    Loops fresh idempotency keys for one authorization_id against a single
+    logical resource (invoice INV-001) with max 3, asserts 4th refuses naming
+    the authorization_id and remaining 0, verifies distinct authorizations
+    stay independent and that settlements draw down the same counter. This
+    mirrors the public-boundary scenario in tests/test_budget_drawdown.py
+    but is replayable via the fault corpus.
+    """
+    import json
+    import os
+    import tempfile
+    from pathlib import Path
+
+    from continuum.actions import ActionLedger
+    from continuum.actions.idempotency import resolve_authorization_id
+    from continuum.budgets import get_remaining, load_budgets
+    from continuum.models import Run
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
+    tmp_path = Path(tmp.name)
+    tmp.close()
+    old_env = os.environ.get("CONTINUUM_BUDGETS_PATH")
+    old_default = None
+    try:
+        import continuum.budgets as _budgets
+        import continuum.actions.ledger as _ledger_mod
+
+        old_default = _budgets.DEFAULT_BUDGETS_PATH
+        _budgets.DEFAULT_BUDGETS_PATH = str(tmp_path)
+        _ledger_mod.DEFAULT_BUDGETS_PATH = str(tmp_path)
+        os.environ["CONTINUUM_BUDGETS_PATH"] = str(tmp_path)
+
+        tmp_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path.write_text(
+            json.dumps({"default_max_attempts": 3, "action_types": {"send_invoice": {"max_attempts": 3}}})
+        )
+
+        storage = SQLiteStorage(":memory:")
+        try:
+            run_id = "run_fresh_key"
+            storage.create_run(Run(run_id=run_id, goal="fresh-key"))
+            storage.append_event(run_id, EventType.RUN_STARTED, {"goal": "fresh-key"})
+            ledger = ActionLedger(storage, run_id)
+
+            auth_id = resolve_authorization_id("send_invoice", None, {"invoice": "INV-001"})
+            assert auth_id is not None, "authorization id must be derivable for INV-001"
+
+            for i in range(3):
+                outcome = ledger.claim("send_invoice", {"invoice": "INV-001"}, key=f"fresh-k{i}")
+                assert outcome.fresh
+                ledger.fail(outcome.key, "boom", certain=True)
+
+            try:
+                ledger.claim("send_invoice", {"invoice": "INV-001"}, key="fresh-k3")
+                return False, None, ["4th fresh key for INV-001 was not refused"], True
+            except Exception as exc:
+                msg = str(exc)
+                if "budget exhausted" not in msg.lower():
+                    return False, None, [f"4th claim refused but reason missing budget exhausted: {msg}"], True
+                if auth_id[:8] not in msg and auth_id not in msg:
+                    return False, None, [f"refusal must name authorization_id {auth_id[:12]}..., got: {msg}"], True
+                if "remaining 0" not in msg and "remaining: 0" not in msg and "0 remaining" not in msg:
+                    if "0" not in msg:
+                        return False, None, [f"refusal should indicate remaining 0, got: {msg}"], True
+
+            try:
+                outcome2 = ledger.claim("send_invoice", {"invoice": "INV-002"}, key="fresh-other")
+                assert outcome2.fresh
+            except Exception as exc:
+                return False, None, [f"distinct authorization INV-002 should not be blocked: {exc}"], True
+
+            raw = load_budgets(tmp_path)
+            rem1 = get_remaining(raw, "send_invoice", auth_id)
+            auth2 = resolve_authorization_id("send_invoice", None, {"invoice": "INV-002"})
+            assert auth2 is not None
+            rem2 = get_remaining(raw, "send_invoice", auth2)
+            if rem1 != 0:
+                return False, None, [f"INV-001 remaining expected 0, got {rem1}"], True
+            if rem2 != 2:
+                return False, None, [f"INV-002 remaining expected 2, got {rem2}"], True
+
+            storage2 = SQLiteStorage(":memory:")
+            try:
+                run2 = "run_settle"
+                storage2.create_run(Run(run_id=run2, goal="settle"))
+                storage2.append_event(run2, EventType.RUN_STARTED, {"goal": "settle"})
+                ledger2 = ActionLedger(storage2, run2)
+                tmp_path.write_text(
+                    json.dumps({"default_max_attempts": 5, "action_types": {"deploy": {"max_attempts": 5}}})
+                )
+                auth_dep = resolve_authorization_id("deploy", None, {"target": "prod-1"})
+                assert auth_dep is not None
+                out = ledger2.claim("deploy", {"target": "prod-1"}, key="deploy-k1")
+                raw_after_claim = load_budgets(tmp_path)
+                rem_after_claim = get_remaining(raw_after_claim, "deploy", auth_dep)
+                ledger2.complete(out.key, external_id="ext-1")
+                raw_after_complete = load_budgets(tmp_path)
+                rem_after_complete = get_remaining(raw_after_complete, "deploy", auth_dep)
+                if rem_after_claim is None or rem_after_complete is None:
+                    return False, None, ["settlement budget missing"], True
+                if rem_after_complete >= rem_after_claim:
+                    return (
+                        False,
+                        None,
+                        [f"settlement should draw down: after claim {rem_after_claim}, after complete {rem_after_complete}"],
+                        True,
+                    )
+            finally:
+                storage2.close()
+
+            return True, "continuum.budgets", [f"fresh-key reissuance correctly blocked at cap for {auth_id[:8]}..."], False
+        finally:
+            storage.close()
+    finally:
+        try:
+            import continuum.budgets as _budgets2
+            import continuum.actions.ledger as _ledger_mod2
+
+            if old_default is not None:
+                _budgets2.DEFAULT_BUDGETS_PATH = old_default
+                _ledger_mod2.DEFAULT_BUDGETS_PATH = old_default
+        except Exception:
+            pass
+        if old_env is None:
+            os.environ.pop("CONTINUUM_BUDGETS_PATH", None)
+        else:
+            os.environ["CONTINUUM_BUDGETS_PATH"] = old_env
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
 def run_single_fault(fault: FaultClass, run_id: str | None = None) -> FaultInjectionResult:
     """Run a single fault injection and return the result."""
     start = time.perf_counter()
+    if fault.name == "fresh_key_reissuance":
+        detected, detection_module, notes, unsafe_resume = _assess_fresh_key_reissuance()
+        elapsed_ms = round((time.perf_counter() - start) * 1000, 3)
+        propagation_distance = 1 if detected else 0
+        return FaultInjectionResult(
+            fault_name=fault.name,
+            detected=detected,
+            detection_module=detection_module,
+            propagation_distance=propagation_distance,
+            unsafe_resume=unsafe_resume,
+            elapsed_ms=elapsed_ms,
+            notes=notes,
+        )
     storage = SQLiteStorage(":memory:")
     rid = run_id or f"run_{fault.name}"
     try:

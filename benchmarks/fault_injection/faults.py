@@ -63,18 +63,24 @@ FAULT_CLASSES: list[FaultClass] = [
         expected_detection_module="continuum.recovery.contract",
         should_block_resume=True,
     ),
+    FaultClass(
+        name="fresh_key_reissuance",
+        description="Loop fresh idempotency keys for one authorization to bypass retry budget. Before #413 each fresh key opened a new bucket and the Nth claim passed; after, N fresh keys for same invoice exhaust one bucket and Nth is refused with budget exhausted naming authorization_id (issue #415, epic #390).",
+        expected_detection_module="continuum.budgets",
+        should_block_resume=False,
+    ),
 ]
 
 # Quick lookup
 FAULT_BY_NAME: dict[str, FaultClass] = {f.name: f for f in FAULT_CLASSES}
 
-# CI corpus: only the classes testable today without feature gates.
-# Scaffold ships with the three classes that are reliably detectable on
-# current main: fabricated progress, drifted path, tampered history.
-# Dropped constraint and laundered lesson are scaffolded for when
-# pinning and provenance land, but are not in the CI corpus yet.
+# CI corpus: classes testable today without feature gates.
+# Scaffold originally had three reliably detectable classes; after #390
+# the fresh-key reissuance class is also testable (authorization-bound
+# budgets at 4a4d76e). Dropped constraint and laundered lesson remain
+# scaffolded until their features land.
 CI_FAULTS: list[FaultClass] = [
     f
     for f in FAULT_CLASSES
-    if f.name in {"fabricated_progress", "drifted_path_argument", "tampered_history"}
+    if f.name in {"fabricated_progress", "drifted_path_argument", "tampered_history", "fresh_key_reissuance"}
 ]

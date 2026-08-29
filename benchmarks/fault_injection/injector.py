@@ -253,6 +253,28 @@ def inject_laundered_lesson(storage: Storage, run_id: str) -> None:
     )
 
 
+def inject_fresh_key_reissuance(storage: Storage, run_id: str) -> None:
+    """Loop fresh keys for one authorization to test budget amplification fix (#415).
+
+    Sets up a budgets registry with max 3 for send_invoice, then creates
+    a run and loops fresh idempotency keys for the same invoice. Before
+    #413 (authorization-bound budgets) each fresh key was unbound and the
+    4th claim passed; after, the 4th is refused with budget exhausted
+    naming the authorization_id. This injector does not itself assert; the
+    runner checks that the Nth claim is refused correctly. For the
+    fault-injection corpus, we pre-seed the run with a budgets file via
+    the per-test isolation in conftest, so the injector here only creates
+    the run and leaves budget setup to the runner's per-fault handling.
+    """
+    try:
+        storage.get_run(run_id)
+    except Exception:
+        from continuum.models import Run
+
+        storage.create_run(Run(run_id=run_id, goal="fresh-key reissuance"))
+        storage.append_event(run_id, EventType.RUN_STARTED, {"goal": "fresh-key reissuance"})
+
+
 # Dispatch table
 INJECTORS: dict[str, Any] = {
     "fabricated_progress": inject_fabricated_progress,
@@ -260,6 +282,7 @@ INJECTORS: dict[str, Any] = {
     "tampered_history": inject_tampered_history,
     "dropped_constraint": inject_dropped_constraint,
     "laundered_lesson": inject_laundered_lesson,
+    "fresh_key_reissuance": inject_fresh_key_reissuance,
 }
 
 

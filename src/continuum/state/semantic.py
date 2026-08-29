@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Literal
 
 from continuum.events import Event, EventType
@@ -47,6 +47,7 @@ from continuum.models import (
     Provenance,
     SemanticState,
     StateStatus,
+    utcnow,
 )
 
 __all__ = [
@@ -431,6 +432,64 @@ class _Accumulator:
             if constraint_id not in self.unmatched_pin_retractions:
                 self.unmatched_pin_retractions.append(constraint_id)
 
+    def plan_upsert(self, event: Event) -> None:
+        payload = event.payload
+        plan_id = payload.get("plan_id")
+        if not isinstance(plan_id, str) or not plan_id.strip():
+            raise ProjectionError(f"event {event.event_id}: PLAN_UPSERT missing non-empty plan_id")
+        units = payload.get("units")
+        if not isinstance(units, list):
+            raise ProjectionError(f"event {event.event_id}: PLAN_UPSERT units must be a list")
+        seen: set[str] = set()
+        status_map = {
+            "pending": "pending",
+            "working": "in_progress",
+            "done": "completed",
+            "blocked": "blocked",
+        }
+        by_id: dict[str, Any] = {p.step_id: p for p in self.plan}
+        for raw in units:
+            if not isinstance(raw, dict):
+                raise ProjectionError(f"event {event.event_id}: PLAN_UPSERT unit must be an object")
+            unit_id = raw.get("id")
+            if not isinstance(unit_id, str) or not unit_id.strip():
+                raise ProjectionError(
+                    f"event {event.event_id}: PLAN_UPSERT unit id must be non-empty"
+                )
+            if unit_id in seen:
+                raise ProjectionError(
+                    f"event {event.event_id}: duplicate unit id {unit_id!r} in same PLAN_UPSERT"
+                )
+            seen.add(unit_id)
+            title = raw.get("title")
+            if not isinstance(title, str):
+                raise ProjectionError(
+                    f"event {event.event_id}: unit {unit_id!r} title must be a string"
+                )
+            raw_status = raw.get("status", "pending")
+            if not isinstance(raw_status, str) or raw_status not in status_map:
+                raise ProjectionError(
+                    f"event {event.event_id}: unit {unit_id!r} status must be one of {sorted(status_map)}"
+                )
+            status = status_map[raw_status]
+            depends = raw.get("depends_on", [])
+            if not isinstance(depends, list):
+                raise ProjectionError(
+                    f"event {event.event_id}: unit {unit_id!r} depends_on must be a list"
+                )
+            depends_list = [str(d) for d in depends]
+            from continuum.models import PlanStep, PlanStepStatus
+
+            step = PlanStep(
+                step_id=unit_id,
+                description=title,
+                status=PlanStepStatus(status),
+                depends_on=depends_list,
+                provenance=_provenance(event),
+            )
+            by_id[unit_id] = step
+        self.plan = sorted(by_id.values(), key=lambda p: p.step_id)
+
     # -- finish ----------------------------------------------------------- #
 
     def build(self) -> SemanticState:
@@ -531,6 +590,8 @@ def _dispatch(acc: _Accumulator, event: Event) -> bool:
             acc.constraint_pinned(event)
         case EventType.CONSTRAINT_RETRACTED:
             acc.constraint_retracted(event)
+        case EventType.PLAN_UPSERT:
+            acc.plan_upsert(event)
         case _:
             return False
     return True
@@ -701,3 +762,196 @@ def project(
     selected = [e for e in events if upto is None or e.sequence <= upto]
     state, _ = project_incremental(run_id, selected, on_unprojectable=on_unprojectable)
     return state
+
+
+# --------------------------------------------------------------------------- #
+# Reconstruction accounting per pin (issue #418)
+# --------------------------------------------------------------------------- #
+
+# Marker format for pins in reconstructed context.
+# Each active pin emits a hash-tagged marker like:
+#   [pin:constraint_id:abc12345]
+# where abc12345 is the first 8 chars of the sha256. The marker is the
+# source of truth for accounting, not a summarizer's self-report.
+_PIN_MARKER_PREFIX = "[pin:"
+_PIN_MARKER_SUFFIX = "]"
+
+
+def _pin_marker(pin: ConstraintPin) -> str:
+    """Hash-tagged marker for a pin, emitted by reconstruction."""
+    return f"{_PIN_MARKER_PREFIX}{pin.constraint_id}:{pin.sha256[:8]}{_PIN_MARKER_SUFFIX}"
+
+
+def _pin_marker_for_id(constraint_id: str, sha256: str) -> str:
+    """Marker for a given id and full sha256."""
+    return f"{_PIN_MARKER_PREFIX}{constraint_id}:{sha256[:8]}{_PIN_MARKER_SUFFIX}"
+
+
+def account_pins_in_context(
+    state: SemanticState,
+    context: str,
+    *,
+    grace_seconds: int | None = None,
+    now: datetime | None = None,
+    strict: bool = False,
+) -> dict[str, dict[str, Any]]:
+    """Classify each active pin as present, absent or unverifiable.
+
+    The classification is computed from what the produced ``context`` actually
+    contains, not from a summarizer's claim. Each active pin must have emitted
+    a hash-tagged marker during reconstruction; the marker is the evidence.
+
+    - present: marker found in context
+    - absent: marker not found, and pin not in a truncated/dropped section
+    - unverifiable: marker not found but context was truncated and the pin
+      would have been in a dropped section (so we cannot tell)
+
+    Grace window: if a pin is absent and the time since ``pinned_at`` exceeds
+    ``grace_seconds``, it is flagged. In strict mode the flag escalates to
+    ``REQUIRES_REVIEW``; otherwise it is advisory.
+
+    Returns a dict mapping constraint_id to a dict with:
+    - status: "present" | "absent" | "unverifiable"
+    - sha256: full digest
+    - sha256_prefix: first 8 chars
+    - pinned_at: timestamp
+    - age_seconds: seconds since pinned_at
+    - past_grace: bool
+    - flag: advisory or strict flag if past grace and absent
+    """
+
+    if now is None:
+        now = utcnow()
+
+    result: dict[str, dict[str, Any]] = {}
+    # Check if context indicates truncation (for unverifiable)
+    is_truncated = "[context truncated" in context or "omitted:" in context
+
+    for pin_id, pin in state.pins.items():
+        marker = _pin_marker(pin)
+        present = marker in context
+        age_seconds = (now - pin.pinned_at).total_seconds() if pin.pinned_at else 0
+        past_grace = grace_seconds is not None and age_seconds > grace_seconds
+
+        if present:
+            status = "present"
+            flag = None
+        else:
+            # If context was truncated, we cannot tell if the pin was in a
+            # dropped section — mark as unverifiable rather than absent
+            if is_truncated:
+                # Heuristic: if the pin's marker would have been in a low-
+                # priority section that was dropped, mark unverifiable
+                # For now, we treat any absent with truncation as unverifiable
+                # unless the pin is in the never-dropped set (goal, etc.)
+                # Since pins are not in the never-dropped set, they are unverifiable
+                status = "unverifiable"
+                flag = None
+                if past_grace:
+                    # Even unverifiable past grace is flagged, but not as absent
+                    flag = f"pin {pin_id}:{pin.sha256[:8]} unverifiable past grace ({int(age_seconds)}s > {grace_seconds}s)"
+            else:
+                status = "absent"
+                flag = None
+                if past_grace:
+                    flag = f"pin {pin_id}:{pin.sha256[:8]} absent past grace ({int(age_seconds)}s > {grace_seconds}s)"
+                    if strict:
+                        # Strict escalation will be handled by caller
+                        pass
+
+        result[pin_id] = {
+            "status": status,
+            "sha256": pin.sha256,
+            "sha256_prefix": pin.sha256[:8],
+            "pinned_at": pin.pinned_at,
+            "age_seconds": age_seconds,
+            "past_grace": past_grace,
+            "flag": flag,
+            "marker": marker,
+        }
+
+    return result
+
+
+def pin_markers_for_state(state: SemanticState) -> list[str]:
+    """Emit hash-tagged markers for each active pin in the state."""
+    return [_pin_marker(pin) for pin in state.pins.values()]
+
+
+def check_pin_accounting(
+    state: SemanticState,
+    context: str,
+    *,
+    grace_seconds: int | None = None,
+    now: datetime | None = None,
+    strict: bool = False,
+) -> tuple[dict[str, dict[str, Any]], list[str], bool]:
+    """Accounting wrapper that also determines if strict escalation is needed.
+
+    Returns (accounting, flags, should_escalate) where:
+    - accounting is the per-pin status dict
+    - flags is a list of advisory/strict flag strings
+    - should_escalate is True if strict and any absent past grace
+    """
+    accounting = account_pins_in_context(
+        state, context, grace_seconds=grace_seconds, now=now, strict=strict
+    )
+    flags: list[str] = []
+    should_escalate = False
+    for _pin_id, info in accounting.items():
+        if info["flag"]:
+            flags.append(info["flag"])
+            if info["status"] == "absent" and info["past_grace"] and strict:
+                should_escalate = True
+    return accounting, flags, should_escalate
+
+
+def constraint_pins_payload(
+    state: SemanticState,
+    context: str,
+    *,
+    grace_seconds: int | None = None,
+    now: datetime | None = None,
+    strict: bool = False,
+) -> dict[str, Any]:
+    """Build the JSON block surfaced in resume and validate responses.
+
+    Read-only display over the accounting output (issue #419). No gating
+    logic lives here; strict escalation is decided in #418 and reused
+    only to compute per-pin deadline and past_grace, not to change mode.
+    The caller supplies the already rendered recovery context, so this
+    function never rebuilds markers itself, it only classifies what the
+    context actually contains.
+    """
+    accounting = account_pins_in_context(
+        state, context, grace_seconds=grace_seconds, now=now, strict=strict
+    )
+    pins: dict[str, dict[str, Any]] = {}
+    flagged: list[str] = []
+    for pin_id in sorted(accounting.keys()):
+        info = accounting[pin_id]
+        pinned_at = info["pinned_at"]
+        grace_deadline = None
+        if pinned_at is not None and grace_seconds is not None:
+            try:
+                deadline = pinned_at + timedelta(seconds=grace_seconds)
+                grace_deadline = deadline.isoformat()
+            except Exception:
+                grace_deadline = None
+        pinned_at_iso = pinned_at.isoformat() if pinned_at is not None else None
+        pins[pin_id] = {
+            "status": info["status"],
+            "sha256": info["sha256"],
+            "sha256_prefix": info["sha256_prefix"],
+            "pinned_at": pinned_at_iso,
+            "grace_deadline": grace_deadline,
+            "past_grace": bool(info["past_grace"]),
+            "flag": info["flag"],
+        }
+        if info["status"] != "present":
+            flagged.append(pin_id)
+    return {
+        "pins": pins,
+        "flagged": sorted(flagged),
+        "grace_seconds": grace_seconds,
+    }
