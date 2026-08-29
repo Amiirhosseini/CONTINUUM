@@ -1340,7 +1340,9 @@ def cmd_rewind(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
 
     storage.get_run(args.run_id)
     try:
-        result = rewind_to_checkpoint(storage, args.run_id, args.to, force=args.force, dry_run=args.dry_run)
+        result = rewind_to_checkpoint(
+            storage, args.run_id, args.to, force=args.force, dry_run=args.dry_run
+        )
     except RewindError as exc:
         print(f"error: {exc}", file=err)
         return ExitCode.ERROR
@@ -1359,16 +1361,30 @@ def cmd_rewind(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
             "unrecoverable": list(result.unrecoverable),
             "state_version": result.state_version,
         }
-        lines = [f"Dry run rewind of {result.run_id} to {result.target_checkpoint.checkpoint_id} (v{result.target_checkpoint.version})"]
+        lines = [
+            f"Dry run rewind of {result.run_id} to {result.target_checkpoint.checkpoint_id} (v{result.target_checkpoint.version})"
+        ]
         if result.reverted_files:
-            lines.append(f"would revert {len(result.reverted_files)} file(s): {', '.join(result.reverted_files[:5])}")
+            lines.append(
+                f"would revert {len(result.reverted_files)} file(s): {', '.join(result.reverted_files[:5])}"
+            )
         if result.deleted_files:
-            lines.append(f"would delete {len(result.deleted_files)} file(s): {', '.join(result.deleted_files[:5])}")
+            lines.append(
+                f"would delete {len(result.deleted_files)} file(s): {', '.join(result.deleted_files[:5])}"
+            )
         if result.conflicts:
             lines.append(f"conflicts ({len(result.conflicts)}): {'; '.join(result.conflicts[:3])}")
         if result.unrecoverable:
-            lines.append(f"unrecoverable ({len(result.unrecoverable)}): {'; '.join(result.unrecoverable[:3])}")
-        _emit(payload, "\n".join(lines) or "Dry run: nothing to revert.", as_json=args.json, stream=out, palette=getattr(args, "_palette", None))
+            lines.append(
+                f"unrecoverable ({len(result.unrecoverable)}): {'; '.join(result.unrecoverable[:3])}"
+            )
+        _emit(
+            payload,
+            "\n".join(lines) or "Dry run: nothing to revert.",
+            as_json=args.json,
+            stream=out,
+            palette=getattr(args, "_palette", None),
+        )
         return ExitCode.OK
     if result.conflicts or result.unrecoverable:
         payload = {
@@ -1380,13 +1396,23 @@ def cmd_rewind(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
             "conflicts": list(result.conflicts),
             "unrecoverable": list(result.unrecoverable),
         }
-        lines = [f"Rewind of {result.run_id} to {result.target_checkpoint.checkpoint_id} (v{result.target_checkpoint.version}) has conflicts"]
+        lines = [
+            f"Rewind of {result.run_id} to {result.target_checkpoint.checkpoint_id} (v{result.target_checkpoint.version}) has conflicts"
+        ]
         if result.conflicts:
             lines.append(f"conflicts ({len(result.conflicts)}): {'; '.join(result.conflicts[:3])}")
         if result.unrecoverable:
-            lines.append(f"unrecoverable ({len(result.unrecoverable)}): {'; '.join(result.unrecoverable[:3])}")
+            lines.append(
+                f"unrecoverable ({len(result.unrecoverable)}): {'; '.join(result.unrecoverable[:3])}"
+            )
         lines.append("Use --force to proceed or resolve conflicts and retry.")
-        _emit(payload, "\n".join(lines), as_json=args.json, stream=out, palette=getattr(args, "_palette", None))
+        _emit(
+            payload,
+            "\n".join(lines),
+            as_json=args.json,
+            stream=out,
+            palette=getattr(args, "_palette", None),
+        )
         return ExitCode.ERROR
     payload = {
         "run_id": result.run_id,
@@ -1398,8 +1424,18 @@ def cmd_rewind(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
         "resume_mode": result.resume_mode,
         "resume_safe": result.resume_safe,
     }
-    lines = [f"Rewound {result.run_id} to checkpoint {result.target_checkpoint.checkpoint_id} (v{result.target_checkpoint.version})", f"  reverted {len(result.reverted_files)} file(s), deleted {len(result.deleted_files)} file(s)", f"  state now at v{result.state_version}, resume mode {result.resume_mode} (safe={result.resume_safe})"]
-    _emit(payload, "\n".join(lines), as_json=args.json, stream=out, palette=getattr(args, "_palette", None))
+    lines = [
+        f"Rewound {result.run_id} to checkpoint {result.target_checkpoint.checkpoint_id} (v{result.target_checkpoint.version})",
+        f"  reverted {len(result.reverted_files)} file(s), deleted {len(result.deleted_files)} file(s)",
+        f"  state now at v{result.state_version}, resume mode {result.resume_mode} (safe={result.resume_safe})",
+    ]
+    _emit(
+        payload,
+        "\n".join(lines),
+        as_json=args.json,
+        stream=out,
+        palette=getattr(args, "_palette", None),
+    )
     return ExitCode.OK
 
 
@@ -2564,9 +2600,20 @@ def build_parser() -> argparse.ArgumentParser:
     checkpoint.add_argument("--reason", default="")
 
     rewind = with_run(add("rewind", cmd_rewind, "Rewind workspace and projection to a checkpoint."))
-    rewind.add_argument("--to", dest="to", required=True, help="checkpoint id, version or source_sequence to rewind to")
-    rewind.add_argument("--force", action="store_true", help="proceed despite conflicts or unrecoverable files")
-    rewind.add_argument("--dry-run", action="store_true", help="report what would be reverted without touching files")
+    rewind.add_argument(
+        "--to",
+        dest="to",
+        required=True,
+        help="checkpoint id, version or source_sequence to rewind to",
+    )
+    rewind.add_argument(
+        "--force", action="store_true", help="proceed despite conflicts or unrecoverable files"
+    )
+    rewind.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="report what would be reverted without touching files",
+    )
 
     record_plan = with_run(
         add("record-plan", cmd_record_plan, "Record a structured plan upsert. Mutates storage.")

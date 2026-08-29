@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from continuum.checkpoint.manager import CheckpointManager
 from continuum.environment.file_snapshot import file_digest, restore_file, snapshot_path
 from continuum.events import EventType
 from continuum.models import StateCheckpoint
@@ -98,14 +97,22 @@ def rewind_to_checkpoint(
         before_digest = before_payload.get("sha256") if isinstance(before_payload, dict) else None
         current_digest = file_digest(path)
         expected_after = after_digest if isinstance(after_digest, str) else None
-        if current_digest is not None and expected_after is not None and current_digest != expected_after:
-            conflicts.append(f"{path}: current digest {current_digest[:12] if current_digest else 'missing'} != last observed {expected_after[:12]}")
+        if (
+            current_digest is not None
+            and expected_after is not None
+            and current_digest != expected_after
+        ):
+            conflicts.append(
+                f"{path}: current digest {current_digest[:12] if current_digest else 'missing'} != last observed {expected_after[:12]}"
+            )
             continue
         if current_digest is None and expected_after is not None:
             if before_digest is None:
                 deleted.append(path)
                 continue
-            conflicts.append(f"{path}: file missing but last observed digest {expected_after[:12]} exists")
+            conflicts.append(
+                f"{path}: file missing but last observed digest {expected_after[:12]} exists"
+            )
             continue
         if before_digest is None:
             try:
@@ -127,7 +134,9 @@ def rewind_to_checkpoint(
         else:
             snapshot = snapshot_path(before_digest)
             if not snapshot.exists():
-                unrecoverable.append(f"{path}: no snapshot for digest {before_digest[:12]} (file may have been too large or unreadable at checkpoint)")
+                unrecoverable.append(
+                    f"{path}: no snapshot for digest {before_digest[:12]} (file may have been too large or unreadable at checkpoint)"
+                )
                 continue
             if not dry_run:
                 if file_digest(path) != expected_after:
@@ -138,7 +147,9 @@ def rewind_to_checkpoint(
                     continue
                 new_digest = file_digest(path)
                 if new_digest != before_digest:
-                    conflicts.append(f"{path}: after restore digest {new_digest[:12] if new_digest else 'missing'} != expected {before_digest[:12]}")
+                    conflicts.append(
+                        f"{path}: after restore digest {new_digest[:12] if new_digest else 'missing'} != expected {before_digest[:12]}"
+                    )
                     continue
             reverted.append(path)
     if not force and not dry_run and (conflicts or unrecoverable):
