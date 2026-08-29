@@ -204,7 +204,7 @@ accounting, flags, should_escalate = check_pin_accounting(state, context_without
 
 # Strict fail-closed
 accounting, flags, should_escalate = check_pin_accounting(state, context_without, grace_seconds=60, now=now_past, strict=True)
-# should_escalate == True -> RecoveryEngine sets mode=REQUEST_HUMAN, safe=False
+# should_escalate == True -> caller that enforces fail-closed should set mode=REQUEST_HUMAN, safe=False (accounting layer, not automatic in RecoveryEngine v1)
 ```
 
 Within grace, even `strict=True` does not escalate:

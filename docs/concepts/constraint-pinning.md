@@ -215,7 +215,7 @@ accounting, flags, should_escalate = check_pin_accounting(state, context_without
 
 `should_escalate` is true only when `strict` and at least one pin is `absent` and `past_grace`. `unverifiable` past grace is flagged but never triggers `should_escalate`, even in strict mode (house fail-closed applies to the cases we can assert, not to those we cannot tell).
 
-`RecoveryEngine` uses `check_pin_accounting(..., strict=True)` to set `REQUEST_HUMAN` with `safe=False` when `should_escalate` is true, matching the house rule that uncertainty degrades rather than resolves in its own favor. The CLI and MCP surfaces `constraint_pins` read-only, no gating change lives there, strict escalation remains in the accounting layer (see `src/continuum/state/semantic.py:check_pin_accounting` and `src/continuum/checkpoint/context.py:build_recovery_context`).
+`check_pin_accounting(..., strict=True)` returns `should_escalate` true when at least one `absent` pin is `past_grace`. A caller that enforces fail-closed should treat that as `REQUIRES_REVIEW` (`REQUEST_HUMAN` with `safe=False`), matching the house rule that uncertainty degrades rather than resolves in its own favor. The current `build_recovery_context` surfaces flags in `notes` and the CLI/MCP surfaces the `constraint_pins` block read-only; strict escalation remains in the accounting layer and is consumed by callers rather than by an automatic mode change in `RecoveryEngine` v1 (see `src/continuum/state/semantic.py:check_pin_accounting` and `src/continuum/checkpoint/context.py:build_recovery_context`).
 
 ## Edge cases
 
