@@ -2060,7 +2060,18 @@ def _codex_feature_flag_hint() -> str:
             "note: Codex hooks are off by default. Add '[features]\\ncodex_hooks = true' "
             f"to {config} (create it if needed), then restart Codex."
         )
-    if "codex_hooks" not in text:
+    import re
+
+    has_flag = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        code_part = line.split("#", 1)[0]
+        if re.search(r"^\s*codex_hooks\s*=", code_part):
+            has_flag = True
+            break
+    if not has_flag:
         return (
             f"note: 'codex_hooks' was not found in {config}; add "
             "'[features]\\ncodex_hooks = true', then restart Codex."

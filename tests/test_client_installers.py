@@ -114,6 +114,24 @@ def test_codex_install_stays_silent_when_flag_present(
     assert "feature_flag_hint" not in json.loads(out)
 
 
+def test_codex_install_hints_when_feature_flag_commented_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_home = tmp_path / "home"
+    codex_dir = fake_home / ".codex"
+    codex_dir.mkdir(parents=True)
+    (codex_dir / "config.toml").write_text(
+        "# .codex/config.toml\n# example: codex_hooks = true\n[features]\n# not set\n"
+    )
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: fake_home))
+    settings = tmp_path / "settings.json"
+    code, out, _ = run("--json", "hooks", "install", "codex", "--settings", str(settings))
+    assert code == ExitCode.OK
+    payload = json.loads(out)
+    assert "feature_flag_hint" in payload
+    assert "codex_hooks" in payload["feature_flag_hint"]
+
+
 def test_gemini_payload_shape_matches_the_observation_contract() -> None:
     """Gemini AfterTool payloads carry the same tool_name/tool_input fields;
     prove `continuum observe` accepts one verbatim through the real CLI."""
