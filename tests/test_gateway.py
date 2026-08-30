@@ -300,7 +300,7 @@ def _raw_gateway_request(addr: str, raw: bytes) -> tuple[int, bytes]:
     except OSError:
         pass
     finally:
-            with contextlib.suppress(OSError):
+        with contextlib.suppress(OSError):
             sock.close()
     if not data:
         return 0, b""
@@ -321,7 +321,7 @@ def test_malformed_content_length_returns_400_not_closed(db: str, gateway: str) 
         b"Content-Length: abc\r\n"
         b"Content-Type: application/json\r\n"
         b"Connection: close\r\n\r\n"
-        b"{\"id\": \"I-5\"}"
+        b'{"id": "I-5"}'
     )
     status, body = _raw_gateway_request(gateway, raw)
     assert status == 400, f"expected 400, got {status} body={body!r}"

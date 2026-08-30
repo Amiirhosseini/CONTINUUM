@@ -144,7 +144,7 @@ def _raw_dashboard_request(addr: str, raw: bytes) -> tuple[int, bytes]:
     except OSError:
         pass
     finally:
-            with contextlib.suppress(OSError):
+        with contextlib.suppress(OSError):
             sock.close()
     if not data:
         return 0, b""
@@ -290,7 +290,9 @@ def test_dashboard_small_body_still_200(tmp_path: Path) -> None:
     try:
         small = urllib.parse.urlencode({"run_id": "run_1", "token": "op-secret"}).encode()
         conn = http.client.HTTPConnection(addr, timeout=10)
-        conn.request("POST", "/action/confirm", body=small, headers={"Content-Length": str(len(small))})
+        conn.request(
+            "POST", "/action/confirm", body=small, headers={"Content-Length": str(len(small))}
+        )
         resp = conn.getresponse()
         data = resp.read().decode(errors="ignore")
         conn.close()
@@ -361,10 +363,8 @@ def test_dashboard_and_gateway_chunked_same_status(tmp_path: Path) -> None:
             except OSError:
                 pass
             finally:
-                try:
+                with contextlib.suppress(OSError):
                     sock.close()
-                except OSError:
-                    pass
             if not data:
                 return 0
             header = data.split(b"\r\n")[0].decode(errors="ignore")

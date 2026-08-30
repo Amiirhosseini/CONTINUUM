@@ -280,7 +280,9 @@ class GatewayServer:
                                     drained += len(trailer)
                                     if drained > DRAIN_LIMIT_BYTES:
                                         self.close_connection = True
-                                        self._respond(413, {"error": "request body too large to drain"})
+                                        self._respond(
+                                            413, {"error": "request body too large to drain"}
+                                        )
                                         raise _BodyTooLarge
                                     if trailer in (b"\r\n", b"\n", b""):
                                         break
