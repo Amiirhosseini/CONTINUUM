@@ -2288,6 +2288,10 @@ def cmd_verify(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
     else:
         lines = [f"INTEGRITY FAILURE: {len(report.violations)} violation(s)"]
         lines += [f"  seq {v.sequence}: {v.kind} — {v.detail}" for v in report.violations[:20]]
+        if len(report.violations) > 20:
+            lines.append(
+                f"... and {len(report.violations) - 20} more violation(s) omitted, see --json for full list"
+            )
         trusted = report.trusted_through.get(args.run_id, 0)
         lines.append(f"  trusted through sequence {trusted}")
         text = "\n".join(lines)
