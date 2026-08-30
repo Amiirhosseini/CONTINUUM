@@ -83,7 +83,7 @@ def build_informed_retry(
     uncertainty. Otherwise the return is ``None`` and callers must not change
     their output at all.
     """
-    events = storage.read_events(run_id)
+    events = list(storage.read_all_events(run_id))
     starts = [e for e in events if e.type is EventType.RECOVERY_STARTED]
     completions = [e for e in events if e.type is EventType.RECOVERY_COMPLETED]
     blocked = [e for e in events if e.type is EventType.RECOVERY_BLOCKED]

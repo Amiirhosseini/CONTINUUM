@@ -831,6 +831,13 @@ def build_server(
         payload: dict[str, Any] = {"summary": summary}
         if pinning_clean:
             payload["pinning"] = pinning_clean
+        from continuum.provenance_map import provenance_for_run
+
+        derived = provenance_for_run(ctx.storage, run_id)
+        from continuum.provenance_map import clamp_derived_origin
+
+        stamped = clamp_derived_origin(derived, Origin.EXTERNAL_AGENT, None)
+        payload["derived_origin"] = stamped.value
         event = ctx.storage.append_event(
             run_id,
             EventType.REASONING_SUMMARY,

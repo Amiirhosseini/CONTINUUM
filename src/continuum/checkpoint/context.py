@@ -127,7 +127,10 @@ def _pins_section(state: SemanticState) -> ContextSection:
 
 
 def _goal_section(state: SemanticState) -> ContextSection:
-    lines = [f"{state.goal.description}  (goal v{state.goal.version})"]
+    origin = state.goal.provenance.origin.value
+    seq = state.goal.provenance.source_sequence
+    tag = f" [provenance: {origin} seq:{seq}]" if seq is not None else f" [provenance: {origin}]"
+    lines = [f"{state.goal.description}  (goal v{state.goal.version}){tag}"]
     lines += [f"constraint: {c}" for c in state.goal.constraints]
     return ContextSection("CURRENT GOAL", tuple(lines), priority=0)
 
@@ -135,7 +138,10 @@ def _goal_section(state: SemanticState) -> ContextSection:
 def _progress_section(state: SemanticState) -> ContextSection:
     p = state.progress
     total = "unknown" if p.total is None else str(p.total)
-    line = f"{p.completed} completed, {p.pending} pending, {p.failed} failed (of {total})"
+    origin = p.provenance.origin.value
+    seq = p.provenance.source_sequence
+    tag = f" [provenance: {origin} seq:{seq}]" if seq is not None else f" [provenance: {origin}]"
+    line = f"{p.completed} completed, {p.pending} pending, {p.failed} failed (of {total}){tag}"
     lines = [line, f"derived from events 1..{state.source_sequence}"]
     return ContextSection("VERIFIED PROGRESS", tuple(lines), priority=1)
 
@@ -146,10 +152,24 @@ def _stale_section(state: SemanticState) -> ContextSection:
     for decision in state.decisions:
         if decision.status in _TERMINAL:
             reason = decision.invalidated_reason or "no reason recorded"
-            lines.append(f"[{decision.status}] decision {decision.decision_id}: {reason}")
+            origin = decision.provenance.origin.value
+            seq = decision.provenance.source_sequence
+            tag = (
+                f" [provenance: {origin} seq:{seq}]"
+                if seq is not None
+                else f" [provenance: {origin}]"
+            )
+            lines.append(f"[{decision.status}] decision {decision.decision_id}: {reason}{tag}")
     for finding in state.findings:
         if finding.status in _TERMINAL:
-            lines.append(f"[{finding.status}] finding {finding.finding_id}: {finding.claim}")
+            origin = finding.provenance.origin.value
+            seq = finding.provenance.source_sequence
+            tag = (
+                f" [provenance: {origin} seq:{seq}]"
+                if seq is not None
+                else f" [provenance: {origin}]"
+            )
+            lines.append(f"[{finding.status}] finding {finding.finding_id}: {finding.claim}{tag}")
     for dependency in state.external_dependencies:
         if dependency.status in _TERMINAL:
             lines.append(
@@ -170,12 +190,12 @@ def _stale_section(state: SemanticState) -> ContextSection:
 def _review_section(state: SemanticState) -> ContextSection:
     """Inferred or unverified state that a human or a check must confirm."""
     lines = [
-        f"[{d.status}] decision {d.decision_id}: {d.decision}"
+        f"[{d.status}] decision {d.decision_id}: {d.decision} [provenance: {d.provenance.origin.value} seq:{d.provenance.source_sequence}]"
         for d in state.decisions
         if d.status is StateStatus.REQUIRES_REVIEW
     ]
     lines += [
-        f"[{f.status}] finding {f.finding_id}: {f.claim}"
+        f"[{f.status}] finding {f.finding_id}: {f.claim} [provenance: {f.provenance.origin.value} seq:{f.provenance.source_sequence}]"
         for f in state.findings
         if f.status is StateStatus.REQUIRES_REVIEW
     ]
@@ -189,7 +209,10 @@ def _review_section(state: SemanticState) -> ContextSection:
 
 def _decisions_section(state: SemanticState, limit: int) -> ContextSection:
     valid = state.valid_decisions()
-    lines = [f"{d.decision_id}: {d.decision}" for d in valid[:limit]]
+    lines = [
+        f"{d.decision_id}: {d.decision} [provenance: {d.provenance.origin.value} seq:{d.provenance.source_sequence}]"
+        for d in valid[:limit]
+    ]
     if len(valid) > limit:
         lines.append(f"... and {len(valid) - limit} more valid decisions")
     return ContextSection("VALID DECISIONS", tuple(lines), priority=4)
@@ -197,7 +220,10 @@ def _decisions_section(state: SemanticState, limit: int) -> ContextSection:
 
 def _pending_section(state: SemanticState, limit: int) -> ContextSection:
     work = state.open_work()
-    lines = [f"{w.task_id}: {w.description}" for w in work[:limit]]
+    lines = [
+        f"{w.task_id}: {w.description} [provenance: {w.provenance.origin.value} seq:{w.provenance.source_sequence}]"
+        for w in work[:limit]
+    ]
     if len(work) > limit:
         lines.append(f"... and {len(work) - limit} more pending tasks")
     return ContextSection("PENDING TASKS", tuple(lines), priority=5)
@@ -206,7 +232,10 @@ def _pending_section(state: SemanticState, limit: int) -> ContextSection:
 def _findings_section(state: SemanticState, limit: int) -> ContextSection:
     usable = [f for f in state.findings if f.status is StateStatus.VALID]
     ranked = sorted(usable, key=lambda f: (-f.confidence, f.finding_id))
-    lines = [f"{f.finding_id} ({f.confidence:.2f}): {f.claim}" for f in ranked[:limit]]
+    lines = [
+        f"{f.finding_id} ({f.confidence:.2f}): {f.claim} [provenance: {f.provenance.origin.value} seq:{f.provenance.source_sequence}]"
+        for f in ranked[:limit]
+    ]
     if len(ranked) > limit:
         lines.append(f"... and {len(ranked) - limit} more findings")
     return ContextSection("RELEVANT FINDINGS", tuple(lines), priority=6)
@@ -219,6 +248,80 @@ def _dependencies_section(state: SemanticState) -> ContextSection:
         if d.status not in _TERMINAL
     ]
     return ContextSection("EXTERNAL DEPENDENCIES", tuple(lines), priority=7)
+
+
+def _provenance_map_section(state: SemanticState) -> ContextSection:
+    """Per-fact origin map that survives compaction (issue #294).
+
+    Each line names a durable fact, its origin, and the hash-chained source
+    position it was asserted at. The map is the compaction output's audit
+    trail: a consumer that only sees the briefing still sees per-fact trust
+    instead of a single summary-level level, and each reference stays
+    resolvable to its original chain entry via sequence/event_id.
+    """
+    lines: list[str] = []
+    origin = state.goal.provenance.origin.value
+    seq = state.goal.provenance.source_sequence
+    eid = state.goal.provenance.source_event_id
+    tag = (
+        f"seq:{seq} id:{eid[:12] if eid else '-'}"
+        if seq is not None
+        else f"id:{eid[:12] if eid else '-'}"
+    )
+    lines.append(f"goal: {origin} {tag}")
+    p = state.progress
+    origin = p.provenance.origin.value
+    seq = p.provenance.source_sequence
+    eid = p.provenance.source_event_id
+    tag = (
+        f"seq:{seq} id:{eid[:12] if eid else '-'}"
+        if seq is not None
+        else f"id:{eid[:12] if eid else '-'}"
+    )
+    lines.append(f"progress: {origin} {tag}")
+    for d in sorted(state.decisions, key=lambda x: x.decision_id):
+        origin = d.provenance.origin.value
+        seq = d.provenance.source_sequence
+        eid = d.provenance.source_event_id
+        tag = (
+            f"seq:{seq} id:{eid[:12] if eid else '-'}"
+            if seq is not None
+            else f"id:{eid[:12] if eid else '-'}"
+        )
+        lines.append(f"decision {d.decision_id}: {origin} {tag}")
+    for f in sorted(state.findings, key=lambda x: x.finding_id):
+        origin = f.provenance.origin.value
+        seq = f.provenance.source_sequence
+        eid = f.provenance.source_event_id
+        tag = (
+            f"seq:{seq} id:{eid[:12] if eid else '-'}"
+            if seq is not None
+            else f"id:{eid[:12] if eid else '-'}"
+        )
+        lines.append(f"finding {f.finding_id}: {origin} {tag}")
+    for e in sorted(state.evidence, key=lambda x: x.evidence_id):
+        origin = e.provenance.origin.value
+        seq = e.provenance.source_sequence
+        eid = e.provenance.source_event_id
+        tag = (
+            f"seq:{seq} id:{eid[:12] if eid else '-'}"
+            if seq is not None
+            else f"id:{eid[:12] if eid else '-'}"
+        )
+        lines.append(f"evidence {e.evidence_id}: {origin} {tag}")
+    for pin in sorted(state.pins.values(), key=lambda x: x.constraint_id):
+        origin = pin.provenance.origin.value
+        seq = pin.provenance.source_sequence
+        eid = pin.provenance.source_event_id
+        tag = (
+            f"seq:{seq} id:{eid[:12] if eid else '-'}"
+            if seq is not None
+            else f"id:{eid[:12] if eid else '-'}"
+        )
+        lines.append(f"pin {pin.constraint_id}: {origin} {tag}")
+    return ContextSection(
+        "PROVENANCE MAP — per-fact origin (hash-chained)", tuple(lines), priority=8
+    )
 
 
 def build_recovery_context(
@@ -248,6 +351,7 @@ def build_recovery_context(
         _pending_section(state, max_items),
         _findings_section(state, max_items),
         _dependencies_section(state),
+        _provenance_map_section(state),
     ]
 
     if environment_changes:
