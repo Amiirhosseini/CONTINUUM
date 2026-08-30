@@ -268,19 +268,22 @@ def test_digest_auditable_and_briefing_consumption() -> None:
 
         tmp = tempfile.mktemp(suffix=".sqlite")
         file_storage = SQLiteStorage(tmp)
-        file_storage.create_run(Run(run_id=run_id, goal="g"))
-        for ev in all_events:
-            file_storage.append_event(run_id, ev.type, ev.payload, source=ev.source)
-        verify2 = file_storage.verify_events(run_id)
-        assert verify2.ok
-        out = io.StringIO()
-        err = io.StringIO()
-        code = cli_main(["--db", tmp, "briefing", "--run-id", run_id], out=out, err=err)
-        assert code == 0
-        text = out.getvalue()
-        assert "trajectory reports" in text.lower() or "trajectory report" in text.lower()
-        assert report.report_id in text or str(report.window_end) in text
-        pathlib.Path(tmp).unlink(missing_ok=True)
+        try:
+            file_storage.create_run(Run(run_id=run_id, goal="g"))
+            for ev in all_events:
+                file_storage.append_event(run_id, ev.type, ev.payload, source=ev.source)
+            verify2 = file_storage.verify_events(run_id)
+            assert verify2.ok
+            out = io.StringIO()
+            err = io.StringIO()
+            code = cli_main(["--db", tmp, "briefing", "--run-id", run_id], out=out, err=err)
+            assert code == 0
+            text = out.getvalue()
+            assert "trajectory reports" in text.lower() or "trajectory report" in text.lower()
+            assert report.report_id in text or str(report.window_end) in text
+        finally:
+            file_storage.close()
+            pathlib.Path(tmp).unlink(missing_ok=True)
     finally:
         storage.close()
 
