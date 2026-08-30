@@ -69,6 +69,12 @@ FAULT_CLASSES: list[FaultClass] = [
         expected_detection_module="continuum.budgets",
         should_block_resume=False,
     ),
+    FaultClass(
+        name="unsafe_edit",
+        description="Checkpoint mid-run after ActionLedger.claim, then restore and merge that skips past the unsettled claim. Before #389 the same restore/merge would have passed and silently dropped the outside-world uncertainty; after, the shared gate (continuum.recovery.gate) refuses naming the action id and suggesting reconcile or carry-forward. Covers fork, restore and merge (issue #410, epic #389).",
+        expected_detection_module="continuum.recovery.gate",
+        should_block_resume=True,
+    ),
 ]
 
 # Quick lookup
@@ -90,5 +96,6 @@ CI_FAULTS: list[FaultClass] = [
         "tampered_history",
         "fresh_key_reissuance",
         "dropped_constraint",
+        "unsafe_edit",
     }
 ]

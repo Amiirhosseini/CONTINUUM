@@ -239,6 +239,99 @@ def _assess_run(
         return True, "continuum.recovery.engine", [f"exception: {exc}"], False
 
 
+def _assess_unsafe_edit(storage: Storage, run_id: str) -> tuple[bool, str | None, list[str], bool]:
+    """Check unsafe-edit gate (issue #410, epic #389).
+
+    Real mid-run checkpoint after ActionLedger.claim, then restore and merge
+    that skips the unsettled claim must be refused naming the action id and
+    suggesting reconcile or carry-forward. After reconcile the same restore
+    must pass. This is the public-boundary proof for the whole epic and is
+    falsifiable against pre-epic main where the same restore would have
+    passed silently.
+    """
+    from continuum.actions import ActionLedger
+    from continuum.recovery.gate import EditPreconditionError
+
+    try:
+        ledger = ActionLedger(storage, run_id)
+        pending = ledger.pending()
+        if not pending:
+            return False, None, ["unsafe_edit: no pending action after inject"], True
+        target_action = pending[0]
+        action_id = target_action.action_id
+        anchor = 0
+        try:
+            checkpoints = storage.list_checkpoints(run_id)
+            if checkpoints:
+                anchor = min(cp.state.source_sequence for cp in checkpoints)
+        except Exception:
+            anchor = 0
+        try:
+            pending_seq = None
+            for ev in storage.read_events(run_id):
+                if ev.type.value in ("ACTION_RECORDED", "ACTION_RECONCILED", "ACTION_COMPENSATED"):
+                    act = ev.payload.get("action", {})
+                    if isinstance(act, dict) and act.get("action_id") == action_id:
+                        pending_seq = ev.sequence
+                        break
+            if pending_seq is not None and anchor >= pending_seq:
+                anchor = 0
+        except Exception:
+            pass
+        from continuum.recovery.merge import approve_merge
+        from continuum.recovery.restore import approve_restore
+
+        def _refuses(callable_fn):
+            try:
+                callable_fn()
+            except EditPreconditionError as exc:
+                msg = str(exc)
+                rationale = getattr(exc, "rationale", {})
+                if action_id not in msg and action_id not in str(rationale):
+                    return False, f"refusal did not name action id {action_id}: {msg} / {rationale}"
+                low = (msg + str(rationale)).lower()
+                if "reconcile" not in low or "carry" not in low:
+                    return False, f"refusal must suggest reconcile and carry-forward: {msg}"
+                if "uncertain_slots" not in rationale:
+                    return False, "rationale missing uncertain_slots"
+                return True, ""
+            except Exception as exc:
+                return False, f"unexpected exception: {exc}"
+            return False, "did not refuse"
+
+        ok, why = _refuses(lambda: approve_restore(storage, run_id, reason="test restore", anchor_sequence=anchor))
+        if not ok:
+            return False, None, [f"restore should refuse: {why}"], True
+        ok, why = _refuses(lambda: approve_merge(storage, run_id, reason="test merge", anchor_sequence=anchor))
+        if not ok:
+            return False, None, [f"merge should refuse: {why}"], True
+        from continuum.recovery.gate import check_preconditions
+        try:
+            check_preconditions(storage, run_id, anchor, edit_type="fork")
+            return False, None, ["fork should refuse but passed"], True
+        except EditPreconditionError as exc:
+            if action_id not in str(exc) and action_id not in str(exc.rationale):
+                return False, None, ["fork refusal did not name action id"], True
+        except Exception as exc:
+            return False, None, [f"fork unexpected: {exc}"], True
+        ledger.reconcile(action_id, occurred=True, external_id="ext-1", note="probe")
+        try:
+            approve_restore(storage, run_id, reason="after reconcile", anchor_sequence=anchor)
+        except Exception as exc:
+            return False, None, [f"restore after reconcile should pass but raised {exc}"], True
+        try:
+            approve_merge(storage, run_id, reason="after reconcile", anchor_sequence=anchor)
+        except Exception as exc:
+            return False, None, [f"merge after reconcile should pass but raised {exc}"], True
+        try:
+            check_preconditions(storage, run_id, anchor, edit_type="fork")
+        except Exception as exc:
+            return False, None, [f"fork after reconcile should pass but raised {exc}"], True
+        return True, "continuum.recovery.gate", [f"unsafe_edit correctly refused {action_id[:8]}... and passed after reconcile"], False
+    except Exception as exc:
+        return False, None, [f"unsafe_edit assess exception: {exc}"], True
+
+
 def _assess_fresh_key_reissuance() -> tuple[bool, str | None, list[str], bool]:
     """Check authorization-bound budget amplification fix (#415, epic #390).
 
@@ -412,6 +505,25 @@ def _assess_fresh_key_reissuance() -> tuple[bool, str | None, list[str], bool]:
 def run_single_fault(fault: FaultClass, run_id: str | None = None) -> FaultInjectionResult:
     """Run a single fault injection and return the result."""
     start = time.perf_counter()
+    if fault.name == "unsafe_edit":
+        storage = SQLiteStorage(":memory:")
+        rid = run_id or f"run_{fault.name}"
+        try:
+            inject_fault(storage, rid, fault.name)
+            detected, detection_module, notes, unsafe_resume = _assess_unsafe_edit(storage, rid)
+            elapsed_ms = round((time.perf_counter() - start) * 1000, 3)
+            propagation_distance = 1 if detected else 0
+            return FaultInjectionResult(
+                fault_name=fault.name,
+                detected=detected,
+                detection_module=detection_module,
+                propagation_distance=propagation_distance,
+                unsafe_resume=unsafe_resume,
+                elapsed_ms=elapsed_ms,
+                notes=notes,
+            )
+        finally:
+            storage.close()
     if fault.name == "fresh_key_reissuance":
         detected, detection_module, notes, unsafe_resume = _assess_fresh_key_reissuance()
         elapsed_ms = round((time.perf_counter() - start) * 1000, 3)

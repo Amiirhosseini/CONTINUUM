@@ -262,6 +262,30 @@ def inject_laundered_lesson(storage: Storage, run_id: str) -> None:
     )
 
 
+def inject_unsafe_edit(storage: Storage, run_id: str) -> None:
+    """Create a mid-action checkpoint after an unsettled claim (issue #410, epic #389).
+
+    Real checkpoint mid-run after ActionLedger.claim that leaves an uncertain
+    slot. Before #389 the same restore that skips past the claim would have
+    passed silently and dropped the outside-world uncertainty; after, the
+    shared gate (continuum.recovery.gate) refuses naming the action id and
+    suggesting reconcile or carry-forward. This is the public-boundary proof
+    for the whole epic and covers fork, restore and merge.
+    """
+    from continuum.actions import ActionLedger
+    from continuum.checkpoint import CheckpointManager
+    from continuum.models import Run
+
+    try:
+        storage.get_run(run_id)
+    except Exception:
+        storage.create_run(Run(run_id=run_id, goal="unsafe edit"))
+        storage.append_event(run_id, EventType.RUN_STARTED, {"goal": "unsafe edit", "total": 10})
+    ledger = ActionLedger(storage, run_id)
+    ledger.claim("test.unsafe_edit", {"resource": "r1"}, key="unsafe-k1")
+    CheckpointManager(storage).checkpoint(run_id)
+
+
 def inject_fresh_key_reissuance(storage: Storage, run_id: str) -> None:
     """Loop fresh keys for one authorization to test budget amplification fix (#415).
 
@@ -292,6 +316,7 @@ INJECTORS: dict[str, Any] = {
     "dropped_constraint": inject_dropped_constraint,
     "laundered_lesson": inject_laundered_lesson,
     "fresh_key_reissuance": inject_fresh_key_reissuance,
+    "unsafe_edit": inject_unsafe_edit,
 }
 
 
