@@ -65,16 +65,10 @@ class _MalformedBody(Exception):
 
 #: Requests larger than this are refused with 413 before the body is read.
 #: A proxy that reads unbounded bodies into memory is a denial-of-service
-#: surface against the very agent it protects. Content-Length is validated
-#: strictly: missing or empty means 0, present but not a non-negative int
-#: yields 400. Transfer-Encoding: chunked (case-insensitive, comma list) is
-#: rejected with 400 to prevent bypassing the Content-Length cap; chunked
-#: streams are drained up to DRAIN_LIMIT_BYTES so the client can read the
-#: refusal without an unbounded read (#522).
+#: surface against the very agent it protects.
 MAX_BODY_BYTES = 10 * 1024 * 1024
 
 #: Upper bound on how much we will drain-and-discard before giving up.
-#: Honored for both Content-Length oversize and chunked drains (#317, #522).
 DRAIN_LIMIT_BYTES = 256 * 1024 * 1024
 
 
@@ -243,87 +237,10 @@ class GatewayServer:
                 writes the refusal itself and raises, 413 with
                 :class:`_BodyTooLarge` when it is longer than ``max_bytes``, 400
                 with :class:`_MalformedBody` when it is not JSON this proxy can
-                decode (issue #323) or when Content-Length is malformed or when
-                Transfer-Encoding contains chunked (#522). Callers catch both
-                and return, since the response is already on the wire.
+                decode (issue #323). Callers catch both and return, since the
+                response is already on the wire.
                 """
-                # Fail closed on chunked Transfer-Encoding before Content-Length
-                # parsing, so a client cannot bypass the cap by omitting length
-                # and sending an unbounded chunked stream (#522). Both servers
-                # reject chunked identically with 400 and respect the drain bound.
-                te = self.headers.get("Transfer-Encoding", "")
-                if te and "chunked" in [v.strip().lower() for v in te.split(",")]:
-                    drained = 0
-                    try:
-                        while True:
-                            line = self.rfile.readline(65536)
-                            if not line:
-                                break
-                            drained += len(line)
-                            if drained > DRAIN_LIMIT_BYTES:
-                                self.close_connection = True
-                                self._respond(413, {"error": "request body too large to drain"})
-                                raise _BodyTooLarge
-                            stripped = line.strip().split(b";")[0].strip()
-                            if not stripped:
-                                continue
-                            try:
-                                chunk_size = int(stripped, 16)
-                            except ValueError:
-                                self._respond(400, {"error": "invalid chunked Transfer-Encoding"})
-                                raise _MalformedBody from None
-                            if chunk_size == 0:
-                                while True:
-                                    trailer = self.rfile.readline(65536)
-                                    if not trailer:
-                                        break
-                                    drained += len(trailer)
-                                    if drained > DRAIN_LIMIT_BYTES:
-                                        self.close_connection = True
-                                        self._respond(
-                                            413, {"error": "request body too large to drain"}
-                                        )
-                                        raise _BodyTooLarge
-                                    if trailer in (b"\r\n", b"\n", b""):
-                                        break
-                                break
-                            remaining = chunk_size
-                            while remaining > 0:
-                                chunk = self.rfile.read(min(1024 * 1024, remaining))
-                                if not chunk:
-                                    break
-                                drained += len(chunk)
-                                remaining -= len(chunk)
-                                if drained > DRAIN_LIMIT_BYTES:
-                                    self.close_connection = True
-                                    self._respond(413, {"error": "request body too large to drain"})
-                                    raise _BodyTooLarge
-                            crlf = self.rfile.read(2)
-                            if crlf:
-                                drained += len(crlf)
-                                if drained > DRAIN_LIMIT_BYTES:
-                                    self.close_connection = True
-                                    self._respond(413, {"error": "request body too large to drain"})
-                                    raise _BodyTooLarge
-                    except (_BodyTooLarge, _MalformedBody):
-                        raise
-                    except Exception:
-                        self._respond(400, {"error": "invalid chunked Transfer-Encoding"})
-                        raise _MalformedBody from None
-                    self._respond(400, {"error": "chunked Transfer-Encoding not supported"})
-                    raise _MalformedBody
-                raw_length = self.headers.get("Content-Length")
-                if raw_length is None or raw_length == "":
-                    length = 0
-                else:
-                    try:
-                        length = int(raw_length.strip())
-                    except (ValueError, AttributeError):
-                        self._respond(400, {"error": f"invalid Content-Length: {raw_length!r}"})
-                        raise _MalformedBody from None
-                    if length < 0:
-                        self._respond(400, {"error": f"invalid Content-Length: {raw_length!r}"})
-                        raise _MalformedBody
+                length = int(self.headers.get("Content-Length") or 0)
                 if length > max_bytes:
                     # Drain (without buffering) so the client can finish
                     # writing and read our 413, instead of dying on a broken

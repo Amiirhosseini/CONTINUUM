@@ -18,10 +18,6 @@ from continuum.storage.base import Storage
 MAX_DASHBOARD_BODY = 1 * 1024 * 1024
 
 #: Upper bound on how much to drain before giving up, matching gateway (#317).
-#: Content-Length is validated strictly: missing or empty means 0, present
-#: but not a non-negative int yields 400 (html). Transfer-Encoding: chunked
-#: (case-insensitive, comma list) is rejected with 400 to prevent bypassing
-#: the cap; chunked streams are drained up to the same bound (#522).
 DASHBOARD_DRAIN_LIMIT_BYTES = 256 * 1024 * 1024
 
 
@@ -289,106 +285,7 @@ def make_dashboard_server(
             self._html(render_dashboard_html(storage))
 
         def do_POST(self) -> None:  # noqa: N802
-            # Fail closed on chunked Transfer-Encoding before Content-Length
-            # parsing, so a client cannot bypass the cap by omitting length
-            # and sending an unbounded chunked stream (#522). Both servers
-            # reject chunked identically with 400 and respect the drain bound.
-            te = self.headers.get("Transfer-Encoding", "")
-            if te and "chunked" in [v.strip().lower() for v in te.split(",")]:
-                drained = 0
-                try:
-                    while True:
-                        line = self.rfile.readline(65536)
-                        if not line:
-                            break
-                        drained += len(line)
-                        if drained > DASHBOARD_DRAIN_LIMIT_BYTES:
-                            self.close_connection = True
-                            self._html(
-                                "<h1>413 Body too large</h1><p>request body too large to drain</p>",
-                                code=413,
-                            )
-                            return
-                        stripped = line.strip().split(b";")[0].strip()
-                        if not stripped:
-                            continue
-                        try:
-                            chunk_size = int(stripped, 16)
-                        except ValueError:
-                            self._html(
-                                "<h1>400 Bad Request</h1><p>invalid chunked Transfer-Encoding</p>",
-                                code=400,
-                            )
-                            return
-                        if chunk_size == 0:
-                            while True:
-                                trailer = self.rfile.readline(65536)
-                                if not trailer:
-                                    break
-                                drained += len(trailer)
-                                if drained > DASHBOARD_DRAIN_LIMIT_BYTES:
-                                    self.close_connection = True
-                                    self._html(
-                                        "<h1>413 Body too large</h1><p>request body too large to drain</p>",
-                                        code=413,
-                                    )
-                                    return
-                                if trailer in (b"\r\n", b"\n", b""):
-                                    break
-                            break
-                        remaining = chunk_size
-                        while remaining > 0:
-                            chunk = self.rfile.read(min(1024 * 1024, remaining))
-                            if not chunk:
-                                break
-                            drained += len(chunk)
-                            remaining -= len(chunk)
-                            if drained > DASHBOARD_DRAIN_LIMIT_BYTES:
-                                self.close_connection = True
-                                self._html(
-                                    "<h1>413 Body too large</h1><p>request body too large to drain</p>",
-                                    code=413,
-                                )
-                                return
-                        crlf = self.rfile.read(2)
-                        if crlf:
-                            drained += len(crlf)
-                            if drained > DASHBOARD_DRAIN_LIMIT_BYTES:
-                                self.close_connection = True
-                                self._html(
-                                    "<h1>413 Body too large</h1><p>request body too large to drain</p>",
-                                    code=413,
-                                )
-                                return
-                except Exception:
-                    self._html(
-                        "<h1>400 Bad Request</h1><p>invalid chunked Transfer-Encoding</p>",
-                        code=400,
-                    )
-                    return
-                self._html(
-                    "<h1>400 Bad Request</h1><p>chunked Transfer-Encoding not supported</p>",
-                    code=400,
-                )
-                return
-            raw_length = self.headers.get("Content-Length")
-            if raw_length is None or raw_length == "":
-                length = 0
-            else:
-                try:
-                    length = int(raw_length.strip())
-                except (ValueError, AttributeError):
-                    self._html(
-                        f"<h1>400 Bad Request</h1><p>invalid Content-Length: {html.escape(repr(raw_length))}</p>",
-                        code=400,
-                    )
-                    return
-                if length < 0:
-                    self._html(
-                        f"<h1>400 Bad Request</h1><p>invalid Content-Length: {html.escape(repr(raw_length))}</p>",
-                        code=400,
-                    )
-                    return
+            length = int(self.headers.get("Content-Length") or 0)
             if length > MAX_DASHBOARD_BODY:
                 drained = 0
                 while drained < length:
