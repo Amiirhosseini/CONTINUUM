@@ -320,7 +320,7 @@ def _provenance_map_section(state: SemanticState) -> ContextSection:
         )
         lines.append(f"pin {pin.constraint_id}: {origin} {tag}")
     return ContextSection(
-        "PROVENANCE MAP — per-fact origin (hash-chained)", tuple(lines), priority=8
+        "PROVENANCE MAP - per-fact origin (hash-chained)", tuple(lines), priority=8
     )
 
 
