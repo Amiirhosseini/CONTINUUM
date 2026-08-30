@@ -501,14 +501,6 @@ If CONTINUUM helps your agents recover reliably, consider sponsoring to support 
 </p>
 
 <p align="center">
-  <iframe src="https://github.com/sponsors/Cyrax321/button" title="Sponsor Cyrax321" height="32" width="114" style="border: 0; border-radius: 6px;"></iframe>
-</p>
-
-<p align="center">
-  <iframe src="https://github.com/sponsors/Cyrax321/card" title="Sponsor Cyrax321" height="225" width="600" style="border: 0;"></iframe>
-</p>
-
-<p align="center">
   <a href="https://github.com/sponsors/Cyrax321">Become a sponsor</a> — GitHub Sponsors, or add FUNDING.yml custom link if you prefer another platform.
 </p>
 
