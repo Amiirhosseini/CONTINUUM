@@ -30,14 +30,15 @@ def render_dashboard_html(storage: Storage) -> str:
             safe = "unknown"
         rows.append(
             f"<tr><td>{html.escape(run.run_id)}</td>"
+            f"<td>{html.escape(run.goal)}</td>"
             f"<td>{html.escape(run.status.value)}</td>"
             f"<td>{mode}</td><td>{safe}</td></tr>"
         )
-    body = "\n".join(rows) if rows else "<tr><td colspan=4>No runs</td></tr>"
+    body = "\n".join(rows) if rows else "<tr><td colspan=5>No runs</td></tr>"
     return f"""<!doctype html>
 <html><head><meta charset=\"utf-8\"><title>CONTINUUM Dashboard</title></head>
 <body><h1>CONTINUUM Dashboard</h1>
-<table border=\"1\" cellpadding=\"6\"><tr><th>Run</th><th>Status</th><th>Recovery</th><th>Safe</th></tr>
+<table border=\"1\" cellpadding=\"6\"><tr><th>Run</th><th>Goal</th><th>Status</th><th>Recovery</th><th>Safe</th></tr>
 {body}
 </table></body></html>"""
 
@@ -128,6 +129,7 @@ def render_run_detail_html(storage: Storage, run_id: str) -> str:
     except Exception as exc:
         return f"""<!doctype html><html><body><h1>Run not found</h1><p>{html.escape(str(exc))}</p></body></html>"""
     engine = RecoveryEngine(storage)
+    decision = None
     try:
         decision = engine.assess(run_id)
         contract_html = html.escape(decision.contract.model_dump_json(indent=2))
@@ -143,6 +145,7 @@ def render_run_detail_html(storage: Storage, run_id: str) -> str:
         ledger_html = f"<p>{html.escape(str(exc))}</p>"
         validation_html = ""
         advisory_html = ""
+        pins_html = ""
     events = storage.read_events(run_id)
     events_rows = "".join(
         f"<tr><td>{e.sequence}</td><td>{html.escape(e.type.value)}</td><td>{html.escape(str(e.payload))}</td></tr>"
@@ -157,7 +160,7 @@ def render_run_detail_html(storage: Storage, run_id: str) -> str:
         from continuum.dashboard.hitl import pending_actions_with_keys
 
         pending = pending_actions_with_keys(storage, run_id)
-        needs_confirm = decision.mode.value == "request_human"
+        needs_confirm = decision is not None and decision.mode.value == "request_human"
         if pending or needs_confirm:
             rows = []
             if needs_confirm:
