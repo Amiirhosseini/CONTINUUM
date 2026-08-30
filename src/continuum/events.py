@@ -120,6 +120,9 @@ class EventType(StrEnum):
     # structured attempt memory (issue #313): durable falsification lesson
     ATTEMPT_LESSON = "ATTEMPT_LESSON"
 
+    # sleep-time trajectory reports (issue #393): distilled from archived history
+    TRAJECTORY_REPORT = "TRAJECTORY_REPORT"
+
     # structured plan (issue #312): durable milestones for long-horizon recovery
     PLAN_UPSERT = "PLAN_UPSERT"
 

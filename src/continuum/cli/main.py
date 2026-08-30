@@ -1898,6 +1898,13 @@ def cmd_briefing(args: argparse.Namespace, storage: Storage, out: Any, err: Any)
         lines.append("attempt lessons (system-derived):")
         for lesson in state.attempt_lessons:
             lines += [f"  {line}" for line in render_attempt_lesson(lesson)]
+    # Sleep-time trajectory reports (issue #393): distilled from archived history
+    if getattr(state, "trajectory_reports", None):
+        from continuum.analysis.trajectory_report import render_trajectory_report
+
+        lines.append("trajectory reports (sleep-time, system-derived):")
+        for report in state.trajectory_reports:
+            lines += [f"  {line}" for line in render_trajectory_report(report)]
     if steps:
         lines.append("next steps:")
         lines += [f"  {i}. {t}" for i, t in enumerate(steps, 1)]
@@ -1912,6 +1919,9 @@ def cmd_briefing(args: argparse.Namespace, storage: Storage, out: Any, err: Any)
             "context": context,
             "human_steps": steps,
             "attempt_lessons": [lesson.model_dump(mode="json") for lesson in state.attempt_lessons],
+            "trajectory_reports": [
+                report.model_dump(mode="json") for report in state.trajectory_reports
+            ],
             "hookSpecificOutput": {
                 "hookEventName": args.hook_event_name,
                 "additionalContext": context,
