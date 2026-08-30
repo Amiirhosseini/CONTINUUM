@@ -786,6 +786,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`continuum_confirm` hid handler refusals (#371).** `confirm_gate` now
+  invokes the handler inside `_refusal_reaches_the_caller`, so domain errors
+  such as a missing run retain their useful `ToolError` message.
+
 - **JSON booleans passed every integer check in the budget registry (#429).**
   `isinstance(True, int)` holds in Python, so `true` was accepted wherever
   `.continuum/budgets.json` requires a positive integer: as
