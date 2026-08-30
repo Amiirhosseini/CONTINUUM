@@ -279,3 +279,111 @@ def test_oversized_body_is_refused_with_413(db: str, gateway: str) -> None:
     conn.close()
     assert resp.status == 413
     assert "exceeds" in body["error"]
+
+
+def _raw_gateway_request(addr: str, raw: bytes) -> tuple[int, bytes]:
+    """Send raw bytes over a socket and return (status, body)."""
+    import socket
+
+    host, port = addr.split(":")
+    sock = socket.create_connection((host, int(port)), timeout=10)
+    sock.sendall(raw)
+    sock.settimeout(5)
+    data = b""
+    try:
+        while True:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+    except OSError:
+        pass
+    finally:
+        try:
+            sock.close()
+        except OSError:
+            pass
+    if not data:
+        return 0, b""
+    header, _, body = data.partition(b"\r\n\r\n")
+    first = header.split(b"\r\n")[0].decode(errors="ignore")
+    try:
+        status = int(first.split()[1])
+    except Exception:
+        status = 0
+    return status, body
+
+
+def test_malformed_content_length_returns_400_not_closed(db: str, gateway: str) -> None:
+    """A header like Content-Length: abc must yield 400, not a dropped connection (#522)."""
+    raw = (
+        b"POST /v1/invoices HTTP/1.1\r\n"
+        b"Host: api.example.com\r\n"
+        b"Content-Length: abc\r\n"
+        b"Content-Type: application/json\r\n"
+        b"Connection: close\r\n\r\n"
+        b"{\"id\": \"I-5\"}"
+    )
+    status, body = _raw_gateway_request(gateway, raw)
+    assert status == 400, f"expected 400, got {status} body={body!r}"
+    payload = json.loads(body or b"{}")
+    assert "invalid Content-Length" in payload.get("error", "")
+
+
+def test_negative_content_length_returns_400(db: str, gateway: str) -> None:
+    """Negative Content-Length is not a valid non-negative int (#522)."""
+    raw = (
+        b"POST /v1/invoices HTTP/1.1\r\n"
+        b"Host: api.example.com\r\n"
+        b"Content-Length: -1\r\n"
+        b"Content-Type: application/json\r\n"
+        b"Connection: close\r\n\r\n"
+    )
+    status, body = _raw_gateway_request(gateway, raw)
+    assert status == 400
+    payload = json.loads(body or b"{}")
+    assert "invalid Content-Length" in payload.get("error", "")
+
+
+def test_chunked_transfer_encoding_is_rejected_with_400(db: str, gateway: str) -> None:
+    """A client omitting Content-Length and sending chunked must not bypass caps (#522)."""
+    raw = (
+        b"POST /v1/invoices HTTP/1.1\r\n"
+        b"Host: api.example.com\r\n"
+        b"Transfer-Encoding: chunked\r\n"
+        b"Content-Type: application/json\r\n"
+        b"Connection: close\r\n\r\n"
+        b"5\r\nhello\r\n0\r\n\r\n"
+    )
+    status, body = _raw_gateway_request(gateway, raw)
+    assert status == 400, f"expected 400 for chunked, got {status} body={body!r}"
+    payload = json.loads(body or b"{}")
+    assert "chunked" in payload.get("error", "").lower()
+
+
+def test_chunked_comma_list_is_rejected_case_insensitive(db: str, gateway: str) -> None:
+    """Transfer-Encoding may be a comma list and case-insensitive (#522)."""
+    raw = (
+        b"POST /v1/invoices HTTP/1.1\r\n"
+        b"Host: api.example.com\r\n"
+        b"Transfer-Encoding: gzip, Chunked\r\n"
+        b"Content-Type: application/json\r\n"
+        b"Connection: close\r\n\r\n"
+        b"5\r\nhello\r\n0\r\n\r\n"
+    )
+    status, body = _raw_gateway_request(gateway, raw)
+    assert status == 400
+    payload = json.loads(body or b"{}")
+    assert "chunked" in payload.get("error", "").lower()
+
+
+def test_small_body_still_processed(db: str, gateway: str) -> None:
+    """Valid small bodies must still reach the decision table (regression)."""
+    claim(db, "invoice:I-small")
+    status, body = post(gateway, "/v1/invoices", {"id": "I-small"})
+    # With a live claim the gateway forwards and gets a 502 from the unreachable
+    # upstream; without a claim it would be 403. Either is not a body-size refusal.
+    assert status in (403, 502)
+    # Must not be a 400/413 body-size error
+    assert status != 400
+    assert status != 413
