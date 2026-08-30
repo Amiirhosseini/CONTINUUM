@@ -62,7 +62,7 @@ Zero-setup paths (no clone, no install, nothing published anywhere):
 | Watch crash recovery happen end to end | `docker run --rm ghcr.io/cyrax321/continuum` |
 | Use the CLI through Docker | `docker run --rm ghcr.io/cyrax321/continuum continuum --help` |
 | Run the CLI without cloning | `uvx --from git+https://github.com/Cyrax321/CONTINUUM.git continuum --help` |
-| Windows PowerShell (from a clone) | `powershell -ExecutionPolicy Bypass -File try-it.ps1` — or `try-it.ps1 cli --help` |
+| Windows PowerShell (from a clone) | `powershell -ExecutionPolicy Bypass -File .\try-it.ps1` or `powershell -ExecutionPolicy Bypass -File .\try-it.ps1 cli --help` |
 | Full dev environment in the browser | [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/Cyrax321/CONTINUUM?quickstart=1) |
 
 The Docker image is published to GHCR by CI on every push to `main` and every release tag (`.github/workflows/docker-publish.yml`). The Codespace is defined in `.devcontainer/`.
