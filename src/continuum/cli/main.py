@@ -866,12 +866,30 @@ def cmd_health(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
             palette=getattr(args, "_palette", None),
         )
         return ExitCode.OK
+    trajectory_payload = None
+    trajectory_text = ""
+    try:
+        from continuum.analysis.trajectory_report import (
+            health_maybe_generate_trajectory_report,
+            render_trajectory_report,
+        )
+
+        trajectory_report = health_maybe_generate_trajectory_report(storage, run_id)
+        if trajectory_report is not None:
+            trajectory_payload = trajectory_report.model_dump(mode="json")
+            trajectory_text = "\n" + "\n".join(render_trajectory_report(trajectory_report))
+    except Exception:
+        trajectory_payload = None
+        trajectory_text = ""
+    payload = {"run_id": run_id, "advisory": advisory}
+    if trajectory_payload is not None:
+        payload["trajectory_report"] = trajectory_payload
     _emit(
-        {"run_id": run_id, "advisory": advisory},
+        payload,
         f"trust_score: {advisory['trust_score']} "
         f"(role={advisory['breakdown']['role']} "
         f"goal={advisory['breakdown']['goal']} "
-        f"evidence={advisory['breakdown']['evidence']})",
+        f"evidence={advisory['breakdown']['evidence']})" + trajectory_text,
         as_json=args.json,
         stream=out,
         palette=getattr(args, "_palette", None),
