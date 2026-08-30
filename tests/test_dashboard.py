@@ -1,3 +1,4 @@
+import contextlib
 import http.client
 import os
 import threading
@@ -143,10 +144,8 @@ def _raw_dashboard_request(addr: str, raw: bytes) -> tuple[int, bytes]:
     except OSError:
         pass
     finally:
-        try:
+            with contextlib.suppress(OSError):
             sock.close()
-        except OSError:
-            pass
     if not data:
         return 0, b""
     header, _, body = data.partition(b"\r\n\r\n")
@@ -306,8 +305,6 @@ def test_dashboard_small_body_still_200(tmp_path: Path) -> None:
 
 def test_dashboard_and_gateway_chunked_same_status(tmp_path: Path) -> None:
     """Both servers must agree on the chunked refusal code (#522 consistency)."""
-    import json
-
     from continuum.gateway import GatewayServer, load_gateway_config
 
     # Gateway side

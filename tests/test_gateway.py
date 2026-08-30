@@ -7,6 +7,7 @@ live upstream server on an ephemeral port, through the actual HTTP stack.
 
 from __future__ import annotations
 
+import contextlib
 import http.client
 import json
 import threading
@@ -299,10 +300,8 @@ def _raw_gateway_request(addr: str, raw: bytes) -> tuple[int, bytes]:
     except OSError:
         pass
     finally:
-        try:
+            with contextlib.suppress(OSError):
             sock.close()
-        except OSError:
-            pass
     if not data:
         return 0, b""
     header, _, body = data.partition(b"\r\n\r\n")
