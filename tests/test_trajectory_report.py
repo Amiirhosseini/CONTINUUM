@@ -6,6 +6,7 @@ import json
 
 from continuum.analysis.trajectory_report import (
     build_trajectory_report,
+    health_maybe_generate_trajectory_report,
     maybe_generate_trajectory_report,
     record_trajectory_report,
 )
@@ -308,3 +309,56 @@ def test_synthetic_archive_determinism() -> None:
     assert r1.scar_rate == r2.scar_rate
     assert r1.stall_sites == r2.stall_sites
     assert r1.top_failure_action_types == r2.top_failure_action_types
+
+
+def test_health_idle_trigger_generates_for_quiet_and_not_for_busy() -> None:
+    storage = _make_storage()
+    try:
+        run_id = "run_1"
+        prev_end = 0
+        for window in range(10):
+            for i in range(3):
+                _add_failed_action(storage, run_id, "test.stall", f"w{window}_k{i}")
+            end = storage.last_sequence(run_id)
+            storage.append_event(
+                run_id,
+                EventType.EVENT_LOG_ANCHORED,
+                {"anchor_sequence": end},
+                source=Origin.DETERMINISTIC,
+            )
+            report = health_maybe_generate_trajectory_report(storage, run_id)
+            assert report is not None, f"window {window} should be quiet and generate"
+            assert report.window_end == end
+            assert report.window_start == prev_end
+            prev_end = end
+        events = list(storage.read_events(run_id))
+        reports = [e for e in events if e.type is EventType.TRAJECTORY_REPORT]
+        assert len(reports) == 10
+        storage.append_event(
+            run_id,
+            EventType.WORK_COMPLETED,
+            {"count": 1, "task_id": "busy"},
+            source=Origin.DETERMINISTIC,
+        )
+        end = storage.last_sequence(run_id)
+        storage.append_event(
+            run_id,
+            EventType.EVENT_LOG_ANCHORED,
+            {"anchor_sequence": end},
+            source=Origin.DETERMINISTIC,
+        )
+        before = len(
+            [e for e in storage.read_events(run_id) if e.type is EventType.TRAJECTORY_REPORT]
+        )
+        report_busy = health_maybe_generate_trajectory_report(storage, run_id)
+        assert report_busy is None
+        after = len(
+            [e for e in storage.read_events(run_id) if e.type is EventType.TRAJECTORY_REPORT]
+        )
+        assert after == before
+        via_health = health_maybe_generate_trajectory_report(storage, run_id)
+        assert via_health is None
+        direct = maybe_generate_trajectory_report(storage, run_id)
+        assert direct is None
+    finally:
+        storage.close()

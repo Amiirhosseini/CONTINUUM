@@ -14,6 +14,7 @@ from continuum.storage.base import Storage
 __all__ = [
     "TRAJECTORY_REPORT_CAP_BYTES",
     "build_trajectory_report",
+    "health_maybe_generate_trajectory_report",
     "is_quiet_window",
     "maybe_generate_trajectory_report",
     "record_trajectory_report",
@@ -255,6 +256,38 @@ def record_trajectory_report(
     return report
 
 
+def _last_compaction_window(storage: Storage, run_id: str) -> tuple[int, int] | None:
+    try:
+        all_events = list(storage.read_events(run_id)) + list(storage.read_archived_events(run_id))
+    except Exception:
+        all_events = list(storage.read_events(run_id))
+    anchors: list[int] = []
+    for ev in all_events:
+        if ev.type is EventType.EVENT_LOG_ANCHORED:
+            anchor = ev.payload.get("anchor_sequence")
+            if anchor is None:
+                anchor = ev.payload.get("sequence")
+            try:
+                anchors.append(int(anchor) if anchor is not None else ev.sequence)
+            except Exception:
+                anchors.append(ev.sequence)
+    if not anchors:
+        try:
+            window_end = storage.last_sequence(run_id)
+            window_start = 0
+        except Exception:
+            return None
+        if window_end == 0:
+            return None
+    else:
+        anchors_sorted = sorted(set(anchors))
+        window_end = anchors_sorted[-1]
+        window_start = anchors_sorted[-2] if len(anchors_sorted) >= 2 else 0
+    if window_end <= window_start:
+        return None
+    return int(window_start), int(window_end)
+
+
 def maybe_generate_trajectory_report(
     storage: Storage,
     run_id: str,
@@ -263,34 +296,10 @@ def maybe_generate_trajectory_report(
     window_end: int | None = None,
 ) -> TrajectoryReport | None:
     if window_start is None or window_end is None:
-        try:
-            all_events = list(storage.read_events(run_id)) + list(
-                storage.read_archived_events(run_id)
-            )
-        except Exception:
-            all_events = list(storage.read_events(run_id))
-        anchors: list[int] = []
-        for ev in all_events:
-            if ev.type is EventType.EVENT_LOG_ANCHORED:
-                anchor = ev.payload.get("anchor_sequence")
-                if anchor is None:
-                    anchor = ev.payload.get("sequence")
-                try:
-                    anchors.append(int(anchor) if anchor is not None else ev.sequence)
-                except Exception:
-                    anchors.append(ev.sequence)
-        if not anchors:
-            try:
-                window_end = storage.last_sequence(run_id)
-                window_start = 0
-            except Exception:
-                return None
-            if window_end == 0:
-                return None
-        else:
-            anchors_sorted = sorted(set(anchors))
-            window_end = anchors_sorted[-1]
-            window_start = anchors_sorted[-2] if len(anchors_sorted) >= 2 else 0
+        window = _last_compaction_window(storage, run_id)
+        if window is None:
+            return None
+        window_start, window_end = window
     assert window_start is not None and window_end is not None
     if window_end <= window_start:
         return None
@@ -313,6 +322,40 @@ def maybe_generate_trajectory_report(
         return None
     report = build_trajectory_report(storage, run_id, int(window_start), int(window_end))
     return record_trajectory_report(storage, run_id, report)
+
+
+def health_maybe_generate_trajectory_report(
+    storage: Storage, run_id: str
+) -> TrajectoryReport | None:
+    try:
+        all_events = list(storage.read_events(run_id)) + list(storage.read_archived_events(run_id))
+    except Exception:
+        all_events = list(storage.read_events(run_id))
+    anchors: list[int] = []
+    for ev in all_events:
+        if ev.type is EventType.EVENT_LOG_ANCHORED:
+            anchor = ev.payload.get("anchor_sequence")
+            if anchor is None:
+                anchor = ev.payload.get("sequence")
+            try:
+                anchors.append(int(anchor) if anchor is not None else ev.sequence)
+            except Exception:
+                anchors.append(ev.sequence)
+    if not anchors:
+        return None
+    anchors_sorted = sorted(set(anchors))
+    window_end = anchors_sorted[-1]
+    window_start = anchors_sorted[-2] if len(anchors_sorted) >= 2 else 0
+    if window_end <= window_start:
+        return None
+    events = _window_events(storage, run_id, int(window_start), int(window_end))
+    if not events:
+        return None
+    if not is_quiet_window(events):
+        return None
+    return maybe_generate_trajectory_report(
+        storage, run_id, window_start=int(window_start), window_end=int(window_end)
+    )
 
 
 def render_trajectory_report(report: TrajectoryReport) -> list[str]:
