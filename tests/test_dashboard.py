@@ -40,6 +40,35 @@ def test_dashboard_run_detail_shows_ledger_and_contract() -> None:
     assert "Validation" in html
 
 
+def test_dashboard_pagination_hint_shows_for_many_events() -> None:
+    storage = SQLiteStorage(":memory:")
+    storage.create_run(Run(run_id="run_1", goal="g"))
+    for i in range(30):
+        storage.append_event("run_1", EventType.TOOL_CALLED, {"i": i})
+    html = render_run_detail_html(storage, "run_1")
+    assert "Showing last 20 of 30 events" in html
+    assert "continuum events run_1" in html
+    assert "for full log" in html
+
+
+def test_dashboard_no_pagination_hint_for_few_events() -> None:
+    storage = SQLiteStorage(":memory:")
+    storage.create_run(Run(run_id="run_1", goal="g"))
+    for i in range(5):
+        storage.append_event("run_1", EventType.TOOL_CALLED, {"i": i})
+    html = render_run_detail_html(storage, "run_1")
+    assert "Showing last 20 of" not in html
+
+
+def test_dashboard_no_pagination_hint_for_exactly_twenty() -> None:
+    storage = SQLiteStorage(":memory:")
+    storage.create_run(Run(run_id="run_1", goal="g"))
+    for i in range(20):
+        storage.append_event("run_1", EventType.TOOL_CALLED, {"i": i})
+    html = render_run_detail_html(storage, "run_1")
+    assert "Showing last 20 of" not in html
+
+
 def test_dashboard_post_body_too_large_returns_413(tmp_path: Path) -> None:
     """Large POST bodies are refused with 413, matching gateway pattern (#317)."""
     # token needed for the small-body control, but the oversize check happens before auth

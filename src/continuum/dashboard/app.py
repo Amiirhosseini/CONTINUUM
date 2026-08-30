@@ -152,11 +152,17 @@ def render_run_detail_html(storage: Storage, run_id: str) -> str:
         advisory_html = ""
         pins_html = ""
     events = storage.read_events(run_id)
+    total = len(events)
+    hint = (
+        f"<p>Showing last 20 of {total} events, see continuum events {html.escape(run_id)} for full log.</p>"
+        if total > 20
+        else ""
+    )
     events_rows = "".join(
         f"<tr><td>{e.sequence}</td><td>{html.escape(e.type.value)}</td><td>{html.escape(str(e.payload))}</td></tr>"
         for e in events[-20:]
     )
-    events_html = f'<table border="1" cellpadding="4"><tr><th>Seq</th><th>Type</th><th>Payload</th></tr>{events_rows}</table>'
+    events_html = f'{hint}<table border="1" cellpadding="4"><tr><th>Seq</th><th>Type</th><th>Payload</th></tr>{events_rows}</table>'
 
     # Human-in-the-loop surface (issue #242): buttons only when there is
     # something a person can actually settle.
