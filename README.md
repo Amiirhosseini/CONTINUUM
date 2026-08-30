@@ -22,6 +22,10 @@
 </p>
 
 <p align="center">
+  <a href="https://app.ona.com/#https://github.com/Cyrax321/CONTINUUM"><img src="https://ona.com/build-with-ona.svg" alt="Build with Ona" /></a>
+</p>
+
+<p align="center">
   <a href="https://continuum-nu-six.vercel.app/"><strong>Visit the CONTINUUM website</strong></a>
 </p>
 
