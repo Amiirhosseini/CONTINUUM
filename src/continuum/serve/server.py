@@ -128,16 +128,35 @@ def _env_versions(env: Any) -> dict[str, str]:
 
     Callers send either a mapping or a list of ``name=version`` strings, and both
     the snapshot and the dependency declaration have to agree on what was pinned.
+    Strict as CLI ``_environment``: an entry without ``=`` or with an empty
+    version raises ``BadParams`` with the same message, so switching transports
+    cannot silently ignore a typo.
     """
     versions: dict[str, str] = {}
     if isinstance(env, dict):
         for name, version in env.items():
-            versions[str(name)] = str(version)
+            name_s = str(name)
+            version_s = str(version)
+            if not name_s or "=" in name_s:
+                raise BadParams(f"--env expects name=version, got {name_s!r}")
+            if not version_s:
+                raise BadParams(
+                    f"--env {name_s}= has an empty version; "
+                    f"omit the flag entirely if the value is unknown"
+                )
+            versions[name_s] = version_s
     elif isinstance(env, list):
         for item in env:
-            if not isinstance(item, str) or "=" not in item:
-                continue
-            name, _, version = item.partition("=")
+            if not isinstance(item, str):
+                raise BadParams(f"--env expects name=version, got {item!r}")
+            name, separator, version = item.partition("=")
+            if not name or not separator:
+                raise BadParams(f"--env expects name=version, got {item!r}")
+            if not version:
+                raise BadParams(
+                    f"--env {name}= has an empty version; "
+                    f"omit the flag entirely if the value is unknown"
+                )
             versions[name] = version
     return versions
 

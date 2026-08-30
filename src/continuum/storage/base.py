@@ -131,6 +131,23 @@ class Storage(ABC):
         del run_id
         return []
 
+    def read_all_events(self, run_id: str) -> Sequence[Event]:
+        """Full history including archived prefix, sorted by sequence.
+
+        After compaction the live log holds only the anchor and tail; any
+        provenance calculation that reads only live events would miss an
+        archived ``EXTERNAL_AGENT`` fact and launder it to ``DETERMINISTIC``.
+        Callers that compute ``derived_origin`` over a run's history must use
+        this helper so min is honest. Sorted to keep hash chain order stable.
+        """
+        archived = list(self.read_archived_events(run_id))
+        live = list(self.read_events(run_id))
+        if not archived:
+            return live
+        if not live:
+            return archived
+        return tuple(sorted([*archived, *live], key=lambda e: e.sequence))
+
     def foreign_action(self, key: str, *, exclude_run: str) -> Action | None:
         """Newest action recorded under ``key`` outside ``exclude_run``.
 

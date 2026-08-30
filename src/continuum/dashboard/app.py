@@ -15,6 +15,11 @@ from typing import Any
 from continuum.recovery import RecoveryEngine
 from continuum.storage.base import Storage
 
+MAX_DASHBOARD_BODY = 1 * 1024 * 1024
+
+#: Upper bound on how much to drain before giving up, matching gateway (#317).
+DASHBOARD_DRAIN_LIMIT_BYTES = 256 * 1024 * 1024
+
 
 def render_dashboard_html(storage: Storage) -> str:
     runs = storage.list_runs()
@@ -147,11 +152,17 @@ def render_run_detail_html(storage: Storage, run_id: str) -> str:
         advisory_html = ""
         pins_html = ""
     events = storage.read_events(run_id)
+    total = len(events)
+    hint = (
+        f"<p>Showing last 20 of {total} events, see continuum events {html.escape(run_id)} for full log.</p>"
+        if total > 20
+        else ""
+    )
     events_rows = "".join(
         f"<tr><td>{e.sequence}</td><td>{html.escape(e.type.value)}</td><td>{html.escape(str(e.payload))}</td></tr>"
         for e in events[-20:]
     )
-    events_html = f'<table border="1" cellpadding="4"><tr><th>Seq</th><th>Type</th><th>Payload</th></tr>{events_rows}</table>'
+    events_html = f'{hint}<table border="1" cellpadding="4"><tr><th>Seq</th><th>Type</th><th>Payload</th></tr>{events_rows}</table>'
 
     # Human-in-the-loop surface (issue #242): buttons only when there is
     # something a person can actually settle.
@@ -226,6 +237,11 @@ def make_dashboard_server(
     with goals and side-effect details, which must not be reachable from
     off-host by default. Operators who understand the exposure can pass
     ``--host 0.0.0.0`` explicitly.
+
+    POST bodies are capped at 1 MB (#317) to prevent unbounded reads. Bodies
+    exceeding the cap are drained up to 256 MB (matching gateway) and answered
+    with 413, so a client can finish writing and read the refusal instead of
+    dying on a broken pipe.
     """
     import urllib.parse
 
@@ -242,10 +258,14 @@ def make_dashboard_server(
             return
 
         def _html(self, content: str, code: int = 200) -> None:
+            body = content.encode("utf-8")
             self.send_response(code)
+            if getattr(self, "close_connection", False):
+                self.send_header("Connection", "close")
             self.send_header("Content-type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(content.encode("utf-8"))
+            self.wfile.write(body)
 
         def do_GET(self) -> None:  # noqa: N802
             if self.path.startswith("/runs/"):
@@ -262,6 +282,25 @@ def make_dashboard_server(
 
         def do_POST(self) -> None:  # noqa: N802
             length = int(self.headers.get("Content-Length") or 0)
+            if length > MAX_DASHBOARD_BODY:
+                drained = 0
+                while drained < length:
+                    chunk = self.rfile.read(min(1024 * 1024, length - drained))
+                    if not chunk:
+                        break
+                    drained += len(chunk)
+                    if drained > DASHBOARD_DRAIN_LIMIT_BYTES:
+                        self.close_connection = True
+                        self._html(
+                            "<h1>413 Body too large</h1><p>request body too large to drain</p>",
+                            code=413,
+                        )
+                        return
+                self._html(
+                    f"<h1>413 Body too large</h1><p>request body exceeds {MAX_DASHBOARD_BODY} bytes</p>",
+                    code=413,
+                )
+                return
             raw = self.rfile.read(length) if length else b""
             form = dict(urllib.parse.parse_qsl(raw.decode("utf-8")))
             token = form.get("token") or self.headers.get("X-Dashboard-Token")

@@ -396,6 +396,7 @@ after reconciling         -> REPAIR_AND_RESUME, next: revalidate_dependency:data
 - **Hash-chained events** - tamper-evident audit trail
 - **Credentials never serialized** into state - referenced only, never stored
 - **Provenance tracking** - every state component traces back to its origin event
+- **Provenance that survives compaction** - every checkpoint component carries its `Origin` tag; compaction output preserves per-fact origin rather than a single summary trust level. Summaries are stamped `derived_origin = min(sources)` over the full history (archived + live) and the projector clamps any claimed `derived_origin` to `min(claimed, writer source, weakest seen)`, so an archived `EXTERNAL_AGENT` fact cannot be laundered into `DETERMINISTIC` via `build_informed_retry`, `REASONING_SUMMARY`, or briefing `PROVENANCE MAP` (hash-chained `source_sequence`/`source_event_id` stay resolvable to archived rows, verified by `verify_events` across the anchor boundary). See `docs/audit-provenance-compaction-294.md`.
 
 ---
 
