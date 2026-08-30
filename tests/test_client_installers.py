@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 from continuum.cli import ExitCode, main
-from continuum.clienthooks import CLIENT_PROFILES
+from continuum.clienthooks import CLIENT_PROFILES, install_client_hook
 
 
 def run(*argv: str) -> tuple[int, str, str]:
@@ -248,3 +248,48 @@ def test_briefing_repoint_reuses_group(tmp_path: Path) -> None:
         )
         == "present"
     )
+
+
+def _installed_commands(settings: Path, event_name: str) -> list[str]:
+    """Every command wired under ``event_name``, in file order, duplicates included."""
+    groups = json.loads(settings.read_text())["hooks"][event_name]
+    return [h["command"] for g in groups if isinstance(g.get("hooks"), list) for h in g["hooks"]]
+
+
+def test_an_install_of_one_kind_does_not_repoint_another(tmp_path: Path) -> None:
+    """Only an entry of the same kind counts as the one being installed (#484).
+
+    The kinds used to be checked as a set, so any continuum entry sharing the
+    event and matcher matched: installing observe where a briefing was already
+    wired repointed the briefing and reported "updated", silently dropping a
+    hook the caller never named. Reading the kind off the command keeps the two
+    entries apart.
+    """
+    settings = tmp_path / "settings.json"
+    briefing = "/venv/bin/continuum briefing"
+    observe = "/venv/bin/continuum observe"
+    assert (
+        install_client_hook(settings, briefing, event_name="SessionStart", matcher="")
+        == "installed"
+    )
+    assert (
+        install_client_hook(settings, observe, event_name="SessionStart", matcher="") == "installed"
+    )
+    assert _installed_commands(settings, "SessionStart") == [briefing, observe]
+
+
+def test_a_command_of_no_known_kind_is_appended_never_matched(tmp_path: Path) -> None:
+    """The kind is read off the command, so an unknown one matches nothing (issue #484).
+
+    Deriving the kind is what stops an install of one kind repointing another, and
+    the flip side has to hold too: a command this module did not build -- including
+    one whose quoting cannot be parsed at all -- carries no kind, so it is appended
+    rather than mistaken for ours, and unparseable quoting does not raise.
+    """
+    settings = tmp_path / "settings.json"
+    unknown = "/venv/bin/continuum inspect"
+    malformed = '"C:\\no\\closing\\quote continuum briefing'
+    for command in (unknown, malformed, unknown):
+        status = install_client_hook(settings, command, event_name="SessionStart", matcher="")
+        assert status == "installed"
+    assert _installed_commands(settings, "SessionStart") == [unknown, malformed, unknown]
