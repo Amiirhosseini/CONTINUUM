@@ -28,6 +28,14 @@
   <a href="https://app.ona.com/#https://github.com/Cyrax321/CONTINUUM"><img src="https://ona.com/build-with-ona.svg" alt="Build with Ona" /></a>
 </p>
 
+<p align="center">
+  <sub>If CONTINUUM helps your agents recover, please star the repo. It helps others discover it and keeps good first issues coming.</sub>
+</p>
+
+<p align="center">
+  <a href="https://star-history.com/#Cyrax321/CONTINUUM&Date"><img src="https://api.star-history.com/svg?repos=Cyrax321/CONTINUUM&type=Date" alt="Star History Chart" /></a>
+</p>
+
 ---
 
 ## Contents
