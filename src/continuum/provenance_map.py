@@ -223,6 +223,47 @@ def derived_provenance_for_events(events: Any) -> Origin:
     return derived_origin(origins)
 
 
+def origin_rank(origin: Origin) -> int:
+    """Authority rank of an origin, lower is weaker (for monotonicity)."""
+    return _AUTHORITY_RANK[canonical_origin(origin)]
+
+
+def clamp_derived_origin(
+    claimed: Origin, source: Origin, weakest_seen: Origin | None = None
+) -> Origin:
+    """Clamp a claimed derived origin so it never upgrades trust.
+
+    A summary may never assert a fact at higher trust than its strongest
+    source. The clamped result is the minimum over the claimed origin,
+    the writer's own source, and the weakest origin seen in the prefix so
+    far (when known). Missing or invalid claims degrade to unverified.
+    """
+    candidates: list[Origin] = [claimed, source]
+    if weakest_seen is not None:
+        candidates.append(weakest_seen)
+    return derived_origin(candidates)
+
+
+def provenance_for_run(storage: Any, run_id: str) -> Origin:
+    """Derived provenance over the full history including archived prefix.
+
+    After compaction the live log holds only the anchor and tail; the
+    archived prefix still contributes authority. Reading only live events
+    would launder an archived EXTERNAL_AGENT fact into DETERMINISTIC.
+    This helper merges archived + live sorted by sequence so min is honest.
+    """
+    try:
+        archived = list(storage.read_archived_events(run_id))
+    except Exception:
+        archived = []
+    try:
+        live = list(storage.read_events(run_id))
+    except Exception:
+        live = []
+    merged = sorted([*archived, *live], key=lambda e: getattr(e, "sequence", 0))
+    return derived_provenance_for_events(merged)
+
+
 __all__ = [
     "CanonicalProvenance",
     "ProvenanceView",
@@ -233,4 +274,7 @@ __all__ = [
     "min_canonical",
     "derived_origin",
     "derived_provenance_for_events",
+    "origin_rank",
+    "clamp_derived_origin",
+    "provenance_for_run",
 ]

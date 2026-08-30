@@ -119,6 +119,70 @@ def _provenance(event: Event) -> Provenance:
     )
 
 
+def _provenance_clamped(event: Event, weakest_seen: Any | None) -> Provenance:
+    """Projected provenance that never upgrades trust (issue #294).
+
+    Trust monotonicity: a summary may never assert a fact at higher trust
+    than its strongest source. The clamped origin is the minimum over the
+    claimed derived origin (when present), the writer's own source, and
+    the weakest origin seen in the prefix so far. This is a deterministic
+    rule checked in the pure fold, not by an LLM, and it survives
+    compaction because weakest_seen is seeded from the checkpoint's
+    per-fact origins.
+    """
+    raw_derived = event.payload.get("derived_origin")
+    if isinstance(raw_derived, str):
+        try:
+            from continuum.models import Origin
+
+            claimed = Origin(raw_derived)
+        except ValueError:
+            from continuum.models import Origin
+
+            claimed = Origin.EXTERNAL_AGENT
+        from continuum.models import Origin
+        from continuum.provenance_map import clamp_derived_origin
+
+        weakest = weakest_seen if isinstance(weakest_seen, Origin) else None
+        origin = clamp_derived_origin(claimed, event.source, weakest)
+    else:
+        origin = event.source
+    return Provenance(
+        origin=origin,
+        source_sequence=event.sequence,
+        source_event_id=event.event_id,
+        extractor="deterministic",
+    )
+
+
+def _weakest_from_state(state: SemanticState | None) -> Any | None:
+    """Weakest origin among a state's per-fact provenances, for seeding."""
+    if state is None:
+        return None
+    from continuum.models import Origin
+
+    candidates: list[Origin] = []
+    candidates.append(state.goal.provenance.origin)
+    candidates.append(state.progress.provenance.origin)
+    for p in state.plan:
+        candidates.append(p.provenance.origin)
+    for d in state.decisions:
+        candidates.append(d.provenance.origin)
+    for f in state.findings:
+        candidates.append(f.provenance.origin)
+    for e in state.evidence:
+        candidates.append(e.provenance.origin)
+    for w in state.pending_work:
+        candidates.append(w.provenance.origin)
+    for pin in state.pins.values():
+        candidates.append(pin.provenance.origin)
+    if not candidates:
+        return None
+    from continuum.provenance_map import derived_origin
+
+    return derived_origin(candidates)
+
+
 def _as_str_list(value: Any) -> list[str]:
     if value is None:
         return []
@@ -168,6 +232,20 @@ class _Accumulator:
         self.updated_at: datetime | None = base.updated_at if base else None
         self.source_sequence: int = base.source_sequence if base else 0
         self.version: int = base.version if base else 0
+        self._weakest_seen = _weakest_from_state(base)
+
+    def _track_weakest(self, event: Event) -> None:
+
+        origin = event.source
+        if self._weakest_seen is None:
+            self._weakest_seen = origin
+        else:
+            from continuum.provenance_map import derived_origin
+
+            self._weakest_seen = derived_origin([self._weakest_seen, origin])
+
+    def _provenance_for(self, event: Event) -> Provenance:
+        return _provenance_clamped(event, self._weakest_seen)
 
     # -- handlers --------------------------------------------------------- #
 
@@ -176,12 +254,12 @@ class _Accumulator:
             description=_payload_str(event, "goal"),
             version=int(event.payload.get("goal_version", 1)),
             constraints=_as_str_list(event.payload.get("constraints")),
-            provenance=_provenance(event),
+            provenance=self._provenance_for(event),
         )
         total = event.payload.get("total")
         if total is not None:
             self.progress = Progress(
-                total=int(total), pending=int(total), provenance=_provenance(event)
+                total=int(total), pending=int(total), provenance=self._provenance_for(event)
             )
         self.created_at = event.timestamp
 
@@ -197,7 +275,7 @@ class _Accumulator:
                 version=int(event.payload.get("goal_version", self.goal.version + 1)),
                 constraints=_as_str_list(event.payload.get("constraints"))
                 or list(self.goal.constraints),
-                provenance=_provenance(event),
+                provenance=self._provenance_for(event),
             )
         self._apply_progress(event.payload, event)
 
@@ -264,7 +342,7 @@ class _Accumulator:
             reason=str(event.payload.get("reason", "")),
             evidence=_as_str_list(event.payload.get("evidence")),
             created_at=event.timestamp,
-            provenance=_provenance(event),
+            provenance=self._provenance_for(event),
         )
         if not _replace(self.decisions, "decision_id", decision.decision_id, decision):
             self.decisions.append(decision)
@@ -303,7 +381,7 @@ class _Accumulator:
                 else None
             ),
             added_at=event.timestamp,
-            provenance=_provenance(event),
+            provenance=self._provenance_for(event),
         )
         if not _replace(self.evidence, "evidence_id", item.evidence_id, item):
             self.evidence.append(item)
@@ -315,7 +393,7 @@ class _Accumulator:
             evidence=_as_str_list(event.payload.get("evidence")),
             confidence=float(event.payload.get("confidence", 1.0)),
             created_at=event.timestamp,
-            provenance=_provenance(event),
+            provenance=self._provenance_for(event),
         )
         if not _replace(self.findings, "finding_id", finding.finding_id, finding):
             self.findings.append(finding)
@@ -338,7 +416,7 @@ class _Accumulator:
             description=_payload_str(event, "description"),
             prerequisite=_as_str_list(event.payload.get("prerequisite")),
             created_at=event.timestamp,
-            provenance=_provenance(event),
+            provenance=self._provenance_for(event),
         )
         if not _replace(self.pending_work, "task_id", work.task_id, work):
             self.pending_work.append(work)
@@ -356,7 +434,7 @@ class _Accumulator:
                 else None
             ),
             last_verified_at=event.timestamp,
-            provenance=_provenance(event),
+            provenance=self._provenance_for(event),
         )
         if not _replace(self.dependencies, "resource", dependency.resource, dependency):
             self.dependencies.append(dependency)
@@ -426,7 +504,7 @@ class _Accumulator:
             constraint_id=payload.constraint_id,
             sha256=payload.sha256,
             status="active",
-            provenance=_provenance(event),
+            provenance=self._provenance_for(event),
             pinned_at=event.timestamp,
         )
         self.pins[payload.constraint_id] = pin
@@ -509,7 +587,7 @@ class _Accumulator:
                 description=title,
                 status=PlanStepStatus(status),
                 depends_on=depends_list,
-                provenance=_provenance(event),
+                provenance=self._provenance_for(event),
             )
             by_id[unit_id] = step
         self.plan = sorted(by_id.values(), key=lambda p: p.step_id)
@@ -714,6 +792,7 @@ def project_incremental(
                 raise
             return acc.build_degraded(event, str(exc)), report
 
+        acc._track_weakest(event)
         acc.source_sequence = event.sequence
         if acc.created_at is None:
             acc.created_at = event.timestamp
