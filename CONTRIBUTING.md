@@ -29,6 +29,8 @@ source .venv/bin/activate        # macOS / Linux
 pip install -e ".[dev]"
 ```
 
+Local CONTINUUM data lives in `.continuum/` (budgets, local `*.db` files). It is already listed in `.gitignore`, so do not commit it. If you cloned before this was added, run `echo ".continuum/" >> .gitignore`.
+
 ---
 
 ## Running the Tests
