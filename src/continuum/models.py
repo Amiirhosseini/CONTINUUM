@@ -531,6 +531,37 @@ class AttemptLesson(BaseModel):
         return [str(v) for v in value]
 
 
+class TrajectoryReport(BaseModel):
+    """Deterministic sleep-time report distilled from archived history (issue #393).
+
+    Computed from the archive plus ledger, no LLM, no network. Bounded size,
+    one per compaction window, digest-auditable via TRAJECTORY_REPORT event.
+    Stored alongside attempt lessons but derived from a different window, so
+    the two never compete for authority.
+    """
+
+    model_config = Frozen
+
+    report_id: str = Field(min_length=1)
+    window_start: int = Field(ge=0)
+    window_end: int = Field(ge=0)
+    compaction_seq: int = Field(ge=0)
+    attempts: int = Field(ge=0)
+    scar_rate: float = Field(ge=0.0, le=1.0)
+    stall_sites: list[str] = Field(default_factory=list)
+    top_failure_action_types: list[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=utcnow)
+    derived_origin: str = Field(default="")
+
+    @field_validator("stall_sites", "top_failure_action_types")
+    @classmethod
+    def _list_bounded(cls, value: list[str]) -> list[str]:
+        trimmed = [str(v)[:128] for v in value]
+        if len(trimmed) > 5:
+            trimmed = trimmed[:5]
+        return trimmed
+
+
 class ModelSpecificState(BaseModel):
     """An assumption tied to a specific model; switching models must revalidate."""
 
@@ -588,6 +619,8 @@ class SemanticState(BaseModel):
     """
     attempt_lessons: list[AttemptLesson] = Field(default_factory=list)
     """Structured lessons from failed attempts (issue #313), sorted by created_at."""
+    trajectory_reports: list[TrajectoryReport] = Field(default_factory=list)
+    """Sleep-time trajectory reports distilled from archived history (issue #393), sorted by window."""
     model: ModelState | None = None
     version: int = 0
     source_sequence: int = 0

@@ -48,6 +48,7 @@ from continuum.models import (
     Provenance,
     SemanticState,
     StateStatus,
+    TrajectoryReport,
     utcnow,
 )
 
@@ -158,6 +159,9 @@ class _Accumulator:
         )
         self.attempt_lessons: list[AttemptLesson] = (
             list(base.attempt_lessons) if base and base.attempt_lessons else []
+        )
+        self.trajectory_reports: list[TrajectoryReport] = (
+            list(base.trajectory_reports) if base and base.trajectory_reports else []
         )
         self.model: ModelState | None = base.model if base else None
         self.created_at: datetime | None = base.created_at if base else None
@@ -443,6 +447,15 @@ class _Accumulator:
         self.attempt_lessons.append(lesson)
         self.attempt_lessons.sort(key=lambda existing: existing.created_at)
 
+    def trajectory_report(self, event: Event) -> None:
+        report = TrajectoryReport.model_validate(event.payload)
+        if any(existing.report_id == report.report_id for existing in self.trajectory_reports):
+            return
+        if any(existing.window_end == report.window_end for existing in self.trajectory_reports):
+            return
+        self.trajectory_reports.append(report)
+        self.trajectory_reports.sort(key=lambda existing: existing.window_end)
+
     def plan_upsert(self, event: Event) -> None:
         payload = event.payload
         plan_id = payload.get("plan_id")
@@ -553,6 +566,7 @@ class _Accumulator:
             pins=dict(self.pins),
             unmatched_pin_retractions=list(self.unmatched_pin_retractions),
             attempt_lessons=list(self.attempt_lessons),
+            trajectory_reports=list(self.trajectory_reports),
             model=self.model,
             version=self.version,
             source_sequence=self.source_sequence,
@@ -604,6 +618,8 @@ def _dispatch(acc: _Accumulator, event: Event) -> bool:
             acc.constraint_retracted(event)
         case EventType.ATTEMPT_LESSON:
             acc.attempt_lesson(event)
+        case EventType.TRAJECTORY_REPORT:
+            acc.trajectory_report(event)
         case EventType.PLAN_UPSERT:
             acc.plan_upsert(event)
         case _:
