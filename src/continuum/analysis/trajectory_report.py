@@ -256,7 +256,9 @@ def record_trajectory_report(
     return report
 
 
-def _last_compaction_window(storage: Storage, run_id: str) -> tuple[int, int] | None:
+def _last_compaction_window(
+    storage: Storage, run_id: str, *, require_anchor: bool = False
+) -> tuple[int, int] | None:
     try:
         all_events = list(storage.read_events(run_id)) + list(storage.read_archived_events(run_id))
     except Exception:
@@ -272,6 +274,8 @@ def _last_compaction_window(storage: Storage, run_id: str) -> tuple[int, int] | 
             except Exception:
                 anchors.append(ev.sequence)
     if not anchors:
+        if require_anchor:
+            return None
         try:
             window_end = storage.last_sequence(run_id)
             window_start = 0
@@ -327,32 +331,10 @@ def maybe_generate_trajectory_report(
 def health_maybe_generate_trajectory_report(
     storage: Storage, run_id: str
 ) -> TrajectoryReport | None:
-    try:
-        all_events = list(storage.read_events(run_id)) + list(storage.read_archived_events(run_id))
-    except Exception:
-        all_events = list(storage.read_events(run_id))
-    anchors: list[int] = []
-    for ev in all_events:
-        if ev.type is EventType.EVENT_LOG_ANCHORED:
-            anchor = ev.payload.get("anchor_sequence")
-            if anchor is None:
-                anchor = ev.payload.get("sequence")
-            try:
-                anchors.append(int(anchor) if anchor is not None else ev.sequence)
-            except Exception:
-                anchors.append(ev.sequence)
-    if not anchors:
+    window = _last_compaction_window(storage, run_id, require_anchor=True)
+    if window is None:
         return None
-    anchors_sorted = sorted(set(anchors))
-    window_end = anchors_sorted[-1]
-    window_start = anchors_sorted[-2] if len(anchors_sorted) >= 2 else 0
-    if window_end <= window_start:
-        return None
-    events = _window_events(storage, run_id, int(window_start), int(window_end))
-    if not events:
-        return None
-    if not is_quiet_window(events):
-        return None
+    window_start, window_end = window
     return maybe_generate_trajectory_report(
         storage, run_id, window_start=int(window_start), window_end=int(window_end)
     )
