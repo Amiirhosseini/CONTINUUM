@@ -271,7 +271,7 @@ class GatewayServer:
                                 chunk_size = int(stripped, 16)
                             except ValueError:
                                 self._respond(400, {"error": "invalid chunked Transfer-Encoding"})
-                                raise _MalformedBody
+                                raise _MalformedBody from None
                             if chunk_size == 0:
                                 while True:
                                     trailer = self.rfile.readline(65536)
@@ -318,7 +318,7 @@ class GatewayServer:
                         length = int(raw_length.strip())
                     except (ValueError, AttributeError):
                         self._respond(400, {"error": f"invalid Content-Length: {raw_length!r}"})
-                        raise _MalformedBody
+                        raise _MalformedBody from None
                     if length < 0:
                         self._respond(400, {"error": f"invalid Content-Length: {raw_length!r}"})
                         raise _MalformedBody
