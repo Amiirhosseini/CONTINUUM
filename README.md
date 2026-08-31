@@ -514,7 +514,7 @@ CONTINUUM is open source under the [Apache-2.0](LICENSE) license. The repository
 
 I designed and built CONTINUUM to address reliability and recovery challenges in long-running AI agent systems. The project is now developed in the open, with community contributions for improvements, fixes, integrations, and documentation via GitHub. Architecture, roadmap, and releases remain curated by the original creator to keep the design coherent as the project evolves.
 
-**Roles:** Creator and Maintainer — Anandhu P Shaji. Contributors are acknowledged in [AUTHORS.md](AUTHORS.md) and [graphs/contributors](https://github.com/Cyrax321/CONTINUUM/graphs/contributors) and are listed as contributors, not creators.
+**Roles:** Creator and Maintainer: Anandhu P Shaji. Contributors are acknowledged in [AUTHORS.md](AUTHORS.md) and [graphs/contributors](https://github.com/Cyrax321/CONTINUUM/graphs/contributors).
 
 ## Contributing
 
