@@ -512,9 +512,13 @@ CONTINUUM is open source under the [Apache-2.0](LICENSE) license. The repository
 
 **CONTINUUM** was created and is maintained by **Anandhu P Shaji** ([@Cyrax321](https://github.com/Cyrax321) · [LinkedIn](https://www.linkedin.com/in/anandhupshaji/)).
 
-I designed and built CONTINUUM to address reliability and recovery challenges in long-running AI agent systems. The project is now developed in the open, with community contributions for improvements, fixes, integrations, and documentation via GitHub. Architecture, roadmap, and releases remain curated by the original creator to keep the design coherent as the project evolves.
+I started with one question: what if an agent could lose its context without losing its work. Over three weeks, I designed and built CONTINUUM from scratch to answer it — a verifiable recovery layer that treats every checkpoint as evidence, not proof, and verifies it against the real world before saying safe.
 
-**Roles:** Creator and Maintainer: Anandhu P Shaji. Contributors are acknowledged in [AUTHORS.md](AUTHORS.md) and [graphs/contributors](https://github.com/Cyrax321/CONTINUUM/graphs/contributors).
+In that time I shipped a hash chained event log with tamper evidence, an idempotent ledger that refuses duplicate side effects even under argument drift, a gate and gateway that block unclaimed calls before they fire, and a universal adapter with five seams so the same run can be written by Claude Code, resumed by LangGraph, inspected by the CLI, and approved on the dashboard. It now holds about 1380 tests, 38 CLI commands, 12 MCP tools, and live proofs with real process kills and real models, all built in public.
+
+The project is now open source under Apache-2.0. Community contributions for fixes, documentation, integrations, and testing are welcome and credited in [AUTHORS.md](AUTHORS.md) and [graphs/contributors](https://github.com/Cyrax321/CONTINUUM/graphs/contributors). Architecture, roadmap, and releases remain curated by the original creator to keep the design coherent as it evolves.
+
+**Roles:** Creator and Maintainer: Anandhu P Shaji. Contributors are acknowledged as contributors.
 
 ## Contributing
 
