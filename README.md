@@ -506,19 +506,13 @@ CONTINUUM sits at the overlap of durable execution, idempotent side-effect track
 
 ## Open Source
 
-CONTINUUM is now an open-source project.
-
-The repository is open to developers who want to contribute through issues, pull requests, documentation, testing, integrations, and improvements.
-
-Community contributions are welcome as CONTINUUM continues to evolve.
+CONTINUUM is open source under the [Apache-2.0](LICENSE) license. The repository is public and welcomes contributions via issues, pull requests, documentation, testing, and integrations. All contributions are reviewed under the guidelines in [CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 ## About
 
-**CONTINUUM** is an open-source project created and developed by **Anandhu P Shaji ([@Cyrax321](https://github.com/Cyrax321))** — [LinkedIn](https://www.linkedin.com/in/anandhupshaji/).
+**CONTINUUM** was created and is maintained by **Anandhu P Shaji** ([@Cyrax321](https://github.com/Cyrax321) · [LinkedIn](https://www.linkedin.com/in/anandhupshaji/)).
 
-I originally designed and built CONTINUUM to address reliability and recovery challenges in long-running AI agent systems. The project is now open source, allowing other developers to contribute improvements, fixes, integrations, documentation, and other enhancements through GitHub.
-
-The project's architecture, direction, and ongoing development are maintained by the original creator.
+I designed and built CONTINUUM to address reliability and recovery challenges in long-running AI agent systems. The project is now developed in the open, with community contributions for improvements, fixes, integrations, and documentation via GitHub. Architecture, roadmap, and releases remain curated by the original creator to keep the design coherent as the project evolves.
 
 ## Contributing
 
