@@ -945,6 +945,7 @@ class ActionLedger:
         *,
         external_id: str | None = None,
         result: Mapping[str, Any] | None = None,
+        consumed_inputs: ConsumedInputs | Mapping[str, Any] | None = None,
     ) -> Action:
         """Record that the effect succeeded.
 
@@ -984,6 +985,8 @@ class ActionLedger:
             )
         settled_external = external_id if external_id is not None else existing.external_id
         settled_result = dict(result) if result is not None else existing.result
+        normalized = _normalize_consumed_inputs(consumed_inputs)
+        settled_consumed = normalized if normalized is not None else existing.consumed_inputs
         action = existing.model_copy(
             update={
                 "status": ActionStatus.COMPLETED,
@@ -994,6 +997,7 @@ class ActionLedger:
                 ),
                 "completed_at": utcnow(),
                 "side_effect_uncertain": False,
+                "consumed_inputs": settled_consumed,
             }
         )
         recorded = self._record(key, action)
