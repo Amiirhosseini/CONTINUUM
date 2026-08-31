@@ -491,14 +491,9 @@ Open an issue before submitting large PRs. See [CONTRIBUTING.md](CONTRIBUTING.md
 
 ### Contributors
 
-<a href="https://github.com/Cyrax321"><img src="docs/contributors/cyrax321.png" width="60" alt="Cyrax321" /></a>
-  <a href="https://github.com/dchaudhari7177"><img src="docs/contributors/dchaudhari7177.png" width="60" alt="Dipak Chaudhari" /></a>
-  <a href="https://github.com/lesbass"><img src="docs/contributors/lesbass.png" width="60" alt="Stefano Maffeis" /></a>
-  <a href="https://github.com/as950118"><img src="docs/contributors/as950118.png" width="60" alt="heonjinjeong" /></a>
-  <a href="https://github.com/abyyxhek"><img src="docs/contributors/abyyxhek.png" width="60" alt="Abishek" /></a>
-  <a href="https://github.com/Parthipashok04"><img src="docs/contributors/parthipashok04.png" width="60" alt="Parthipashok04" /></a>
-
-Also with merged contributions: [Adhi1-2](https://github.com/Adhi1-2), [yuki-fuyutsuki](https://github.com/yuki-fuyutsuki), and [okestroHjJeong](https://github.com/okestroHjJeong).
+<a href="https://github.com/Cyrax321/CONTINUUM/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=Cyrax321/CONTINUUM" />
+</a>
 
 ## Sponsor
 
