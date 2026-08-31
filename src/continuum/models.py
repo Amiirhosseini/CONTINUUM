@@ -55,6 +55,7 @@ __all__ = [
     "ModelState",
     "Run",
     "SemanticState",
+    "ConsumedInputs",
     "Action",
     "EnvResource",
     "EnvironmentSnapshot",
@@ -702,6 +703,54 @@ class SemanticState(BaseModel):
 # --------------------------------------------------------------------------- #
 # Action ledger
 # --------------------------------------------------------------------------- #
+
+
+class ConsumedInputs(BaseModel):
+    """Commitment inputs consumed by a completed action (issue #295).
+
+    Records which checkpoint components and prior action outputs were used
+    to produce this action. Caller supplied at completion time, validated
+    but optional for backward compatibility. An absent or empty value is
+    admissible (no commitments), so old ledger rows without the field
+    remain admissible and round-trip.
+
+    This is the DART commitment graph edge, distinct from causal
+    ``caused_by``: ``caused_by`` traces why an action was decided,
+    ``consumed_inputs`` records what state it committed to.
+    """
+
+    model_config = Frozen
+
+    checkpoint_seq: int = Field(default=0, ge=0)
+    """Checkpoint sequence consumed, 0 means none."""
+    event_positions: list[int] = Field(default_factory=list)
+    """Event sequence positions consumed."""
+    action_ids: list[str] = Field(default_factory=list)
+    """Prior action ids consumed."""
+
+    @field_validator("event_positions")
+    @classmethod
+    def _positions_valid(cls, v: list[int]) -> list[int]:
+        if len(v) > 128:
+            raise ValueError("event_positions must contain at most 128 entries")
+        for pos in v:
+            if not isinstance(pos, int):
+                raise ValueError("event_positions must be integers")
+            if pos < 0:
+                raise ValueError("event_positions must be >= 0")
+        return v
+
+    @field_validator("action_ids")
+    @classmethod
+    def _action_ids_valid(cls, v: list[str]) -> list[str]:
+        if len(v) > 32:
+            raise ValueError("action_ids must contain at most 32 entries")
+        for aid in v:
+            if not isinstance(aid, str):
+                raise ValueError("action_ids must be strings")
+            if not (1 <= len(aid) <= 128):
+                raise ValueError("action_id must be 1-128 characters")
+        return v
 
 
 class Action(BaseModel):
