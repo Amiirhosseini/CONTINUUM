@@ -506,13 +506,11 @@ CONTINUUM sits at the overlap of durable execution, idempotent side-effect track
 
 ## About
 
-**CONTINUUM** was created by **Anandhu P Shaji** ([@Cyrax321](https://github.com/Cyrax321) · [LinkedIn](https://www.linkedin.com/in/anandhupshaji/)).
-
 In early 2026 I watched long running agents fail not on reasoning but on recovery. A checkpoint was treated as proof that it was safe to continue, not as evidence to be verified. An agent could certify its own progress and be believed. A tool could fire twice after a restore and no one would notice until a customer was billed twice. I surveyed the field, durable execution in Temporal and Restate, checkpointing in LangGraph, rollback hazards in ACRFence 2603.20625, error tail degradation in self conditioning 2509.09677, and horizon limits in METR, and saw the gap was not another framework. The gap was a portable verification substrate that could ask, given the state at time T and the world as it is now, is it still correct and safe to continue, and that any harness could plug into.
 
 Over three weeks I designed and built CONTINUUM from scratch to close that gap. I started from one invariant, every fact carries its origin and trust is earned, never assumed, and derived the substrate from it: a hash chained event log with `verify() trusted_through` for tamper evidence, a ledger that refuses duplicate side effects even under argument drift with stable keys and token fallback, a gate and gateway that block unclaimed calls before they fire, and a recovery engine that propagates staleness `dependency -> evidence -> finding -> decision` and seals a contract with `safe`, `evidence`, and executable `human_steps`. To make it universal I built five seams over the same log so the same run can be written by Claude Code, resumed by LangGraph, driven by LangChain or OpenAI, claimed through any HTTP gateway, or observed via OpenTelemetry. I proved it not with mocks but with real kills and real models, `os._exit(9)` mid batch and `os._exit(137)` mid side effect, three Claude Code e2e runs 7/7, and OpenRouter `gpt-4o-mini` hard crash proofs, all reproduced in `demo-run/generate_crash_visual.py` and `docs/assets/crash-recovery.svg`. It now holds about 1380 tests, 38 CLI commands, 12 MCP tools, and a benchmark that prints `0 duplicates` where naive replay prints `50`, all built in public on `main`.
 
-CONTINUUM is open source under the [Apache-2.0](LICENSE) license. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to contribute.
+CONTINUUM was created by **Anandhu P Shaji** ([@Cyrax321](https://github.com/Cyrax321) · [LinkedIn](https://www.linkedin.com/in/anandhupshaji/)) and is maintained by the original creator. It is open source under the [Apache-2.0](LICENSE) license. Community contributions are welcome via [CONTRIBUTING.md](CONTRIBUTING.md) and are credited in [AUTHORS.md](AUTHORS.md) and [graphs/contributors](https://github.com/Cyrax321/CONTINUUM/graphs/contributors).
 
 ## Contributing
 
