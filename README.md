@@ -504,9 +504,17 @@ CONTINUUM sits at the overlap of durable execution, idempotent side-effect track
 - **Agent/MCP runs need an explicit confirm before auto-resume.** Externally-reported state is `REQUIRES_REVIEW`, so `continuum resume` returns `request_human` until a human confirms. By design, not a bug; see [Framework Integration](#framework-integration).
 - **e2e autonomy test series** (issue [#6](https://github.com/Cyrax321/CONTINUUM/issues/6)): three full Claude Code runs scored 7/7 mechanics with unprompted recovery behavior observed. Further iterations across diverse prompt styles remain open.
 
+## Open Source
+
+CONTINUUM is now an open-source project.
+
+The repository is open to developers who want to contribute through issues, pull requests, documentation, testing, integrations, and improvements.
+
+Community contributions are welcome as CONTINUUM continues to evolve.
+
 ## Contributing
 
-Contributions are welcome. This project is open source under Apache 2.0 and deliberately built to be extended: by researchers validating the recovery semantics, by engineers porting the ledger or MCP server to other frameworks or languages, and by anyone turning the planned roadmap into reality. A good place to start is the `good first issue` label on the [issue tracker](https://github.com/Cyrax321/CONTINUUM/issues), or the open correctness bugs listed in STATUS.md.
+This project is open source under Apache 2.0 and deliberately built to be extended: by researchers validating the recovery semantics, by engineers porting the ledger or MCP server to other frameworks or languages, and by anyone turning the planned roadmap into reality. A good place to start is the `good first issue` label on the [issue tracker](https://github.com/Cyrax321/CONTINUUM/issues), or the open correctness bugs listed in STATUS.md.
 
 Open an issue before submitting large PRs. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contribution guide, including the [Code of Conduct](CODE_OF_CONDUCT.md).
 
