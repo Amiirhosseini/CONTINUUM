@@ -1039,6 +1039,7 @@ class ActionLedger:
         external_id: str | None = None,
         result: Mapping[str, Any] | None = None,
         note: str = "",
+        consumed_inputs: ConsumedInputs | Mapping[str, Any] | None = None,
     ) -> Action:
         """Resolve an uncertain action using evidence from the outside world.
 
@@ -1067,6 +1068,8 @@ class ActionLedger:
             # receipt disappears; a caller replacing the evidence passes it.
             settled_external = external_id if external_id is not None else existing.external_id
             settled_result = dict(result) if result is not None else existing.result
+            normalized = _normalize_consumed_inputs(consumed_inputs)
+            settled_consumed = normalized if normalized is not None else existing.consumed_inputs
             action = existing.model_copy(
                 update={
                     "status": ActionStatus.COMPLETED,
@@ -1078,6 +1081,7 @@ class ActionLedger:
                     "completed_at": utcnow(),
                     "side_effect_uncertain": False,
                     "last_error": note or existing.last_error,
+                    "consumed_inputs": settled_consumed,
                 }
             )
         else:
@@ -1089,6 +1093,7 @@ class ActionLedger:
                     "result_hash": None,
                     "side_effect_uncertain": False,
                     "last_error": note or "reconciliation found no external effect",
+                    "consumed_inputs": ConsumedInputs(),
                 }
             )
         recorded = self._record(key, action, EventType.ACTION_RECONCILED)
