@@ -73,7 +73,7 @@ from continuum.budgets import (
 )
 from continuum.concurrency.lease import LeaseCoordinator
 from continuum.events import EventType
-from continuum.models import Action, ActionStatus, UnknownSideEffect, utcnow
+from continuum.models import Action, ActionStatus, ConsumedInputs, UnknownSideEffect, utcnow
 from continuum.security.hashing import stable_hash
 from continuum.storage.base import Storage
 
@@ -220,6 +220,26 @@ def _superset_derives_from_subset(subset: frozenset[str], superset: frozenset[st
         if ext.lstrip(".").lower() not in _KNOWN_SUFFIXES:
             return False
     return True
+
+
+def _normalize_consumed_inputs(
+    consumed: ConsumedInputs | Mapping[str, Any] | None,
+) -> ConsumedInputs | None:
+    """Validate and normalize caller-supplied consumed_inputs.
+
+    Accepts a ``ConsumedInputs`` instance, a plain mapping with
+    ``checkpoint_seq``, ``event_positions``, ``action_ids``, or None.
+    Returns a validated ``ConsumedInputs`` or None when nothing was
+    supplied. Invalid shapes raise ``ValueError`` so the caller learns
+    at the boundary rather than storing an un-auditable commitment.
+    """
+    if consumed is None:
+        return None
+    if isinstance(consumed, ConsumedInputs):
+        return consumed
+    if isinstance(consumed, Mapping):
+        return ConsumedInputs.model_validate(dict(consumed))
+    raise ValueError("consumed_inputs must be a mapping or ConsumedInputs")
 
 
 class LedgerError(RuntimeError):
