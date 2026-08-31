@@ -774,6 +774,8 @@ class Action(BaseModel):
     created_at: datetime = Field(default_factory=utcnow)
     started_at: datetime | None = None
     completed_at: datetime | None = None
+    consumed_inputs: ConsumedInputs = Field(default_factory=ConsumedInputs)
+    """Commitment inputs consumed to produce this action (issue #295)."""
 
 
 class UnknownSideEffect(RuntimeError):
