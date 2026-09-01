@@ -32,13 +32,13 @@ pip install -e ".[dev]"
 On **Windows PowerShell**, use the same steps with these commands instead:
 
 ```powershell
-# 1. Clone the repo (same as above)
+# 1. Clone the repo
 git clone https://github.com/Cyrax321/CONTINUUM.git
 cd CONTINUUM
 
 # 2. Create and activate a virtual environment
 python -m venv .venv
-.venv\Scripts\Activate.ps1
+.\.venv\Scripts\Activate.ps1
 
 # 3. Install in editable mode with all dev extras
 pip install -e ".[dev]"
