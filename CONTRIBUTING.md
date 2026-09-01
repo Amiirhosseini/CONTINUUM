@@ -29,6 +29,24 @@ source .venv/bin/activate        # macOS / Linux
 pip install -e ".[dev]"
 ```
 
+On **Windows PowerShell**, use the same steps with these commands instead:
+
+```powershell
+# 1. Clone the repo (same as above)
+git clone https://github.com/Cyrax321/CONTINUUM.git
+cd CONTINUUM
+
+# 2. Create and activate a virtual environment
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+
+# 3. Install in editable mode with all dev extras
+pip install -e ".[dev]"
+
+# Optional: run the Windows demo launcher
+powershell -ExecutionPolicy Bypass -File .\try-it.ps1
+```
+
 Local CONTINUUM data lives in `.continuum/` (budgets, local `*.db` files). It is already listed in `.gitignore`, so do not commit it. If you cloned before this was added, run `echo ".continuum/" >> .gitignore`.
 
 ---
