@@ -17,7 +17,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
 
-from continuum.events import Event, EventType
+from continuum.events import EventType
 from continuum.models import Origin, StateStatus
 
 __all__ = [
@@ -54,7 +54,13 @@ class ProvenanceNode:
     @property
     def label(self) -> str:
         """Human label for CLI rendering."""
-        pid = self.payload.get("evidence_id") or self.payload.get("finding_id") or self.payload.get("decision_id") or self.payload.get("action_id") or self.event_id[:8]
+        pid = (
+            self.payload.get("evidence_id")
+            or self.payload.get("finding_id")
+            or self.payload.get("decision_id")
+            or self.payload.get("action_id")
+            or self.event_id[:8]
+        )
         return f"{self.type.value}:{pid}"
 
 
@@ -172,7 +178,11 @@ def downstream_of(graph: ProvenanceGraph, evidence_id: str) -> list[ProvenanceNo
     # payload id match
     start_ids: list[str] = []
     for node in graph.nodes.values():
-        pid = node.payload.get("evidence_id") or node.payload.get("finding_id") or node.payload.get("decision_id")
+        pid = (
+            node.payload.get("evidence_id")
+            or node.payload.get("finding_id")
+            or node.payload.get("decision_id")
+        )
         if pid == evidence_id:
             start_ids.append(node.event_id)
         elif node.payload.get("evidence_id") == evidence_id:
