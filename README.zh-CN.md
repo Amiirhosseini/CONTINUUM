@@ -227,3 +227,46 @@ CONTINUUM 针对真实 LLM 智能体、真实协议边界和硬进程崩溃进�
 - **自愈**：硬杀的服务器在启动时通过单次重试清理孤立的 SQLite `-wal`/`-shm` 伴生文件来恢复。
 - **规模**：约 1,380 个测试被收集（约 1,360 通过，其余在缺少可选服务时跳过），覆盖 Python 3.11、3.12 和 3.13（单元、`hypothesis` 属性测试、并发、对抗）。CONTINUUM-Bench 运行五个崩溃场景加一个专门的参数漂移场景，对 CONTINUUM 测量到 0 重复工作和 0 重复副作用，而对朴素重放则为完全重复，另有一个 12 场景恢复正确性套件（`continuum.benchmark.phase6`）将持久执行调研中的崩溃点编码为可执行断言。
 - **对抗审计**：完整 MCP 面已在真实协议上被审计，发现并修复了三个缺陷。方法和复现步骤见 [test.md](test.md)。
+
+## MCP 集成
+
+CONTINUUM 交付 MCP 服务器，因此智能体可以在不嵌入库的情况下记录进度、打检查点并通过账本路由外部副作用：
+
+```bash
+uv pip install -e ".[mcp]"
+CONTINUUM_MCP_MUTATING_CLIENTS=your-client-name continuum-mcp
+```
+
+通过 stdio 的十一个工具。其中三个是只读的（`continuum_validate`、`continuum_resume`、`continuum_list_actions`），八个会变更。副作用采用两阶段（声明、执行、完成），变更工具默认位于 allowlist 之后。智能体报告的状态以 `Origin.EXTERNAL_AGENT` 可溯源性记录并标记为 `REQUIRES_REVIEW`。
+
+验证细节，包括启动时的崩溃恢复和端到端 Claude Code 测试，见 [references/mcp.md](references/mcp.md)。如果已注册的服务器报告 `CONNECTION_CLOSED`，原因几乎总是 `PATH` 解析而非服务器本身：[docs/api/mcp.md](docs/api/mcp.md#troubleshooting) 有诊断和两种修复方法。
+
+## 框架集成
+
+`src/continuum/adapters/` 中交付九个适配器（一个进程内门面加上八个集成），全部为可选安装，因此核心保持仅标准库：
+
+| 适配器 | 类 | 说明 |
+|:--|:--|:--|
+| 通用 Python 智能体 | `GenericAgentAdapter` | 进程内门面，写入可信（`Origin.DETERMINISTIC`）状态。 |
+| 文件系统沙箱 | `FilesystemSandboxAdapter` | 本地目录沙箱，无外部服务，文档和 CI 的默认值。 |
+| Python 进程内 | `PythonInProcAdapter` | 在临时工作目录中运行 Python，通过账本记录。 |
+| 容器 | `ContainerAdapter` | Docker 后端，当 `docker` 缺席时受保护跳过。 |
+| 浏览器 | `BrowserAdapter` | Playwright 后端，未安装时受保护跳过。 |
+| Kubernetes | `KubernetesAdapter` | `kubectl` 后端，未配置时受保护跳过。 |
+| OpenAI Agents SDK | `OpenAIAgentAdapter` | 实验性。钩入 `ToolContext` / `RunHooks`，可选 `openai-agents`。 |
+| LangGraph | `LangGraphAgentAdapter` | 实验性。包装 `StateGraph`，可选 `langgraph`。 |
+| LangChain | `LangChainAgentAdapter` | 实验性。将 `checkpoint_node` 放入 LCEL `Runnable` 流水线和 `create_agent` 工具调用循环，可选 `langchain`。 |
+
+每个适配器都通过账本记录进度，并通过两阶段拦截和完成协议路由外部效应。全部三个框架适配器都有端到端集成测试，并已针对 **真实 OpenRouter 模型** 驱动，在此过程中发现并关闭了 LLM 参数漂移去重缺口和两个 OpenAI 适配器缺陷，包括每个适配器一次真实硬崩溃（`os._exit(137)` 在副作用中）证明。每个适配器的完整用法、真实模型结果和可运行示例见 [references/adapters.md](references/adapters.md)。
+
+生产级 LangGraph 应用也可以保留其原生持久化 API：`make_continuum_checkpointer(storage)` 实现了 LangGraph 的 `BaseCheckpointSaver` 并基于 CONTINUUM 存储，因此每次 put 都落在同一哈希链、可溯源的事件日志中（见 [references/adapters.md](references/adapters.md)）。
+
+另外三个生产框架由 [`adapters/thin.py`](src/continuum/adapters/thin.py) 中无需 SDK 的薄钩子面覆盖：
+
+| 框架 | 拦截面 | 入口 |
+|:--|:--|:--|
+| CrewAI | 全局工具调用前后钩子 | `install_crewai_hooks(storage, run_id)` |
+| AutoGen core | 原地包装 `FunctionTool.run_json` | `wrap_autogen_tool(tool, storage, run_id)` |
+| Pydantic AI | 异步 Hooks 能力 | `Agent(capabilities=[wrap_pydantic_ai_hooks(storage, run_id)])` |
+
+对于这些都未覆盖的栈：`continuum gateway` 对来自任意语言的外发 HTTP 强制声明，`continuum.otel.make_span_processor(storage)` 将现有的 OpenTelemetry 工具跨度转为证据，而 `continuum serve` 以与 MCP 工具相同的操作通过语言无关的 JSON 线路协议暴露（stdio，或通过 `--transport http` 的 HTTP 并使用 `CONTINUUM_SERVE_TOKEN` 鉴权）。
