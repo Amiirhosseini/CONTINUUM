@@ -92,10 +92,11 @@ uv pip install "continuum-agent[mcp] @ git+https://github.com/Cyrax321/CONTINUUM
 
 Verify:
 
+<!-- generated via: pytest --collect-only -q; pytest -q -->
 ```bash
 continuum --help                 # CLI entrypoint
 continuum-mcp --help             # MCP server entrypoint (needs [mcp] or [dev])
-pytest -q                        # ~1,918 collected, ~1,880 passed, ~38 skipped on a minimal env (exact counts vary) <!-- generated via: pytest --collect-only -q; pytest -q -->
+pytest -q                        # ~1,918 collected, ~1,880 passed, ~38 skipped on a minimal env (exact counts vary)
 ruff check src/ tests/ examples/ && ruff format --check src/ tests/ examples/
 mypy src/continuum               # the three gates CI enforces
 ```
