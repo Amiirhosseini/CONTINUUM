@@ -321,3 +321,42 @@ Cualquier harness se conecta al mismo registro encadenado. La misma ejecución p
 1. **Sin auto certificación.** El estado reportado por el agente es `EXTERNAL_AGENT` y degrada a `REQUIRES_REVIEW` hasta un `REVIEW_CONFIRMED` humano. Solo escritores confiables producen estado `DETERMINISTIC`.
 2. **Los efectos secundarios requieren reclamos.** Cada efecto externo se reclama en un libro mayor idempotente antes de dispararse. Los efectos no reclamados se bloquean en el límite, los duplicados se rechazan, los resultados inciertos se elevan para reconciliación.
 3. **La recuperación verifica contra la realidad.** La reanudación comprueba digests de archivos, versiones de dependencias e identidad del modelo antes de decir que es seguro. La obsolescencia se propaga `dependency -> evidence -> finding -> decision` más `PlanStep.depends_on` por lo que solo los pasos afectados se reparan.
+
+### Cinco costuras de integración
+
+| Costura | Cómo conectar | Qué te aporta |
+|:--|:--|:--|
+| 1 En proceso | `GenericAgentAdapter.intercept_action(...)` y `wrap_tool(key_fn=...)` en LangChain, LangGraph, OpenAI Agents SDK | Frameworks Python, escrituras confiables |
+| 2 Servidor MCP | `continuum-mcp` 12 herramientas vía stdio (`continuum_record_progress`, `continuum_intercept_action`, `continuum_complete_action`, etc.) | Cualquier cliente capaz de MCP, 3 solo lectura + 8 mutantes, allowlist `CONTINUUM_MCP_MUTATING_CLIENTS` |
+| 3 Hooks de ciclo de vida CLI | `continuum hooks install claude-code --with-gate` también `gemini` y `codex` | CLIs de código: `SessionStart briefing`, `PostToolUse observe`, `PreToolUse gate`, sin necesidad de CLAUDE.md |
+| 4 Gateway HTTP de cumplimiento | `continuum gateway --port 8765` con `.continuum/gateway.json` | Cualquier lenguaje, cualquier HTTP saliente debe tener un reclamo, el gateway liquida desde el código de estado real |
+| 5 Puente OpenTelemetry | `make_span_processor(storage)` | Cualquier app trazada, los spans se convierten en evidencia `TOOL_COMPLETED` |
+
+Superficies delgadas de hooks para CrewAI, AutoGen, Pydantic AI viven en `adapters/thin.py` sin necesidad de SDK.
+
+### Pipeline de cumplimiento, por qué sin duplicados y sin llamadas inválidas
+
+El pipeline de puerta a observación cierra la brecha en el límite del harness. Esto es lo que ahorra tokens y coste y bloquea llamadas inválidas a herramientas.
+
+```text
+Hook PreToolUse                    Hook PostToolUse
+    |                                    |
+    v                                    v
+continuum gate                    continuum observe
+    |                                    |
+    |-- sin reclamo? DENIEGA (exit 2)          |-- evento TOOL_COMPLETED:
+    |   + instrucciones para reclamar          |     ruta, bytes, sha256 en disco ahora
+    |                                    |
+    |-- reclamo vivo? PERMITE                |-- estado verificado en disco:
+    |                                    |     verificado / cambiado / faltante
+    v
+el agente ejecuta el efecto
+    |
+    v
+continuum_complete_action  (liquidado desde la realidad, no desde el reporte)
+    |
+    v
+libro mayor marcado COMPLETADO, la próxima reproducción devuelve resultado cacheado, no un segundo disparo
+```
+
+Host desconocido se deniega cerrado por fallo, no como relay abierto. Shell `Bash/curl` es el punto ciego documentado de v1.
