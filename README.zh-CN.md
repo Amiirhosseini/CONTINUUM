@@ -160,3 +160,18 @@ CONTINUUM 将 **LLM 上下文**（临时）与 **持久任务状态**（永久�
 | 验证基座 | 给定时间 T 的检查点和当下的世界，继续是否仍然安全和正确？ | `src/continuum/state/validator.py`（过期性 `dependency -> evidence -> finding -> decision` 加上 `PlanStep.depends_on`）、`src/continuum/provenance_map.py`（`Origin` 到 `REQUIRES_REVIEW` 直至 `REVIEW_CONFIRMED`）、`src/continuum/actions/ledger.py` 配合 `src/continuum/actions/idempotency.py` 与 `src/continuum/gate.py` / `src/continuum/gateway.py`（先声明再触发，拒绝重复并为对账抛出 `UnknownSideEffect`）、`src/continuum/replayguard.py`（可移植守卫）、`src/continuum/pinning.py` 与 `src/continuum/replay_similarity.py`（重放正确性）、`src/continuum/budgets.py`（重试上限）、`src/continuum/recovery/engine.py` + `src/continuum/recovery/contract.py` + `src/continuum/recovery/planner.py` + `src/continuum/recovery/observations.py`（最大严重度 `RESUME < ... < ABORT`，带 `evidence` / `reason` / `next_allowed_action` / `human_steps` 的密封合约）、`src/continuum/checkpoint/rewind.py`（原子双状态回滚）、`src/continuum/analysis/prefix_trust.py`（建议性信任）。已发布的检查：`docs/recovery_walkthrough.md`、`benchmarks/fault_injection/`（打印 `detection_rate` / `unsafe_resume_rate` 的套件）、`src/continuum/benchmark/phase6/`（恢复正确性套件）、`docs/RESULTS.md` 以及下方可再生的可视化。 |
 
 该表中的每一行都可在打标签的提交上追溯到 `main` 上存在的路径。表格中不复述任何基准数字，基准只活在已打印它们的套件输出中。完整的已发布套件和设计文档列表见 `docs/research.md`。
+
+### 崩溃恢复，真实发生
+
+下面的图片不是模型图。它是 `python demo-run/generate_crash_visual.py` 的输出，该脚本让 `demo-run/worker.py` 运行至第 399 篇文档时执行 `os._exit(9)`，调用 `continuum resume --env dataset=v4` 并展示拒绝路径（`REQUEST_HUMAN`、`safe:false`、exit 20），用探针调和不确定的副作用，然后从同一数据库恢复并在无重复工作的情况下完成。转录也保存为 `docs/assets/crash-recovery.txt` 供审计。
+
+重新生成：
+
+```bash
+python demo-run/generate_crash_visual.py
+# 或：python scripts/generate_crash_visual.py
+```
+
+![崩溃恢复：批量中硬杀、拒绝、调和、恢复](docs/assets/crash-recovery.svg)
+
+带代码的完整 walkthrough 见 `docs/recovery_walkthrough.md`（`examples/recovery_walkthrough.py`）。最小化 bench harness 见 `references/bench.md`（`continuum benchmark`）。
