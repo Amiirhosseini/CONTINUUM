@@ -208,3 +208,23 @@ python demo-run/generate_crash_visual.py
 | 소모된 부여 추적 | 일회성 권한 참조는 종료 상태에서 소모된 것으로 표시되며 복원 후 재사용은 거부됨(`GRANT_DENIED`), 체크포인트 복원 경로에서 권한 부활을 방어 |
 | 체인 증명 | `continuum attest`는 Ed25519로 실행의 체인 헤드에 서명하여 외부 검증자가 알려진 키로 기록이 변조되지 않았음을 증명할 수 있게 함 |
 | HITL 대시보드 | 감사 패리티가 CLI와 동일한 확인, 조정, 완료 버튼 |
+
+## 보안 확장
+
+두 개의 가산적인 보안 확장이 복구와 체크포인트 기반 위에 자리한다. 그것들은 재개, 재생, 또는 기존의 크래시 시 재검증 경로를 변경하지 않는다.
+
+- **안전한 계획 루프**: 관측은 출처를 가지고 두 개의 독립적인 신호로 검증된다(`verified` / `unverified` / `contested`). 검증되지 않거나 논쟁되는 관측에 의해 보호되는 계획 분기는 `REQUIRES_REVIEW`로 승격된다. 결정은 원장에 `PERCEPTION_OBSERVED`와 `BRANCH_RESOLVED` 이벤트로 추가된다.
+- **주기적 재검증**: 복구 엔진을 단계 간격(기본값 25)과 앱 전환 시 재사용하므로, 실행 중 환경 드리프트가 다음 크래시까지 기다리지 않고 한 주기 내에 포착된다.
+
+[docs/PROBLEM.md](docs/PROBLEM.md), [docs/RESULTS.md](docs/RESULTS.md) 및 [STATUS.md](STATUS.md)를 참조하라.
+
+## 실증적 검증
+
+CONTINUUM은 목업 단위 테스트뿐만 아니라 실제 LLM 에이전트, 라이브 프로토콜 경계, 하드 프로세스 크래시에 대해 검증된다.
+
+- **실제 에이전트**: 실행 중 `SIGKILL`된 Claude Code에 의한 다중 세션 인보이스 배치. 메커니즘에서 7/7을 획득. 재개 세션은 `continuum_resume`을 조회하고, 2단계 원장으로 사이드 이펙트를 라우팅하며, 검증된 쓰기의 중복을 거부하고, `request_human`을 존중했다. 라이브 테스트는 프롬프트 드리프트 중복排除 갭을 드러냈고, `ActionLedger.claim()`에서 정규 경로 정규화와 토큰 기반 폴백으로 닫혔다.
+- **서드파티 클라이언트**: Gemini CLI와 Kilo Code가 stdio JSON-RPC로 라이브 SQLite 저장소에 연결되어 다중 에이전트 공존과 인가 분리를 검증.
+- **프로토콜 준수**: `@modelcontextprotocol/inspector --cli`로 프로세스 죽음을 가로질러 엔드투엔드로 구동. 변경 도구는 기본적으로 `CONTINUUM_MCP_MUTATING_CLIENTS` 뒤에서 거부되며, 외부 클레임은 `REQUIRES_REVIEW`(`safe: false`)로 강등된다.
+- **자기 치유**: 하드킬된 서버는 시작 시 한 번의 재시도로 고립된 SQLite `-wal`/`-shm` 사이드카를 정리하여 복구한다.
+- **규모**: 약 1,380개 테스트가 수집됨(약 1,360개 통과, 나머지는 선택적 서비스 없이 스킵), Python 3.11, 3.12, 3.13에서 실행(unit, `hypothesis` 기반 속성 테스트, 동시성, 적대적). CONTINUUM-Bench는 다섯 개의 크래시 시나리오에 전용 argument-drift 시나리오를 더해 실행하며, CONTINUUM에 대해 0 중복 작업과 0 중복 사이드 이펙트를, 단순 재생에 대해 완전한 중복을 측정한다. 추가로 12 시나리오 복구 정확성 스위트(`continuum.benchmark.phase6`)가 내구성 실행 서베이의 크래시 지점을 실행 가능한 어설션으로 인코딩한다.
+- **적대적 감사**: 전체 MCP 표면이 라이브 프로토콜 위에서 감사되었고, 세 가지 결함이 발견되어 수정되었다. 방법과 재현 단계는 [test.md](test.md)에 있다.
