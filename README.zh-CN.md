@@ -416,3 +416,14 @@ CONTINUUM 是一个库（`src/continuum`，104 个模块）加上大型测试套
 | `cli/` | 38 个 argparse 命令，退出码即裁决，`runs、start、inspect、resume、verify、health、tree、benchmark、attest、dashboard` |
 | `otel.py` | OpenTelemetry 跨度处理器桥 |
 | `benchmark/` | CONTINUUM-Bench  harness，5 个崩溃场景 + 参数漂移 + 12 场景恢复套件 |
+
+### 诚实的局限
+
+- 门控无法洞察 shell 命令内部（Bash 和 curl 绕过结构化工具声明）
+- Postgres 后端经 CI 测试但尚未在生产中久经考验
+- 尚无针对 `request_human` 通知的 webhook 外发（#305）
+- v1 仅支持一层多智能体层级
+- 大负载卸载（#254）尚未实现
+- 数周尺度的基准与 token 成本表落在 #550 看板（#568 至 #570）
+
+完整参考见 [references/architecture.md](references/architecture.md)。而构建于此之上的数月平面，溯源因果图、授权复活、可采纳性、活性，均作为看板 #550 及其 20 个子 issue #551 至 #570 被钉住。
