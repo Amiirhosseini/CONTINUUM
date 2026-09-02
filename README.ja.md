@@ -505,3 +505,56 @@ CONTINUUM は耐久実行、冪等な副作用追跡、LLM エージェントの
 - **フレームワークアダプターは依然として実験的。** 三つのフレームワークアダプターはすべてライブモデルでのソフト再開とハードクラッシュの証明（OpenRouter、`gpt-4o-mini`）を持ち、不確かな副作用上での再開をブロックするクラッシュ契約を含み、汎用ファサードと同等のクラッシュと再開の検証テストを持つようになった（Refs #285）。本番のリカバリには `GenericAgentAdapter` を優先すること。
 - **エージェントと MCP の実行は自動再開の前に明示的な確認を必要とする。** 外部から報告された状態は `REQUIRES_REVIEW` であるため、`continuum resume` は人間が確認するまで `request_human` を返す。設計によるものであり欠陥ではない。[フレームワーク統合](#フレームワーク統合) を参照。
 - **e2e 自律テストシリーズ**（issue [#6](https://github.com/Cyrax321/CONTINUUM/issues/6)）：三回の完全な Claude Code 実行がメカニクスで 7/7 を獲得し、プロンプトなしの回復動作が観察された。多様なプロンプトスタイルにわたるさらなる反復は依然として開かれている。
+
+## について
+
+2026 年初頭、長時間実行されるエージェントが推論ではなくリカバリで失敗するのを見た。チェックポイントは検証すべき証拠ではなく、継続するための証明として扱われていた。Temporal、LangGraph、ACRFence 2603.20625、self conditioning 2509.09677 を調査し、ギャップが移植可能な検証基盤であることを見つけた。それは、時刻 T の状態と今の世界が与えられたとき、継続しても安全かを問うものである。
+
+三週間で私は一つの不変条件から CONTINUUM を構築した。すべての事実はその起源を持つ。結果は `verify()` を持つハッシュチェーンログ、安定したキー重複排除を持つ台帳、未請求の効果をブロックするゲートとゲートウェイ、そして契約を封印するリカバリエンジンである。五つの継ぎ目が同じログを Claude Code、LangGraph、LangChain、OpenAI、HTTP、OpenTelemetry に公開する。実際のキルと 1380 のテストで検証され、単純な再生が `50` と印字するところで `0 重複` と印字する。
+
+CONTINUUM は **Anandhu P Shaji**（[@Cyrax321](https://github.com/Cyrax321) · [LinkedIn](https://www.linkedin.com/in/anandhupshaji/)）によって作成され、原作者によって保守されている。オープンソースであり [Apache-2.0](LICENSE) の下にある。コミュニティの貢献は [CONTRIBUTING.md](CONTRIBUTING.md) 経由で歓迎され、[AUTHORS.md](AUTHORS.md) と [graphs/contributors](https://github.com/Cyrax321/CONTINUUM/graphs/contributors) でクレジットされる。
+
+## コントリビューション
+
+このプロジェクトは Apache 2.0 の下でオープンソースであり、意図的に拡張可能に構築されている。リカバリセマンティクスを検証する研究者、台帳や MCP サーバーを他のフレームワークや言語に移植するエンジニア、計画されたロードマップを現実にする誰にとっても拡張可能である。良い出発点は [issue トラッカー](https://github.com/Cyrax321/CONTINUUM/issues) の `good first issue` ラベル、または STATUS.md にリストされた未解決の正確性バグである。
+
+大きな PR を送信する前に issue を開いてください。完全なコントリビューションガイドは [CONTRIBUTING.md](CONTRIBUTING.md) を参照。 [Code of Conduct](CODE_OF_CONDUCT.md) を含む。
+
+### コントリビューター
+
+<a href="https://github.com/Cyrax321/CONTINUUM/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=Cyrax321/CONTINUUM" />
+</a>
+
+## スポンサー
+
+CONTINUUM がエージェントの信頼できる回復に役立つなら、長期的な保守を支援するためにスポンサーを検討してください。
+
+<p align="center">
+  <a href="https://github.com/sponsors/Cyrax321"><img src="https://img.shields.io/badge/Sponsor-❤-ff69b4?style=for-the-badge&logo=githubsponsors" alt="Sponsor Cyrax321" /></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/sponsors/Cyrax321">スポンサーになる</a>、GitHub Sponsors、または FUNDING.yml にカスタムリンクを追加（他のプラットフォームを好む場合）。
+</p>
+
+## ライセンス
+
+Apache 2.0、[LICENSE](LICENSE) を参照。
+
+---
+
+深いリファレンス資料：
+
+- [references/install.md](references/install.md) - 前提条件、インストールレベル、パッケージマップ、検証
+- [references/concepts.md](references/concepts.md) - セマンティックチェックポイント、検証、台帳、リカバリモード、契約
+- [references/architecture.md](references/architecture.md) - データモデル、イベントログ、投影、ストレージ、チェックポインティング、リカバリエンジン、セキュリティ
+- [references/adapters.md](references/adapters.md) - フレームワークアダプターの使用法とライブモデル検証結果
+- [references/api.md](references/api.md) - Python とアダプター API
+- [references/cli.md](references/cli.md) - 完全な CLI コマンドリスト、終了コード、状態差分
+- [references/mcp.md](references/mcp.md) - MCP サーバー状態、検証、未解決の問い
+- [references/bench.md](references/bench.md) - CONTINUUM-Bench 設計
+- [references/quickstart.md](references/quickstart.md) - インストール、例、証明スクリプト
+- [references/e2e.md](references/e2e.md) - 端から端の自律テストウォークスルー
+- [references/testing.md](references/testing.md) - テストスイートの配置と規約
+- [references/related-work.md](references/related-work.md) - 注釈付き関連研究と引用監査
