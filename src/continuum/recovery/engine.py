@@ -357,6 +357,7 @@ class RecoveryEngine:
             reason=reason,
             scope=scope,
             post_checkpoint_observations=observations,
+            admissibility=admissibility,
         )
 
         tail_evidence: str | None = None
