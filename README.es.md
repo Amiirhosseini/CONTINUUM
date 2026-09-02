@@ -506,3 +506,56 @@ CONTINUUM se sitúa en la intersección de ejecución durable, seguimiento idemp
 - **Los adaptadores de framework siguen siendo experimentales.** Los tres adaptadores de framework ahora llevan pruebas de reanudación suave y caída dura con modelo vivo (OpenRouter, `gpt-4o-mini`), incluida la prueba de contrato de caída que bloquea la reanudación sobre un efecto secundario incierto, y ahora tienen tests de verificación de caída y reanudación que alcanzan paridad con la fachada genérica (Refs #285). Prefiere `GenericAgentAdapter` para recuperación en producción.
 - **Las ejecuciones de agente y MCP necesitan una confirmación explícita antes de la reanudación automática.** El estado reportado externamente es `REQUIRES_REVIEW`, por lo que `continuum resume` devuelve `request_human` hasta que un humano confirma. Por diseño, no es un defecto, ver [Integración de frameworks](#integración-de-frameworks).
 - **Serie de tests de autonomía e2e** (issue [#6](https://github.com/Cyrax321/CONTINUUM/issues/6)): tres ejecuciones completas de Claude Code puntuaron 7/7 en mecánicas con comportamiento de recuperación no solicitado observado. Más iteraciones a través de diversos estilos de prompt permanecen abiertas.
+
+## Sobre
+
+A principios de 2026 vi agentes de larga duración fallar en la recuperación, no en el razonamiento. Los checkpoints se trataban como prueba para continuar, no como evidencia a verificar. Estudiando Temporal, LangGraph, ACRFence 2603.20625 y self conditioning 2509.09677, encontré que el hueco era un sustrato de verificación portable que pregunta, dado el estado en el tiempo T y el mundo tal como está ahora, sigue siendo seguro continuar.
+
+En tres semanas construí CONTINUUM desde un invariante, cada hecho lleva su origen. El resultado es un registro encadenado con `verify()`, un libro mayor con deduplicación por clave estable, una puerta y un gateway que bloquean efectos no reclamados, y un motor de recuperación que sella un contrato. Cinco costuras exponen el mismo registro a Claude Code, LangGraph, LangChain, OpenAI, HTTP y OpenTelemetry. Validado con muertes reales y 1380 tests, imprime `0 duplicados` donde la reproducción ingenua imprime `50`.
+
+CONTINUUM fue creado por **Anandhu P Shaji** ([@Cyrax321](https://github.com/Cyrax321) · [LinkedIn](https://www.linkedin.com/in/anandhupshaji/)) y es mantenido por el creador original. Es de código abierto bajo [Apache-2.0](LICENSE). Las contribuciones de la comunidad son bienvenidas vía [CONTRIBUTING.md](CONTRIBUTING.md) y se acreditan en [AUTHORS.md](AUTHORS.md) y [graphs/contributors](https://github.com/Cyrax321/CONTINUUM/graphs/contributors).
+
+## Contribuir
+
+Este proyecto es de código abierto bajo Apache 2.0 y está deliberadamente construido para ser extendido: por investigadores que validan la semántica de recuperación, por ingenieros que portan el libro mayor o el servidor MCP a otros frameworks o lenguajes, y por cualquiera que convierta la hoja de ruta planificada en realidad. Un buen lugar para empezar es la etiqueta `good first issue` en el [rastreador de issues](https://github.com/Cyrax321/CONTINUUM/issues), o los defectos abiertos de corrección listados en STATUS.md.
+
+Abre un issue antes de enviar PRs grandes. Consulta [CONTRIBUTING.md](CONTRIBUTING.md) para la guía completa de contribución, incluido el [Code of Conduct](CODE_OF_CONDUCT.md).
+
+### Colaboradores
+
+<a href="https://github.com/Cyrax321/CONTINUUM/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=Cyrax321/CONTINUUM" />
+</a>
+
+## Patrocinar
+
+Si CONTINUUM ayuda a tus agentes a recuperarse de forma fiable, considera patrocinar para apoyar el mantenimiento a largo plazo.
+
+<p align="center">
+  <a href="https://github.com/sponsors/Cyrax321"><img src="https://img.shields.io/badge/Sponsor-❤-ff69b4?style=for-the-badge&logo=githubsponsors" alt="Sponsor Cyrax321" /></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/sponsors/Cyrax321">Conviértete en patrocinador</a>, GitHub Sponsors, o añade un enlace personalizado en FUNDING.yml si prefieres otra plataforma.
+</p>
+
+## Licencia
+
+Apache 2.0, ver [LICENSE](LICENSE).
+
+---
+
+Material de referencia profundo:
+
+- [references/install.md](references/install.md) - requisitos previos, niveles de instalación, mapa de paquetes, verificación
+- [references/concepts.md](references/concepts.md) - checkpoints semánticos, validación, libro mayor, modos de recuperación, contrato
+- [references/architecture.md](references/architecture.md) - modelo de datos, registro de eventos, proyección, almacenamiento, checkpointing, motor de recuperación, seguridad
+- [references/adapters.md](references/adapters.md) - uso de adaptadores de framework y resultados de validación con modelo vivo
+- [references/api.md](references/api.md) - API de Python y adaptadores
+- [references/cli.md](references/cli.md) - lista completa de comandos CLI, códigos de salida, diff de estado
+- [references/mcp.md](references/mcp.md) - estado del servidor MCP, verificación, preguntas abiertas
+- [references/bench.md](references/bench.md) - diseño de CONTINUUM-Bench
+- [references/quickstart.md](references/quickstart.md) - instalación, ejemplos, los scripts de prueba
+- [references/e2e.md](references/e2e.md) - recorrido de test de autonomía extremo a extremo
+- [references/testing.md](references/testing.md) - disposición y convenciones de la suite de tests
+- [references/related-work.md](references/related-work.md) - trabajo relacionado anotado y auditoría de citas
