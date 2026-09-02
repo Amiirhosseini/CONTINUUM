@@ -417,3 +417,14 @@ CONTINUUM は一つのライブラリ（`src/continuum`、104 モジュール）
 | `cli/` | 38 の argparse コマンド、終了コードが評決、`runs, start, inspect, resume, verify, health, tree, benchmark, attest, dashboard` |
 | `otel.py` | OpenTelemetry スパンプロセッサーブリッジ |
 | `benchmark/` | CONTINUUM-Bench ハーネス、5 つのクラッシュシナリオ + 引数ドリフト + 12 シナリオのリカバリスイート |
+
+### 正直な制限
+
+- ゲートはシェルコマンドの内部を見ることができない（Bash や curl は構造化されたツールクレームを回避する）
+- Postgres バックエンドは CI でテストされているが本番で鍛えられていない
+- `request_human` 通知のための webhook 外向きはまだない（#305）
+- v1 では一層のマルチエージェント階層のみ
+- 大きなペイロードのオフロード（#254）はまだ未実装
+- 数週間スケールのベンチマークとトークンコスト表はボード #550（#568 から #570）に着地する
+
+完全なリファレンスは [references/architecture.md](references/architecture.md) にある。そしてこの上に構築される数ヶ月平面、来歴因果グラフ、権限の復活、許容性、活性はボード #550 とその 20 のサブ issue #551 から #570 として固定されている。
