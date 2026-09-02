@@ -32,6 +32,10 @@
   <sub>If CONTINUUM helps your agents recover, please star the repo. It helps others discover it and keeps good first issues coming.</sub>
 </p>
 
+<p align="center">
+  <sub><strong>English</strong> | <a href="README.zh-CN.md">简体中文</a></sub>
+</p>
+
 ---
 
 ## Contents
