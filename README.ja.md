@@ -51,3 +51,20 @@ CONTINUUM はより狭く、より難しい問いを立てます。エージェ�
 - **セマンティックチェックポイント**：エージェントが継続するために必要なコンパクトでバージョン管理された表現であり、会話のダンプではない。
 - **独立した環境の再検証**：各チェックポイントコンポーネントは再開前に現在の環境に対して検証され、陳腐化は依存グラフを通じて伝播する。
 - **来歴を意識した状態**：すべての事実はその起源をたどることができ、エージェントが報告した進捗が自己認証されることは決してない。
+
+## クイックスタート
+
+PyPI に `continuum-agent` 0.1.0 として公開。`pip install continuum-agent` を実行（固定する場合は `pip install continuum-agent==0.1.0`）。リリースタグではビルド済み wheel が [GitHub Releases](https://github.com/Cyrax321/CONTINUUM/releases) に添付される。
+
+ゼロセットアップのパス（クローンもインストールも公開も不要）：
+
+| パス | 方法 |
+|:--|:--|
+| PyPI からインストール | `pip install continuum-agent==0.1.0` してから `continuum --help` |
+| クラッシュリカバリを端から端まで見る | `docker run --rm ghcr.io/cyrax321/continuum` |
+| Docker 経由で CLI を使う | `docker run --rm ghcr.io/cyrax321/continuum continuum --help` |
+| クローンせずに CLI を実行 | `uvx --from git+https://github.com/Cyrax321/CONTINUUM.git continuum --help` |
+| Windows PowerShell（クローン内） | `powershell -ExecutionPolicy Bypass -File .\try-it.ps1` または `powershell -ExecutionPolicy Bypass -File .\try-it.ps1 cli --help` |
+| ブラウザで完全な開発環境 | [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/Cyrax321/CONTINUUM?quickstart=1) |
+
+Docker イメージは CI によって `main` への各 push と各リリースタグで GHCR に公開される（`.github/workflows/docker-publish.yml`）。Codespace は `.devcontainer/` で定義される。
