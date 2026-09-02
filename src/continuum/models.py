@@ -725,6 +725,8 @@ class ConsumedInputs(BaseModel):
     """Checkpoint sequence consumed, 0 means none."""
     event_positions: list[int] = Field(default_factory=list)
     """Event sequence positions consumed."""
+    component_ids: list[str] = Field(default_factory=list)
+    """Checkpoint component ids consumed (e.g., decision ids, finding ids)."""
     action_ids: list[str] = Field(default_factory=list)
     """Prior action ids consumed."""
 
@@ -738,6 +740,18 @@ class ConsumedInputs(BaseModel):
                 raise ValueError("event_positions must be integers")
             if pos < 0:
                 raise ValueError("event_positions must be >= 0")
+        return v
+
+    @field_validator("component_ids")
+    @classmethod
+    def _component_ids_valid(cls, v: list[str]) -> list[str]:
+        if len(v) > 32:
+            raise ValueError("component_ids must contain at most 32 entries")
+        for cid in v:
+            if not isinstance(cid, str):
+                raise ValueError("component_ids must be strings")
+            if not (1 <= len(cid) <= 128):
+                raise ValueError("component_id must be 1-128 characters")
         return v
 
     @field_validator("action_ids")
