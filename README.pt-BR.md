@@ -506,3 +506,56 @@ O CONTINUUM se situa na interseção de execução durável, rastreamento idempo
 - **Adaptadores de framework permanecem experimentais.** Os três adaptadores de framework agora carregam provas de retomada suave e queda dura com modelo vivo (OpenRouter, `gpt-4o-mini`), incluindo a prova de contrato de queda que bloqueia retomada sobre um efeito colateral incerto, e agora têm testes de verificação de queda e retomada que alcançam paridade com a fachada genérica (Refs #285). Prefira `GenericAgentAdapter` para recuperação em produção.
 - **Execuções de agente e MCP precisam de confirmação explícita antes da retomada automática.** Estado reportado externamente é `REQUIRES_REVIEW`, portanto `continuum resume` retorna `request_human` até que um humano confirme. Por design, não é um defeito, ver [Integração de frameworks](#integração-de-frameworks).
 - **Série de testes de autonomia e2e** (issue [#6](https://github.com/Cyrax321/CONTINUUM/issues/6)): três execuções completas do Claude Code pontuaram 7/7 em mecânicas com comportamento de recuperação não solicitado observado. Mais iterações através de diversos estilos de prompt permanecem abertas.
+
+## Sobre
+
+No início de 2026 vi agentes de longa duração falharem na recuperação, não no raciocínio. Checkpoints eram tratados como prova para continuar, não como evidência a verificar. Pesquisando Temporal, LangGraph, ACRFence 2603.20625 e self conditioning 2509.09677, encontrei que a lacuna era um substrato de verificação portátil que pergunta, dado o estado no tempo T e o mundo como está agora, ainda é seguro continuar.
+
+Em três semanas construí o CONTINUUM a partir de um invariante, cada fato carrega sua origem. O resultado é um log encadeado com `verify()`, um ledger com deduplicação por chave estável, uma porta e um gateway que bloqueiam efeitos não reivindicados, e um motor de recuperação que sela um contrato. Cinco costuras expõem o mesmo log ao Claude Code, LangGraph, LangChain, OpenAI, HTTP e OpenTelemetry. Validado com mortes reais e 1380 testes, ele imprime `0 duplicatas` onde a reprodução ingênua imprime `50`.
+
+O CONTINUUM foi criado por **Anandhu P Shaji** ([@Cyrax321](https://github.com/Cyrax321) · [LinkedIn](https://www.linkedin.com/in/anandhupshaji/)) e é mantido pelo criador original. É de código aberto sob [Apache-2.0](LICENSE). Contribuições da comunidade são bem-vindas via [CONTRIBUTING.md](CONTRIBUTING.md) e são creditadas em [AUTHORS.md](AUTHORS.md) e [graphs/contributors](https://github.com/Cyrax321/CONTINUUM/graphs/contributors).
+
+## Contribuir
+
+Este projeto é de código aberto sob Apache 2.0 e deliberadamente construído para ser estendido: por pesquisadores validando a semântica de recuperação, por engenheiros portando o ledger ou o servidor MCP para outros frameworks ou linguagens, e por qualquer pessoa que transforme o roteiro planejado em realidade. Um bom lugar para começar é a etiqueta `good first issue` no [rastreador de issues](https://github.com/Cyrax321/CONTINUUM/issues), ou os defeitos abertos de correção listados em STATUS.md.
+
+Abra uma issue antes de enviar PRs grandes. Veja [CONTRIBUTING.md](CONTRIBUTING.md) para o guia completo de contribuição, incluindo o [Code of Conduct](CODE_OF_CONDUCT.md).
+
+### Colaboradores
+
+<a href="https://github.com/Cyrax321/CONTINUUM/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=Cyrax321/CONTINUUM" />
+</a>
+
+## Patrocinar
+
+Se o CONTINUUM ajuda seus agentes a se recuperarem de forma confiável, considere patrocinar para apoiar a manutenção a longo prazo.
+
+<p align="center">
+  <a href="https://github.com/sponsors/Cyrax321"><img src="https://img.shields.io/badge/Sponsor-❤-ff69b4?style=for-the-badge&logo=githubsponsors" alt="Sponsor Cyrax321" /></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/sponsors/Cyrax321">Torne-se um patrocinador</a>, GitHub Sponsors, ou adicione um link personalizado em FUNDING.yml se preferir outra plataforma.
+</p>
+
+## Licença
+
+Apache 2.0, ver [LICENSE](LICENSE).
+
+---
+
+Material de referência profundo:
+
+- [references/install.md](references/install.md) - pré-requisitos, níveis de instalação, mapa de pacotes, verificação
+- [references/concepts.md](references/concepts.md) - checkpoints semânticos, validação, ledger, modos de recuperação, contrato
+- [references/architecture.md](references/architecture.md) - modelo de dados, log de eventos, projeção, armazenamento, checkpointing, motor de recuperação, segurança
+- [references/adapters.md](references/adapters.md) - uso de adaptadores de framework e resultados de validação com modelo vivo
+- [references/api.md](references/api.md) - API Python e adaptadores
+- [references/cli.md](references/cli.md) - lista completa de comandos CLI, códigos de saída, diff de estado
+- [references/mcp.md](references/mcp.md) - estado do servidor MCP, verificação, perguntas abertas
+- [references/bench.md](references/bench.md) - design do CONTINUUM-Bench
+- [references/quickstart.md](references/quickstart.md) - instalação, exemplos, os scripts de prova
+- [references/e2e.md](references/e2e.md) - passo a passo de teste de autonomia ponta a ponta
+- [references/testing.md](references/testing.md) - disposição e convenções da suíte de testes
+- [references/related-work.md](references/related-work.md) - trabalho relacionado anotado e auditoria de citações
