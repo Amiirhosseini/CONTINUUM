@@ -2996,6 +2996,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     with_run(add("history", cmd_history, "List state versions and checkpoints."))
 
+    provenance = with_run(add("provenance", cmd_provenance, "Show provenance DAG. Read-only."))
+    impact = with_run(
+        add("impact", cmd_impact, "Show downstream impact of an evidence item. Read-only.")
+    )
+    impact.add_argument(
+        "--evidence", required=True, help="evidence event id or payload evidence_id"
+    )
+
     events = with_run(add("events", cmd_events, "List recorded events."))
     events.add_argument("--after", type=int, default=0)
     events.add_argument("--upto", type=int, default=None)
