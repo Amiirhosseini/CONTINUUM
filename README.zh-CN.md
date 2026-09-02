@@ -291,3 +291,31 @@ continuum resume <run_id>    # 现在报告 RESUME
 - **幂等动作账本**，外部副作用被追踪和去重，不确定的结果会抛出而非静默重试。
 - **恢复模式**，`RESUME`、`REPAIR_AND_RESUME`、`ROLLBACK`、`WAIT`、`REQUEST_HUMAN`、`ABORT`（加上 `REPLAN`）。
 - **恢复合约**，确定性的、完整性密封的、门控的下一步。
+
+## 架构
+
+CONTINUUM 围绕一个不变量组织：**每个事实都携带其来源，信任是挣得的，从不假设。** 为什么这对初创公司重要：运行数周的智能体不能在上下文丢失时丢失工作，也不能浪费 token、成本或对同一工具触发两次。
+
+### 系统一览，通用适配器、单一日志、任意 Harness
+
+任意 Harness 都接入同一哈希链日志。同一 run 可以由 Claude Code 写入、由 LangGraph 恢复、由 CLI 检查并在仪表板上批准。无需框架协作。
+
+```text
+  Claude Code ─┐
+  Gemini CLI ──┤
+  Codex ───────┤
+  LangGraph ───┼── 5 个接缝 ──►  单一持久日志  ──►  恢复 + 仪表板 + CLI
+  LangChain ───┤                （哈希链、        （密封合约、
+  OpenAI SDK ──┤                 可溯源、          验证、健康、
+  CrewAI ──────┤                 精确一次）        家族）
+  任意 HTTP ───┤
+  任意 OTel 应用┘
+
+  接缝：1 进程内  2 MCP  3 CLI 钩子  4 网关  5 OTel
+```
+
+### 三大保证（演示逐一证明）
+
+1. **无自我认证。** 智能体报告的状态为 `EXTERNAL_AGENT` 并降级为 `REQUIRES_REVIEW` 直至人类 `REVIEW_CONFIRMED`。只有可信写入者产生 `DETERMINISTIC` 状态。
+2. **副作用需要声明。** 每个外部效应在触发前在幂等账本中声明。未声明的效应在边界被阻止，重复被拒绝，不确定的结果会抛出以供调和。
+3. **恢复对照现实进行验证。** 恢复前会检查文件摘要、依赖版本和模型身份，然后再说安全。过期性传播 `dependency -> evidence -> finding -> decision` 加上 `PlanStep.depends_on`，因此只有受影响的步骤需要修复。
