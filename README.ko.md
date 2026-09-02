@@ -428,3 +428,39 @@ CONTINUUM은 하나의 라이브러리(`src/continuum`, 104 모듈) plus 대규�
 - 수 주 규모의 벤치마크와 토큰 비용 표는 보드 #550(#568에서 #570)에 착륙한다
 
 완전한 레퍼런스는 [references/architecture.md](references/architecture.md)에 있다. 그리고 이 위에 구축되는 수개월 평면, 출처 인과 그래프, 권한 부활, 허용 가능성, 활성성은 보드 #550와 그 20개 하위 이슈 #551부터 #570으로 고정되어 있다.
+
+## API와 CLI
+
+Python 표면(`EventType`, `Run`, `SQLiteStorage`, `diff_states`, `project`)과 어댑터 API는 실행 가능한 예제와 함께 [references/api.md](references/api.md)에 문서화되어 있다. CLI는 동일한 표면을 셸 형태로 제공한다.
+
+```bash
+continuum runs                                   # 실행 목록
+continuum inspect <run_id>                       # 의미 상태
+continuum validate <run_id> --env dataset=v4     # 검증, 읽기 전용
+continuum resume <run_id> --env dataset=v4       # 복구 결정 + 계약 + 다음 단계
+continuum checkpoint <run_id>                    # 체크포인트 강제, 변경함
+continuum actions <run_id>                       # 외부 사이드 이펙트
+continuum reconcile <run_id>                     # 프로브로 불확실한 효과 정산
+continuum complete <run_id>                      # 키보드에서 실행을 완료로 닫기
+continuum verify <run_id>                        # 이벤트 해시 체인 재감사
+continuum budget <run_id>                        # 액션 타입별 재시도 예산 사용량
+continuum compact <run_id>                       # 앵커 이전 로그 접두사 아카이브
+continuum tree <parent_run_id>                   # 부모 + 자식과 복구 상태 표시
+continuum attest <run_id> --key signer.pem       # 외부 검증자를 위해 체인 헤드에 서명
+```
+
+모든 배선은 호스트 측이며, 모델의 협력은 선택 사항이다.
+
+```bash
+continuum hooks install claude-code --with-gate   # 코딩 CLI: 증거, 브리핑, 게이트
+continuum gateway --port 8765                     # 다른 모든 것을 위한 강제 HTTP 프록시
+provider.add_span_processor(continuum.otel.make_span_processor(storage))  # OTel을 증거로
+continuum-mcp                                     # MCP가 가능한 모든 것: 열한 개 도구 서버
+continuum briefing                                # 세션 시작 컨텍스트 주입
+continuum budget <run_id>                        # 재시도 예산 사용량 보고서
+continuum tree <parent_run_id>                   # 다중 에이전트 계층 보기
+```
+
+선택적 레지스트리는 코드 옆에 존재하며 데이터이지 코드가 아니다. `.continuum/gate.json`(사이드 이펙트 도구 + 안정적인 키 템플릿), `.continuum/reconcilers.json`(외부 시스템을 확인하는 프로브), `.continuum/gateway.json`(업스트림 라우트).
+
+각 명령은 `--json`을 받으며, 읽기 전용 명령은 절대 쓰지 않는다. 따라서 에이전트가 실행 중에도 라이브 데이터베이스에 대해 안전하다. 종료 코드는 안전성 계약이다(검증되어 안전한 실행만 0으로 종료한다). 전체 명령 목록, 종료 코드 표, 상태 차이 출력은 [references/cli.md](references/cli.md)에 있다.
