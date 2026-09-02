@@ -252,6 +252,11 @@ class RecoveryEngine:
             else:
                 confirmed_components.update(["goal", "progress"])
 
+        # Provenance N-hop staleness (issue #553): include archived events so compaction does not launder
+        try:
+            provenance_events = self.storage.read_all_events(run_id)
+        except Exception:
+            provenance_events = self.storage.read_events(run_id)
         validation = self.validator.validate(
             restored.state,
             current_environment=current_environment,
@@ -260,6 +265,7 @@ class RecoveryEngine:
             expected_model=expected_model,
             confirmed=confirmed_components,
             scope=scope,
+            events=provenance_events,
         )
 
         ledger = ActionLedger(self.storage, run_id)
