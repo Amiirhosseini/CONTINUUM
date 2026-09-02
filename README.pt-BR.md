@@ -360,3 +360,19 @@ ledger marcado COMPLETADO, próxima reprodução devolve resultado em cache, nã
 ```
 
 Host desconhecido é negado com falha fechada, não como relay aberto. Shell `Bash/curl` é o ponto cego documentado da v1.
+
+### Árvore de decisão de recuperação, semanas até terminar, correto e exato
+
+O motor toma o sinal mais cauteloso, de modo que a segurança nunca perde para a conveniência.
+
+```text
+RESUME < REPAIR_AND_RESUME < REPLAN < WAIT < REQUEST_HUMAN < ROLLBACK < ABORT
+```
+
+Cada `continuum resume` devolve um contrato selado com: estado de recuperação e `safe`, componentes verificados e invalidados, `human_steps` executáveis (shell exato a executar), observações pós checkpoint verificadas em disco, deriva de fixação e agregação familiar para `continuum tree` multiagente. O briefing `continuum briefing` injeta esse contrato em cada `claude` SessionStart fresco, de modo que dizer `oi` depois de matar o terminal retoma a partir do último prefixo bom.
+
+### Por que isso economiza tokens, custo e chamadas inválidas
+
+* **Tokens:** Checkpoint semântico armazena `Goal + Plan + Progress` não um despejo de transcrição. O briefing serve apenas estado verificado mais um resumo de raciocínio com teto de 4096, não a cauda de erros que o auto condicionamento mostra que degrada a próxima sessão. A retentativa informada `recovery/summary.py` injeta um resumo redigido pelo motor, não histórico bruto.
+* **Custo:** O ledger `action_index` recusa efeitos colaterais duplicados mesmo sob deriva de argumentos como caminhos relativos versus absolutos (`invoice:INV-001` chave estável), de modo que a mesma API não é paga duas vezes após uma retomada. Orçamentos `budgets.py` limitam tempestades de retentativas ao reivindicar. `continuum benchmark` imprime `0 duplicatas` para o continuum versus `50` para o ingênuo.
+* **Chamadas inválidas:** A porta, o gateway e `replayguard` com `langgraph_protected_node` bloqueiam chamadas de ferramentas não reivindicadas ou reproduzidas antes de disparar. A fixação `pinning.py` expõe deriva de prompt ou ferramenta ao retomar.
