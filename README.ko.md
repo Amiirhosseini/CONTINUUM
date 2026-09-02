@@ -68,3 +68,34 @@ PyPI에 `continuum-agent` 0.1.0으로 게시됨. `pip install continuum-agent` �
 | 브라우저에서 완전한 개발 환경 | [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/Cyrax321/CONTINUUM?quickstart=1) |
 
 Docker 이미지는 CI가 `main`에 대한 각 push와 각 릴리스 태그마다 GHCR에 게시한다 (`.github/workflows/docker-publish.yml`). Codespace는 `.devcontainer/`에 정의되어 있다.
+
+```bash
+git clone https://github.com/Cyrax321/CONTINUUM.git
+cd CONTINUUM
+
+uv venv && source .venv/bin/activate     # macOS / Linux; Windows: .venv\Scripts\activate
+
+# 기여자 (권장): 라이브러리 + CLI + 모든 테스트 도구 + 모든 어댑터
+uv pip install -e ".[dev]"
+
+# 또는 필요한 것만 선택: . (최소), [mcp], [otel], [langgraph],
+# [openai], [langchain], [attest], [postgres]
+
+# 또는 클론을 완전히 건너뛰기:
+uv pip install git+https://github.com/Cyrax321/CONTINUUM.git
+uv pip install "continuum-agent[mcp] @ git+https://github.com/Cyrax321/CONTINUUM.git"
+```
+
+> **pip 폴백:** 위의 모든 명령에서 `uv pip install`을 `pip install`로 교체하십시오.
+
+검증:
+
+```bash
+continuum --help                 # CLI 진입점
+continuum-mcp --help             # MCP 서버 진입점 ([mcp] 또는 [dev] 필요)
+pytest -q                        # 약 1,380개 테스트 수집 (정확한 수와 스킵 수는 환경에 따라 다름)
+ruff check src/ tests/ examples/ && ruff format --check src/ tests/ examples/
+mypy src/continuum               # CI가 강제하는 세 가지 게이트
+```
+
+코어 라이브러리는 하나의 런타임 의존성(`pydantic>=2.7`)만 가지며, 나머지는 모두 선택 사항이다. 전체 패키지 맵, extras 행렬, Postgres 테스트 설정, 명령별 검증은 [references/install.md](references/install.md)에 있다.
