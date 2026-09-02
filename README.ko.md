@@ -359,3 +359,19 @@ continuum_complete_action  (현실에서 정산, 보고에서가 아님)
 ```
 
 알 수 없는 호스트는 실패 폐쇄로 거부되며, 개방된 릴레이가 아니다. Shell `Bash/curl`은 문서화된 v1의 사각지대이다.
+
+### 복구 결정 트리, 수주가 끝날 때까지, 정확하고 엄격하게
+
+엔진은 가장 신중한 신호를 채택하므로 안전이 편의에 지는 일은 결코 없다.
+
+```text
+RESUME < REPAIR_AND_RESUME < REPLAN < WAIT < REQUEST_HUMAN < ROLLBACK < ABORT
+```
+
+각 `continuum resume`은 봉인된 계약을 반환한다. 내용은 복구 상태와 `safe`, 검증된 것과 무효화된 구성 요소, 실행 가능한 `human_steps`(실행해야 할 정확한 shell), 체크포인트 이후 관측의 디스크 검증, 핀 고정 드리프트, 그리고 다중 에이전트 `continuum tree`를 위한 가족 집계이다. 브리핑 `continuum briefing`은 신선한 `claude` SessionStart마다 그 계약을 주입한다. 따라서 터미널을 kill한 뒤 `hi`라고 말해도 마지막 좋은 프리픽스부터 재개한다.
+
+### 왜 이것이 토큰, 비용, 잘못된 호출을 절약하는가
+
+* **토큰:** 시맨틱 체크포인트는 `Goal + Plan + Progress`를 저장하며 트랜스크립트 덤프가 아니다. 브리핑은 검증된 상태에 더해 상한 4096의 추론 요약만을 제공하며, 다음 세션을 저하시키는 것으로 나타난 오류 꼬리를 전달하지 않는다. 정보가 있는 재시도 `recovery/summary.py`는 원시 기록이 아닌 엔진이 작성한 요약을 주입한다.
+* **비용:** 원장 `action_index`는 상대 경로와 절대 경로 같은 인자 드리프트가 있어도 중복된 사이드 이펙트를 거부한다(`invoice:INV-001` 안정적인 키). 따라서 동일한 API가 재개 후 두 번 결제되는 일이 없다. 예산 `budgets.py`는 청구 시 재시도 폭풍을 상한한다. `continuum benchmark`는 continuum에 대해 `0 중복`, 단순한 것에 대해 `50`으로 출력한다.
+* **잘못된 호출:** 게이트, 게이트웨이, `replayguard`의 `langgraph_protected_node`는 청구되지 않거나 재생된 도구 호출을 실행 전에 차단한다. 고정 `pinning.py`는 재개 시 prompt나 도구 드리프트를 드러낸다.
