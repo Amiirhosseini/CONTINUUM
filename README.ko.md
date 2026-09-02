@@ -320,3 +320,42 @@ CONTINUUM은 하나의 불변식을 중심으로 구성된다. **모든 사실�
 1. **자기 인증 없음.** 에이전트가 보고한 상태는 `EXTERNAL_AGENT`이며 인간의 `REVIEW_CONFIRMED`까지 `REQUIRES_REVIEW`로 강등된다. 신뢰할 수 있는 작성자만이 `DETERMINISTIC` 상태를 생성한다.
 2. **사이드 이펙트는 청구를 요구한다.** 모든 외부 효과는 실행 전에 멱등한 원장에서 청구된다. 청구되지 않은 효과는 경계에서 차단되고, 중복은 거부되며, 불확실한 결과는 조정을 위해 발생한다.
 3. **복구는 현실에 대해 검증한다.** 재개는 안전하다고 말하기 전에 파일 다이제스트, 의존성 버전, 모델 동일성을 확인한다. 오래됨은 `dependency -> evidence -> finding -> decision` plus `PlanStep.depends_on`으로 전파되므로 영향받은 단계만 수리된다.
+
+### 다섯 가지 통합 심
+
+| 심 | 연결 방법 | 얻게 되는 것 |
+|:--|:--|:--|
+| 1 인프로세스 | `GenericAgentAdapter.intercept_action(...)`와 `wrap_tool(key_fn=...)`(LangChain, LangGraph, OpenAI Agents SDK용) | Python 프레임워크, 신뢰할 수 있는 쓰기 |
+| 2 MCP 서버 | `continuum-mcp` 12개 도구를 stdio를 통해(`continuum_record_progress`, `continuum_intercept_action`, `continuum_complete_action` 등) | 모든 MCP 대응 클라이언트, 3 읽기 전용 + 8 변경, allowlist `CONTINUUM_MCP_MUTATING_CLIENTS` |
+| 3 CLI 수명 주기 훅 | `continuum hooks install claude-code --with-gate` (`gemini`와 `codex`도) | 코딩 CLI: `SessionStart briefing`, `PostToolUse observe`, `PreToolUse gate`, CLAUDE.md 불필요 |
+| 4 강제 HTTP 게이트웨이 | `continuum gateway --port 8765`와 `.continuum/gateway.json` | 모든 언어, 모든 아웃바운드 HTTP는 청구를 요구하며 게이트웨이는 실제 상태 코드로부터 정산 |
+| 5 OpenTelemetry 브리지 | `make_span_processor(storage)` | 모든 트레이싱된 앱, 스팬이 `TOOL_COMPLETED` 증거가 됨 |
+
+CrewAI, AutoGen, Pydantic AI용 얇은 훅 표면은 SDK 없이 `adapters/thin.py`에 존재한다.
+
+### 강제 파이프라인, 왜 중복도 없고 잘못된 호출도 없는가
+
+게이트에서 관측으로의 파이프라인이 하네스 경계의 틈을 닫는다. 이것이 토큰과 비용을 절약하고 잘못된 도구 호출을 차단하는 것이다.
+
+```text
+PreToolUse 훅                    PostToolUse 훅
+    |                                    |
+    v                                    v
+continuum gate                    continuum observe
+    |                                    |
+    |-- 청구 없음? 거부 (exit 2)          |-- TOOL_COMPLETED 이벤트:
+    |   + 청구 지침                      |     경로, 바이트, 현재 디스크의 sha256
+    |                                    |
+    |-- 유효한 청구 있음? 허용                |-- 디스크 검증 상태:
+    |                                    |     검증됨 / 변경됨 / 누락
+    v
+에이전트가 효과 실행
+    |
+    v
+continuum_complete_action  (현실에서 정산, 보고에서가 아님)
+    |
+    v
+원장은 COMPLETED로 표시되고, 다음 재생은 두 번째 발화가 아닌 캐시된 결과를 반환
+```
+
+알 수 없는 호스트는 실패 폐쇄로 거부되며, 개방된 릴레이가 아니다. Shell `Bash/curl`은 문서화된 v1의 사각지대이다.
