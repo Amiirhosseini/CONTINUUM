@@ -190,3 +190,13 @@ rg -n "$(printf '\\u2014')" src/ tests/ docs/ examples/ benchmarks/
 ```
 
 See `.continuum/gate.json.example` for copy-pasteable pgvector and Mem0 templates and `src/continuum/gate.py` for the derivation and cross-run dedup logic.
+
+## Benchmarks
+
+Harness `benchmarks/memory_governance.py` measures the control plane cost:
+
+* Key derivation: ~4 us per `derive_memory_key` on a laptop.
+* Forensic join across 10 runs x 20 records (200 hits): ~37 ms.
+* Gateway tenant deny (allow + deny): ~13 us per `match_route`.
+
+These are cheap, deterministic operations. Numbers come from a real run of the harness, not estimates, so the durability cost is auditable. See `benchmarks/memory_governance.py` for the scripts that produced them.
