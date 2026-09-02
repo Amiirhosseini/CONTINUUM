@@ -229,3 +229,46 @@ CONTINUUM se verifica contra agentes LLM reales, límites de protocolo en vivo y
 - **Auto reparación**: servidores matados de forma brusca se recuperan de sidecars huérfanos `-wal`/`-shm` de SQLite mediante limpieza de un solo reintento al arrancar.
 - **Escala**: cerca de 1,380 tests recogidos (~1,360 pasando, el resto se salta sin servicios opcionales) en Python 3.11, 3.12 y 3.13 (unitarios, basados en propiedades con `hypothesis`, concurrencia, adversariales). CONTINUUM-Bench ejecuta cinco escenarios de caída más un escenario dedicado de deriva de argumentos, midiendo 0 trabajo duplicado y 0 efectos secundarios duplicados para CONTINUUM frente a duplicación total para la reproducción ingenua, más una suite separada de 12 escenarios de corrección de recuperación (`continuum.benchmark.phase6`) que codifica los puntos de caída del estudio de ejecución durable como aserciones ejecutables.
 - **Auditoría adversarial**: la superficie MCP completa fue auditada sobre el protocolo en vivo, se encontraron y corrigieron tres defectos. Método y pasos de reproducción en [test.md](test.md).
+
+## Integración MCP
+
+CONTINUUM entrega un servidor MCP para que un agente pueda registrar progreso, hacer checkpoint y enrutar efectos secundarios externos por el libro mayor sin embeber la librería:
+
+```bash
+uv pip install -e ".[mcp]"
+CONTINUUM_MCP_MUTATING_CLIENTS=your-client-name continuum-mcp
+```
+
+Once herramientas vía stdio. Tres son de solo lectura (`continuum_validate`, `continuum_resume`, `continuum_list_actions`), ocho mutan. Los efectos secundarios son en dos fases (reclamar, ejecutar, completar) y las herramientas mutantes deniegan por defecto tras una allowlist. El estado reportado por el agente se registra con procedencia `Origin.EXTERNAL_AGENT` y se marca `REQUIRES_REVIEW`.
+
+Detalles de verificación, incluida la recuperación tras caída al arrancar y la prueba extremo a extremo con Claude Code, en [references/mcp.md](references/mcp.md). Si un servidor registrado reporta `CONNECTION_CLOSED`, la causa casi siempre es la resolución de `PATH` y no el servidor en sí: [docs/api/mcp.md](docs/api/mcp.md#troubleshooting) tiene el diagnóstico y dos remedios.
+
+## Integración de frameworks
+
+Nueve adaptadores se entregan en `src/continuum/adapters/` (una fachada en proceso más ocho integraciones), todos instalables de forma opcional para que el núcleo siga siendo solo de la librería estándar:
+
+| Adaptador | Clase | Notas |
+|:--|:--|:--|
+| Agente Python genérico | `GenericAgentAdapter` | Fachada en proceso, escribe estado confiable (`Origin.DETERMINISTIC`). |
+| Sandbox de sistema de archivos | `FilesystemSandboxAdapter` | Sandbox de directorio local, sin servicio externo, valor por defecto para docs y CI. |
+| Python en proceso | `PythonInProcAdapter` | Ejecuta Python en un directorio de trabajo temporal, registra vía libro mayor. |
+| Contenedor | `ContainerAdapter` | Respaldado por Docker, salto protegido cuando `docker` falta. |
+| Navegador | `BrowserAdapter` | Respaldado por Playwright, salto protegido cuando no está instalado. |
+| Kubernetes | `KubernetesAdapter` | Respaldado por `kubectl`, salto protegido cuando no está configurado. |
+| OpenAI Agents SDK | `OpenAIAgentAdapter` | Experimental. Engancha `ToolContext` / `RunHooks`, opcional `openai-agents`. |
+| LangGraph | `LangGraphAgentAdapter` | Experimental. Envuelve un `StateGraph`, opcional `langgraph`. |
+| LangChain | `LangChainAgentAdapter` | Experimental. Deja `checkpoint_node` en un pipeline `Runnable` de LCEL y en el bucle de llamada a herramientas de `create_agent`, opcional `langchain`. |
+
+Cada adaptador registra progreso vía el libro mayor y enruta efectos externos por el protocolo de dos fases de intercepción y completado. Los tres adaptadores de framework tienen tests de integración extremo a extremo y han sido conducidos contra un **modelo vivo de OpenRouter**, donde las ejecuciones expusieron y cerraron una brecha de deduplicación por deriva de argumentos de LLM y dos defectos del adaptador de OpenAI, incluido un hard crash vivo (`os._exit(137)` en mitad de efecto secundario) por adaptador. Uso completo, resultados con modelo vivo y ejemplos ejecutables para cada adaptador en [references/adapters.md](references/adapters.md).
+
+Las apps de producción con LangGraph también pueden mantener su API de persistencia nativa: `make_continuum_checkpointer(storage)` implementa `BaseCheckpointSaver` de LangGraph sobre el almacenamiento de CONTINUUM, por lo que cada put aterriza en el mismo registro de eventos encadenado y con procedencia (ver [references/adapters.md](references/adapters.md)).
+
+Otras tres frameworks de producción están cubiertos por superficies delgadas de hooks sin SDK en [`adapters/thin.py`](src/continuum/adapters/thin.py):
+
+| Framework | Superficie de intercepción | Punto de entrada |
+|:--|:--|:--|
+| CrewAI | hooks globales antes/después de llamada a herramienta | `install_crewai_hooks(storage, run_id)` |
+| AutoGen core | `FunctionTool.run_json` envuelto en el sitio | `wrap_autogen_tool(tool, storage, run_id)` |
+| Pydantic AI | capacidad asíncrona de Hooks | `Agent(capabilities=[wrap_pydantic_ai_hooks(storage, run_id)])` |
+
+Para stacks que ninguno de estos alcanza: `continuum gateway` impone reclamos en HTTP saliente desde cualquier lenguaje, `continuum.otel.make_span_processor(storage)` convierte spans existentes de OpenTelemetry de herramientas en evidencia, y `continuum serve` expone las mismas operaciones que las herramientas MCP sobre un protocolo de cable JSON agnóstico al lenguaje (stdio, o HTTP vía `--transport http` con autenticación `CONTINUUM_SERVE_TOKEN`).
