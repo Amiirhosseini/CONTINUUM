@@ -418,3 +418,14 @@ CONTINUUM es una librería (`src/continuum`, 104 módulos) más una suite de tes
 | `cli/` | 38 comandos argparse, códigos de salida como veredicto, `runs, start, inspect, resume, verify, health, tree, benchmark, attest, dashboard` |
 | `otel.py` | Puente de procesador de spans de OpenTelemetry |
 | `benchmark/` | Harness de CONTINUUM-Bench, 5 escenarios de caída + deriva de argumentos + suite de recuperación de 12 escenarios |
+
+### Limitaciones honestas
+
+- La puerta no ve dentro de comandos shell (Bash/curl elude reclamos de herramientas estructuradas)
+- El backend de Postgres está probado por CI pero no curtido en producción
+- Aún no hay webhook saliente para notificaciones `request_human` (#305)
+- Un nivel de jerarquía multiagente en v1
+- Descarga de payloads grandes (#254) aún no implementada
+- El benchmark a escala de semanas con tabla de coste de tokens aterriza en el tablero #550 (#568 a #570)
+
+Referencia completa en [references/architecture.md](references/architecture.md). Y el plano de meses que se construye sobre esto, grafo causal de procedencia, resurrección de autoridad, admisibilidad, vivacidad, está fijado como tablero #550 con 20 sub issues #551 a #570.
