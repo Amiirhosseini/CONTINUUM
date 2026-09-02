@@ -375,3 +375,45 @@ RESUME < REPAIR_AND_RESUME < REPLAN < WAIT < REQUEST_HUMAN < ROLLBACK < ABORT
 * **トークン：** セマンティックチェックポイントは `Goal + Plan + Progress` を保存し、トランスクリプトのダンプではない。ブリーフィングは検証済み状態に加え上限 4096 の推論サマリーだけを提供し、次のセッションを劣化させることが示されているエラーテールを渡さない。情報付きリトライ `recovery/summary.py` は生の履歴ではなくエンジンが作成したサマリーを注入する。
 * **コスト：** 台帳 `action_index` は相対パスと絶対パスのような引数ドリフトがあっても重複する副作用を拒否する（`invoice:INV-001` は安定したキー）。したがって同じ API が再開後に二度支払われることはない。予算 `budgets.py` はクレーム時にリトライの嵐を上限付ける。`continuum benchmark` は continuum に対して `0 重複`、単純なものに対して `50` と印字する。
 * **無効な呼び出し：** ゲート、ゲートウェイ、`replayguard` の `langgraph_protected_node` は未請求または再生されたツール呼び出しを実行前にブロックする。ピン留め `pinning.py` は再開時に prompt やツールのドリフトを表面化させる。
+
+### ストレージアーキテクチャ
+
+スキーマ v6。SQLite がプライマリ、Postgres は CI で検証済み。一つのログ、多くの投影。
+
+| テーブル | 目的 |
+|:--|:--|
+| `events` | ハッシュチェーンの追記専用ログ（v0.2 で 44 種のイベントタイプ） |
+| `runs` | 親子用の `parent_run_id` を持つ実行メタデータ |
+| `versions` | チェックポイントごとの SemanticState スナップショット |
+| `checkpoints` | `RECOVERY` アンカーを持つ密封されたチェックポイント記録 |
+| `action_index` | 実行を跨ぐ冪等性投影（schema v3+）、インデックス化された読み取りであり全スキャンではない |
+| `events_archive` | 圧縮された接頭辞ストレージ（schema v5+）、`continuum compact` が数ヶ月にわたる実行のためにライブログを有界に保つ |
+| `lg_checkpoints` / `lg_writes` | LangGraph ネイティブ永続化（schema v4+）、`make_continuum_checkpointer(storage)` |
+
+### モジュールマップ、一つのライブラリ、多くの面
+
+CONTINUUM は一つのライブラリ（`src/continuum`、104 モジュール）に加え大規模なテストスイート（98 テストファイル、約 1,380 テスト）である。すべてのモジュールは一つのハッシュチェーンイベントログに追記し再生する。
+
+| モジュール | 役割 |
+|:--|:--|
+| `events.py` | 追記専用でハッシュチェーンのイベントログと `verify() trusted_through` |
+| `state/` | 投影 `project()`、検証、抽出、陳腐化の伝播 |
+| `storage/` | `SQLiteStorage` v6、`postgres.py`、`migrations.py`、`actionindex.py` |
+| `actions/` | 冪等な台帳 `claim/complete/reconcile`、`idempotency.py` キーと正規化とトークンフォールバック、消費済み付与の追跡 `GRANT_DENIED` |
+| `checkpoint/` | ポリシー駆動チェックポイント `manager.py` `policy.py` と `RECOVERY` アンカーと `prune` |
+| `recovery/` | エンジン、プランナー、密封契約 `contract.py`、`guidance` `human_steps`、`observations` ディスク検証、`family` ロールアップ、`fork` セマンティクス、`summary` 情報付きリトライ |
+| `gate.py` | ツール前強制：台帳クレームに対する許可または拒否 |
+| `gateway.py` | 強制 HTTP プロキシ：外向きリクエストのために実行前にクレーム |
+| `replayguard.py` | ポータブルガード：`evaluate, protected_call, langgraph_protected_node`、ACRFence の再生ハザードを閉じる |
+| `hooks.py` `clienthooks.py` | 共有チェックポイントフックとインストーラープロファイル `claude-code gemini codex` |
+| `budgets.py` | アクションタイプごとのリトライ予算レジストリと評価 |
+| `pinning.py` | 再開時のバージョンピン留め正規化とドリフト検出 |
+| `replay_similarity.py` | 再生とフォークのための意味的類似性バックエンド exact/fuzzy/embedding |
+| `reconcilers.py` | 自動決着のためのプローブレジストリ `.continuum/reconcilers.json` |
+| `adapters/` | 9 つのクラスアダプター + 薄いフック `thin.py` CrewAI AutoGen Pydantic AI + LangGraph ストア |
+| `mcp/` | 12 の stdio ツールに加え認可 `authz.py` トークン認証、allowlist、確認トークン |
+| `serve/` | Sidecar stdio JSON ワイヤ + HTTP `CONTINUUM_SERVE_TOKEN` |
+| `dashboard/` | Web ダッシュボード `app.py` `hitl.py` と HITL ボタン確認、照合、完了、接頭辞信頼助言、ピン留め |
+| `cli/` | 38 の argparse コマンド、終了コードが評決、`runs, start, inspect, resume, verify, health, tree, benchmark, attest, dashboard` |
+| `otel.py` | OpenTelemetry スパンプロセッサーブリッジ |
+| `benchmark/` | CONTINUUM-Bench ハーネス、5 つのクラッシュシナリオ + 引数ドリフト + 12 シナリオのリカバリスイート |
