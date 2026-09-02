@@ -19,7 +19,6 @@
   <a href="https://github.com/Cyrax321/CONTINUUM/actions/workflows/ci.yml"><img src="https://github.com/Cyrax321/CONTINUUM/actions/workflows/ci.yml/badge.svg" alt="CI status" /></a>
   <a href="https://app.codecov.io/gh/Cyrax321/CONTINUUM"><img src="https://img.shields.io/codecov/c/github/Cyrax321/CONTINUUM?style=flat-square&logo=codecov" alt="Coverage" /></a>
   <a href="https://github.com/Cyrax321/CONTINUUM"><img src="https://img.shields.io/github/stars/Cyrax321/CONTINUUM?style=flat-square" alt="Stars" /></a>
-  <a href="https://github.com/Cyrax321/CONTINUUM"><img src="https://img.shields.io/github/stars/Cyrax321/CONTINUUM?style=flat-square" alt="Stars" /></a>
 </p>
 
 <p align="center" style="margin-bottom: 6px;">
@@ -97,7 +96,7 @@ Verify:
 ```bash
 continuum --help                 # CLI entrypoint
 continuum-mcp --help             # MCP server entrypoint (needs [mcp] or [dev])
-pytest -q                        # ~1,918 collected, ~1,880 passed, ~38 skipped on a minimal env (exact counts vary) <!-- generated via: pytest --collect-only -q; pytest -q -->
+pytest -q                        # ~1,380 collected (exact count and skips vary by environment)
 ruff check src/ tests/ examples/ && ruff format --check src/ tests/ examples/
 mypy src/continuum               # the three gates CI enforces
 ```
