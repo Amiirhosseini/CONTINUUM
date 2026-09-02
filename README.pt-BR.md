@@ -272,3 +272,24 @@ Outras três frameworks de produção são cobertos por superfícies finas de ho
 | Pydantic AI | capacidade assíncrona de Hooks | `Agent(capabilities=[wrap_pydantic_ai_hooks(storage, run_id)])` |
 
 Para stacks que nenhum destes alcança: `continuum gateway` impõe reivindicações em HTTP de saída de qualquer linguagem, `continuum.otel.make_span_processor(storage)` converte spans existentes de OpenTelemetry de ferramentas em evidência, e `continuum serve` expõe as mesmas operações que as ferramentas MCP sobre um protocolo de fio JSON agnóstico à linguagem (stdio, ou HTTP via `--transport http` com autenticação `CONTINUUM_SERVE_TOKEN`).
+
+### Retomando execuções reportadas por agente ou MCP
+
+Estado reportado via MCP, ou através do adaptador OpenAI, carrega proveniência `Origin.EXTERNAL_AGENT` e se resolve para `request_human` até ser confirmado. Execuções de LangGraph e LangChain usam `Origin.DETERMINISTIC` e retomam diretamente. Para limpar a revisão e retomar:
+
+```bash
+continuum confirm <run_id>   # registra REVIEW_CONFIRMED, depois reavalia
+continuum resume <run_id>    # agora reporta RESUME
+```
+
+Sobre MCP o equivalente é a ferramenta `continuum_confirm` seguida de `continuum_resume`. A confirmação é um evento único e atestado por humano: a escotilha de escape para a segurança de auto certificação, de modo que uma execução dirigida externamente nunca fica presa permanentemente.
+
+## Conceitos centrais
+
+A referência profunda para cada conceito vive em [references/concepts.md](references/concepts.md).
+
+- **Checkpoints semânticos**, uma representação compacta e versionada do que o agente precisa para continuar.
+- **Validação de estado**, cada componente verificado de forma independente, obsolescência se propaga pelo grafo de dependências.
+- **Ledger idempotente**, efeitos colaterais externos são rastreados e deduplicados, resultados incertos lançam em vez de tentar novamente silenciosamente.
+- **Modos de recuperação**, `RESUME`, `REPAIR_AND_RESUME`, `ROLLBACK`, `WAIT`, `REQUEST_HUMAN`, `ABORT` (mais `REPLAN`).
+- **Contrato de recuperação**, uma próxima ação determinística, selada por integridade e protegida.
