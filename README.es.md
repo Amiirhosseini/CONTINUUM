@@ -429,3 +429,39 @@ CONTINUUM es una librería (`src/continuum`, 104 módulos) más una suite de tes
 - El benchmark a escala de semanas con tabla de coste de tokens aterriza en el tablero #550 (#568 a #570)
 
 Referencia completa en [references/architecture.md](references/architecture.md). Y el plano de meses que se construye sobre esto, grafo causal de procedencia, resurrección de autoridad, admisibilidad, vivacidad, está fijado como tablero #550 con 20 sub issues #551 a #570.
+
+## API y CLI
+
+Superficie Python (`EventType`, `Run`, `SQLiteStorage`, `diff_states`, `project`) y la API de adaptadores están documentadas con ejemplos ejecutables en [references/api.md](references/api.md). La CLI es la misma superficie en forma de shell:
+
+```bash
+continuum runs                                   # listar ejecuciones
+continuum inspect <run_id>                       # estado semántico
+continuum validate <run_id> --env dataset=v4     # validar, solo lectura
+continuum resume <run_id> --env dataset=v4       # decisión de recuperación + contrato + siguientes pasos
+continuum checkpoint <run_id>                    # forzar un checkpoint, muta
+continuum actions <run_id>                       # efectos secundarios externos
+continuum reconcile <run_id>                     # liquidar efectos inciertos con sondas
+continuum complete <run_id>                      # cerrar una ejecución como hecha, desde el teclado
+continuum verify <run_id>                        # reauditar la cadena de hash de eventos
+continuum budget <run_id>                        # uso de presupuesto de reintentos por tipo de acción
+continuum compact <run_id>                       # archivar prefijo de registro pre-ancla
+continuum tree <parent_run_id>                   # mostrar padre + hijos con estados de recuperación
+continuum attest <run_id> --key signer.pem       # firmar la cabeza de cadena para un verificador externo
+```
+
+Todo el cableado está del lado del host, la cooperación del modelo es opcional:
+
+```bash
+continuum hooks install claude-code --with-gate   # CLIs de código: evidencia, briefing, puerta
+continuum gateway --port 8765                     # proxy HTTP de cumplimiento para todo lo demás
+provider.add_span_processor(continuum.otel.make_span_processor(storage))  # OTel a evidencia
+continuum-mcp                                     # cualquier cosa capaz de MCP: el servidor de once herramientas
+continuum briefing                                # inyección de contexto al inicio de sesión
+continuum budget <run_id>                        # informe de uso de presupuesto de reintentos
+continuum tree <parent_run_id>                   # vista de jerarquía multiagente
+```
+
+Los registros opcionales viven junto a tu código y son datos, no código: `.continuum/gate.json` (herramientas de efecto secundario + plantillas de clave estable), `.continuum/reconcilers.json` (sondas que comprueban sistemas externos), `.continuum/gateway.json` (rutas ascendentes).
+
+Cada comando acepta `--json`, y los comandos de solo lectura nunca escriben, por lo que son seguros contra una base de datos viva mientras un agente está a mitad de ejecución. Los códigos de salida son un contrato de seguridad (solo una ejecución verificada segura sale con 0). Lista completa de comandos, tabla de códigos de salida y salida de diff de estado en [references/cli.md](references/cli.md).
