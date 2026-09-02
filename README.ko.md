@@ -505,3 +505,56 @@ CONTINUUM은 내구성 있는 실행, 멱등한 사이드 이펙트 추적, LLM 
 - **프레임워크 어댑터는 여전히 실험적.** 세 개의 프레임워크 어댑터는 모두 라이브 모델에서의 소프트 재개와 하드 크래시 증명(OpenRouter, `gpt-4o-mini`)을 가지고 있으며, 불확실한 사이드 이펙트 위에서의 재개를 차단하는 크래시 계약을 포함하고, 범용 퍼사드와 동등한 크래시와 재개 검증 테스트를 가지게 되었다(Refs #285). 프로덕션 복구에는 `GenericAgentAdapter`를 우선하라.
 - **에이전트와 MCP 실행은 자동 재개 전에 명시적 확인을 필요로 한다.** 외부에서 보고된 상태는 `REQUIRES_REVIEW`이므로, `continuum resume`은 인간이 확인할 때까지 `request_human`을 반환한다. 설계에 의한 것이며 결함이 아니다. [프레임워크 통합](#프레임워크-통합) 참조.
 - **e2e 자율 테스트 시리즈**(issue [#6](https://github.com/Cyrax321/CONTINUUM/issues/6)): 세 번의 완전한 Claude Code 실행이 메커니즘에서 7/7을 획득했으며, 프롬프트 없는 복구 동작이 관찰되었다. 다양한 프롬프트 스타일에 걸친 추가 반복은 여전히 열려 있다.
+
+## 에 대하여
+
+2026년 초, 장시간 실행되는 에이전트가 추론이 아니라 복구에서 실패하는 것을 보았다. 체크포인트는 검증해야 할 증거가 아니라 계속하기 위한 증명으로 취급되고 있었다. Temporal, LangGraph, ACRFence 2603.20625, self conditioning 2509.09677을 조사한 결과, 간극이 이식 가능한 검증 기판임을 발견했다. 그것은, 시간 T의 상태와 지금의 세계가 주어졌을 때, 계속하는 것이 여전히 안전한지를 묻는 것이다.
+
+3주 만에 나는 하나의 불변식으로부터 CONTINUUM을 구축했다. 모든 사실은 그 기원을 가진다. 결과는 `verify()`를 가진 해시 체인 로그, 안정적인 키 중복排除를 가진 원장, 청구되지 않은 효과를 차단하는 게이트와 게이트웨이, 그리고 계약을 봉인하는 복구 엔진이다. 다섯 개의 심이 동일한 로그를 Claude Code, LangGraph, LangChain, OpenAI, HTTP, OpenTelemetry에 노출한다. 실제 킬과 1380개의 테스트로 검증되었으며, 단순한 재생이 `50`으로 출력하는 곳에서 `0 중복`으로 출력한다.
+
+CONTINUUM은 **Anandhu P Shaji**([@Cyrax321](https://github.com/Cyrax321) · [LinkedIn](https://www.linkedin.com/in/anandhupshaji/))에 의해 생성되었고 원저자에 의해 유지된다. 오픈 소스이며 [Apache-2.0](LICENSE) 하에 있다. 커뮤니티 기여는 [CONTRIBUTING.md](CONTRIBUTING.md)를 통해 환영되며, [AUTHORS.md](AUTHORS.md)와 [graphs/contributors](https://github.com/Cyrax321/CONTINUUM/graphs/contributors)에서 크레딧을 받는다.
+
+## 기여
+
+이 프로젝트는 Apache 2.0 하에 오픈 소스이며 의도적으로 확장 가능하게 구축되었다. 복구 시맨틱을 검증하는 연구자, 원장이나 MCP 서버를 다른 프레임워크나 언어로 포팅하는 엔지니어, 계획된 로드맵을 현실로 만드는 모든 사람을 위해 확장 가능하다. 좋은 출발점은 [issue 트래커](https://github.com/Cyrax321/CONTINUUM/issues)의 `good first issue` 레이블, 또는 STATUS.md에 나열된 열린 정확성 버그이다.
+
+큰 PR을 보내기 전에 이슈를 열어라. 완전한 기여 가이드는 [CONTRIBUTING.md](CONTRIBUTING.md)를 참조하라. [Code of Conduct](CODE_OF_CONDUCT.md)를 포함한다.
+
+### 기여자
+
+<a href="https://github.com/Cyrax321/CONTINUUM/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=Cyrax321/CONTINUUM" />
+</a>
+
+## 스폰서
+
+CONTINUUM이 에이전트의 신뢰할 수 있는 복구에 도움이 된다면, 장기적인 유지를 지원하기 위해 스폰서를 고려하라.
+
+<p align="center">
+  <a href="https://github.com/sponsors/Cyrax321"><img src="https://img.shields.io/badge/Sponsor-❤-ff69b4?style=for-the-badge&logo=githubsponsors" alt="Sponsor Cyrax321" /></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/sponsors/Cyrax321">스폰서가 되기</a>, GitHub Sponsors, 또는 FUNDING.yml에 커스텀 링크를 추가하라(다른 플랫폼을 선호하는 경우).
+</p>
+
+## 라이선스
+
+Apache 2.0, [LICENSE](LICENSE) 참조.
+
+---
+
+깊은 레퍼런스 자료:
+
+- [references/install.md](references/install.md) - 전제 조건, 설치 수준, 패키지 맵, 검증
+- [references/concepts.md](references/concepts.md) - 시맨틱 체크포인트, 검증, 원장, 복구 모드, 계약
+- [references/architecture.md](references/architecture.md) - 데이터 모델, 이벤트 로그, 프로젝션, 저장소, 체크포인팅, 복구 엔진, 보안
+- [references/adapters.md](references/adapters.md) - 프레임워크 어댑터 사용법과 라이브 모델 검증 결과
+- [references/api.md](references/api.md) - Python과 어댑터 API
+- [references/cli.md](references/cli.md) - 완전한 CLI 명령 목록, 종료 코드, 상태 차이
+- [references/mcp.md](references/mcp.md) - MCP 서버 상태, 검증, 열린 질문
+- [references/bench.md](references/bench.md) - CONTINUUM-Bench 설계
+- [references/quickstart.md](references/quickstart.md) - 설치, 예제, 증명 스크립트
+- [references/e2e.md](references/e2e.md) - 엔드투엔드 자율 테스트 워크스루
+- [references/testing.md](references/testing.md) - 테스트 스위트 배치와 관례
+- [references/related-work.md](references/related-work.md) - 주석이 달린 관련 연구와 인용 감사
