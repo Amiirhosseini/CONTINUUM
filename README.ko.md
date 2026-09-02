@@ -375,3 +375,45 @@ RESUME < REPAIR_AND_RESUME < REPLAN < WAIT < REQUEST_HUMAN < ROLLBACK < ABORT
 * **토큰:** 시맨틱 체크포인트는 `Goal + Plan + Progress`를 저장하며 트랜스크립트 덤프가 아니다. 브리핑은 검증된 상태에 더해 상한 4096의 추론 요약만을 제공하며, 다음 세션을 저하시키는 것으로 나타난 오류 꼬리를 전달하지 않는다. 정보가 있는 재시도 `recovery/summary.py`는 원시 기록이 아닌 엔진이 작성한 요약을 주입한다.
 * **비용:** 원장 `action_index`는 상대 경로와 절대 경로 같은 인자 드리프트가 있어도 중복된 사이드 이펙트를 거부한다(`invoice:INV-001` 안정적인 키). 따라서 동일한 API가 재개 후 두 번 결제되는 일이 없다. 예산 `budgets.py`는 청구 시 재시도 폭풍을 상한한다. `continuum benchmark`는 continuum에 대해 `0 중복`, 단순한 것에 대해 `50`으로 출력한다.
 * **잘못된 호출:** 게이트, 게이트웨이, `replayguard`의 `langgraph_protected_node`는 청구되지 않거나 재생된 도구 호출을 실행 전에 차단한다. 고정 `pinning.py`는 재개 시 prompt나 도구 드리프트를 드러낸다.
+
+### 저장소 아키텍처
+
+스키마 v6. SQLite가 기본, Postgres는 CI에서 검증됨. 하나의 로그, 많은 투영.
+
+| 테이블 | 목적 |
+|:--|:--|
+| `events` | 해시 체인 추적 전용 로그(v0.2에서 44가지 이벤트 타입) |
+| `runs` | 부모-자식을 위한 `parent_run_id`를 가진 실행 메타데이터 |
+| `versions` | 체크포인트별 SemanticState 스냅샷 |
+| `checkpoints` | `RECOVERY` 앵커를 가진 봉인된 체크포인트 기록 |
+| `action_index` | 실행을 넘나드는 멱등성 투영(schema v3+), 인덱싱된 읽기이며 전체 스캔이 아님 |
+| `events_archive` | 압축된 접두사 저장소(schema v5+), `continuum compact`가 수개월 실행을 위해 라이브 로그를 제한 |
+| `lg_checkpoints` / `lg_writes` | LangGraph 네이티브 영속성(schema v4+), `make_continuum_checkpointer(storage)` |
+
+### 모듈 맵, 하나의 라이브러리, 많은 표면
+
+CONTINUUM은 하나의 라이브러리(`src/continuum`, 104 모듈) plus 대규모 테스트 스위트(98 테스트 파일, 약 1,380 테스트)이다. 모든 모듈은 하나의 해시 체인 이벤트 로그에 추가하고 재생한다.
+
+| 모듈 | 역할 |
+|:--|:--|
+| `events.py` | 추적 전용이며 해시 체인인 이벤트 로그와 `verify() trusted_through` |
+| `state/` | 투영 `project()`, 검증, 추출, 오래됨 전파 |
+| `storage/` | `SQLiteStorage` v6, `postgres.py`, `migrations.py`, `actionindex.py` |
+| `actions/` | 멱등한 원장 `claim/complete/reconcile`, `idempotency.py` 키와 정규화와 토큰 폴백, 소모된 부여 추적 `GRANT_DENIED` |
+| `checkpoint/` | 정책 기반 체크포인트 `manager.py` `policy.py`와 `RECOVERY` 앵커와 `prune` |
+| `recovery/` | 엔진, 플래너, 봉인된 계약 `contract.py`, `guidance` `human_steps`, `observations` 디스크 검증, `family` 롤업, `fork` 의미론, `summary` 정보가 있는 재시도 |
+| `gate.py` | 도구 전 강제: 원장 청구에 대한 허용 또는 거부 |
+| `gateway.py` | 강제 HTTP 프록시: 아웃바운드 요청을 위해 실행 전 청구 |
+| `replayguard.py` | 휴대용 가드: `evaluate, protected_call, langgraph_protected_node`, ACRFence 재생 위험을 닫음 |
+| `hooks.py` `clienthooks.py` | 공유 체크포인트 훅과 인스톨러 프로필 `claude-code gemini codex` |
+| `budgets.py` | 액션 타입별 재시도 예산 레지스트리와 평가 |
+| `pinning.py` | 재개 시 버전 고정 정규화와 드리프트 감지 |
+| `replay_similarity.py` | 재생과 포크를 위한 의미적 유사성 백엔드 exact/fuzzy/embedding |
+| `reconcilers.py` | 자동 정산을 위한 프로브 레지스트리 `.continuum/reconcilers.json` |
+| `adapters/` | 9개 클래스 어댑터 + 얇은 훅 `thin.py` CrewAI AutoGen Pydantic AI + LangGraph 저장소 |
+| `mcp/` | 12개 stdio 도구 plus 인가 `authz.py` 토큰 인증, allowlist, 확인 토큰 |
+| `serve/` | Sidecar stdio JSON 와이어 + HTTP `CONTINUUM_SERVE_TOKEN` |
+| `dashboard/` | 웹 대시보드 `app.py` `hitl.py`와 HITL 버튼 확인, 조정, 완료, 접두사 신뢰 조언, 고정 |
+| `cli/` | 38개 argparse 명령, 종료 코드가 평결, `runs, start, inspect, resume, verify, health, tree, benchmark, attest, dashboard` |
+| `otel.py` | OpenTelemetry 스팬 프로세서 브리지 |
+| `benchmark/` | CONTINUUM-Bench 하네스, 5개 크래시 시나리오 + 인자 드리프트 + 12 시나리오 복구 스위트 |
