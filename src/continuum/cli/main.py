@@ -2283,7 +2283,9 @@ def cmd_gate(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> 
         return 2
 
     actions_by_key = fold_action_events(storage.read_events(run_id)) if run_id is not None else {}
-    consumed = collect_consumed_authorities(storage.read_events(run_id)) if run_id is not None else {}
+    consumed = (
+        collect_consumed_authorities(storage.read_events(run_id)) if run_id is not None else {}
+    )
     decision = gate_decide(
         config,
         tool_name,

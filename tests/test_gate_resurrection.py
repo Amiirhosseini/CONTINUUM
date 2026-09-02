@@ -7,7 +7,7 @@ import pytest
 from continuum.actions.authority import record_authority_consumed
 from continuum.actions.ledger import ActionLedger
 from continuum.events import EventType
-from continuum.gate import collect_consumed_authorities, decide, load_gate_config
+from continuum.gate import collect_consumed_authorities, decide
 from continuum.models import Run
 from continuum.storage import SQLiteStorage
 
@@ -91,7 +91,12 @@ def test_ledger_blocks_resurrection_with_fresh_key() -> None:
     try:
         ledger = ActionLedger(storage, "run_1")
         # First consumption via grant
-        outcome = ledger.claim("issue_refund", {"order": "o-1"}, key="refund:o-1", grant={"id": "tok_9", "scope": "refund"})
+        outcome = ledger.claim(
+            "issue_refund",
+            {"order": "o-1"},
+            key="refund:o-1",
+            grant={"id": "tok_9", "scope": "refund"},
+        )
         ledger.complete(outcome.key, external_id="rf-1", result={})
         # Also record explicit authority
         record_authority_consumed(storage, "run_1", "tok_9", via_action_id=outcome.action.action_id)
@@ -105,7 +110,10 @@ def test_ledger_blocks_resurrection_with_fresh_key() -> None:
                 grant={"id": "tok_9", "scope": "refund"},
             )
         assert "tok_9" in str(excinfo.value)
-        assert "consumed at seq" in str(excinfo.value).lower() or "consumed" in str(excinfo.value).lower()
+        assert (
+            "consumed at seq" in str(excinfo.value).lower()
+            or "consumed" in str(excinfo.value).lower()
+        )
     finally:
         storage.close()
 
@@ -114,7 +122,9 @@ def test_uncertain_blocks_forward_and_backward() -> None:
     storage = _storage_with_run()
     try:
         ledger = ActionLedger(storage, "run_1")
-        outcome = ledger.claim("charge_card", {"amount": 100}, grant={"id": "tok_u", "scope": "pay"})
+        outcome = ledger.claim(
+            "charge_card", {"amount": 100}, grant={"id": "tok_u", "scope": "pay"}
+        )
         # Record authority linked to this uncertain action
         record_authority_consumed(storage, "run_1", "tok_u", via_action_id=outcome.action.action_id)
         # Fail as uncertain (timeout)
@@ -136,7 +146,7 @@ def test_uncertain_blocks_forward_and_backward() -> None:
 
         # Ledger should also block backward: attempting to claim again with same authority
         # should be denied, not treated as fresh.
-        with pytest.raises(Exception):
+        with pytest.raises(Exception, match="tok_u"):
             ActionLedger(storage, "run_1").claim(
                 "charge_card",
                 {"amount": 100, "authority_id": "tok_u"},
@@ -154,7 +164,9 @@ def test_uncertain_blocks_forward_and_backward() -> None:
         # Reconcile the uncertain action
         key = ledger.resolve_key(outcome.key) or outcome.key
         ledger.reconcile(key, occurred=False, note="probe found no charge")
-        assert not ledger.pending() or all(a.action_id != outcome.action.action_id for a in ledger.pending())
+        assert not ledger.pending() or all(
+            a.action_id != outcome.action.action_id for a in ledger.pending()
+        )
     finally:
         storage.close()
 
@@ -165,7 +177,9 @@ def test_restore_does_not_resurrect() -> None:
         from continuum.checkpoint.manager import CheckpointManager
 
         # Consume then checkpoint
-        ev = record_authority_consumed(storage, "run_1", "auth-restore", via_action_id="act-restore")
+        ev = record_authority_consumed(
+            storage, "run_1", "auth-restore", via_action_id="act-restore"
+        )
         mgr = CheckpointManager(storage)
         # Need a projectable state; ensure at least one event
         state = mgr.project_current("run_1")
