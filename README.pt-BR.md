@@ -69,3 +69,34 @@ Caminhos sem configuração (sem clonar, sem instalar, sem publicar nada):
 | Ambiente de desenvolvimento completo no navegador | [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/Cyrax321/CONTINUUM?quickstart=1) |
 
 A imagem Docker é publicada no GHCR pelo CI a cada push para `main` e a cada tag de release (`.github/workflows/docker-publish.yml`). O Codespace é definido em `.devcontainer/`.
+
+```bash
+git clone https://github.com/Cyrax321/CONTINUUM.git
+cd CONTINUUM
+
+uv venv && source .venv/bin/activate     # macOS / Linux; Windows: .venv\Scripts\activate
+
+# Colaboradores (recomendado): biblioteca + CLI + todas as ferramentas de teste + cada adaptador
+uv pip install -e ".[dev]"
+
+# Ou escolha apenas o que precisa: . (mínimo), [mcp], [otel], [langgraph],
+# [openai], [langchain], [attest], [postgres]
+
+# Ou pule o clone por completo:
+uv pip install git+https://github.com/Cyrax321/CONTINUUM.git
+uv pip install "continuum-agent[mcp] @ git+https://github.com/Cyrax321/CONTINUUM.git"
+```
+
+> **Alternativa com pip:** substitua `uv pip install` por `pip install` em cada comando acima.
+
+Verifique:
+
+```bash
+continuum --help                 # ponto de entrada CLI
+continuum-mcp --help             # ponto de entrada do servidor MCP (precisa de [mcp] ou [dev])
+pytest -q                        # ~1,380 testes coletados (o número exato e os pulos variam por ambiente)
+ruff check src/ tests/ examples/ && ruff format --check src/ tests/ examples/
+mypy src/continuum               # os três portões que o CI exige
+```
+
+A biblioteca central tem uma única dependência de runtime (`pydantic>=2.7`), todo o resto é opcional. O mapa completo de pacotes, a matriz de extras, a configuração de testes do Postgres e a verificação por comando estão em [references/install.md](references/install.md).
