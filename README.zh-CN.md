@@ -139,3 +139,24 @@ python scripts/mcp_smoke.py               # 真实子进程，真实 JSON-RPC �
 ```
 
 `e2e-autonomy-test/` 套件脚本化了一个真实的发票批量任务、在运行中硬杀，以及全新的恢复会话，然后在带外对 outbox、账本和事件链进行评分。Run 1 对真实的 Claude Code 会话取得了 **7/7 机制** 评分。完整 walkthrough 见 [references/e2e.md](references/e2e.md)。
+
+## 工作原理
+
+CONTINUUM 将 **LLM 上下文**（临时）与 **持久任务状态**（永久）分离开来。它不保存对话历史，而是构造语义检查点，即继续执行所需的最小化已验证信息。
+
+![CONTINUUM 工作原理](docs/assets/architecture.svg)
+
+详细说明、投影模型和恢复上下文见 [references/architecture.md](references/architecture.md)。
+
+## CONTINUUM 的位置
+
+四个关注点在每个长时间运行的智能体中重叠。CONTINUUM 只拥有最后一项，并通过显式接缝触及其他三项。不点名任何竞品，也不做没有已交付模块或已发布套件支撑的主张。
+
+| 层 | 回答的问题 | 如何连接（已交付模块或已发布输出） |
+|:--|:--|:--|
+| Harness | 智能体如何调用工具并朝目标推进？ | 在 CONTINUUM 之外。接线点在 `src/continuum/adapters/generic.py`（`GenericAgentAdapter`）、`src/continuum/adapters/thin.py`（CrewAI、AutoGen、Pydantic AI 钩子）、`src/continuum/mcp/server.py`（MCP stdio）、`src/continuum/hooks.py` 和 `src/continuum/clienthooks.py`（编码 CLI 生命周期钩子）、`src/continuum/gateway.py`（面向任意语言的强制 HTTP 代理）和 `src/continuum/otel.py`（OpenTelemetry 桥）中交付。配方见 `docs/recipes/` 和 `references/adapters.md`。 |
+| 持久执行 | 崩溃前发生了什么，哪些工作可以在不丢失的情况下重放？ | 哈希链事件日志 `src/continuum/events.py` 带 `verify()` 和 `trusted_through`，持久存储 `src/continuum/storage/sqlite.py`（WAL，`synchronous=FULL`，schema v6）和 `src/continuum/storage/postgres.py` 加上 `src/continuum/storage/migrations.py`，策略驱动的检查点 `src/continuum/checkpoint/manager.py` 和 `src/continuum/checkpoint/policy.py` 在 `restore()` 时重放间隔。Walkthrough 在 `docs/recovery_walkthrough.md`（`examples/recovery_walkthrough.py` 的输出）中。 |
+| 控制面 | 哪个 run 处于活动状态、谁可以操作它、输出去向何处？ | Run 注册表和父子层级 `src/continuum/storage/` 与 `src/continuum/recovery/family.py`（`continuum tree`），allowlist 鉴权 `src/continuum/mcp/authz.py`（`CONTINUUM_MCP_MUTATING_CLIENTS` / `CONTINUUM_MCP_TOKEN`），展示面 `src/continuum/dashboard/app.py` 和 `src/continuum/serve/server.py`，CLI `src/continuum/cli/main.py`（`continuum runs`、`continuum tree`、`continuum health`）。 |
+| 验证基座 | 给定时间 T 的检查点和当下的世界，继续是否仍然安全和正确？ | `src/continuum/state/validator.py`（过期性 `dependency -> evidence -> finding -> decision` 加上 `PlanStep.depends_on`）、`src/continuum/provenance_map.py`（`Origin` 到 `REQUIRES_REVIEW` 直至 `REVIEW_CONFIRMED`）、`src/continuum/actions/ledger.py` 配合 `src/continuum/actions/idempotency.py` 与 `src/continuum/gate.py` / `src/continuum/gateway.py`（先声明再触发，拒绝重复并为对账抛出 `UnknownSideEffect`）、`src/continuum/replayguard.py`（可移植守卫）、`src/continuum/pinning.py` 与 `src/continuum/replay_similarity.py`（重放正确性）、`src/continuum/budgets.py`（重试上限）、`src/continuum/recovery/engine.py` + `src/continuum/recovery/contract.py` + `src/continuum/recovery/planner.py` + `src/continuum/recovery/observations.py`（最大严重度 `RESUME < ... < ABORT`，带 `evidence` / `reason` / `next_allowed_action` / `human_steps` 的密封合约）、`src/continuum/checkpoint/rewind.py`（原子双状态回滚）、`src/continuum/analysis/prefix_trust.py`（建议性信任）。已发布的检查：`docs/recovery_walkthrough.md`、`benchmarks/fault_injection/`（打印 `detection_rate` / `unsafe_resume_rate` 的套件）、`src/continuum/benchmark/phase6/`（恢复正确性套件）、`docs/RESULTS.md` 以及下方可再生的可视化。 |
+
+该表中的每一行都可在打标签的提交上追溯到 `main` 上存在的路径。表格中不复述任何基准数字，基准只活在已打印它们的套件输出中。完整的已发布套件和设计文档列表见 `docs/research.md`。
