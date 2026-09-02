@@ -860,6 +860,50 @@ class ActionLedger:
                 )
                 raise denied
 
+        # Authority resurrection via AUTHORITY_CONSUMED (issue #289b): a
+        # consumed authority must not be reused even with a fresh key or
+        # drifted arguments. The check mirrors the grant check but scans
+        # AUTHORITY_CONSUMED events. A live retry under the same key and
+        # authority is allowed, mirroring the grant live_match rule.
+        authority_id = None
+        if grant_clean is not None:
+            authority_id = grant_clean["id"]
+        elif isinstance(arguments, Mapping):
+            for _k in ("authority_id", "authority", "token", "approval_id"):
+                if _k in arguments and isinstance(arguments[_k], str) and arguments[_k].strip():
+                    authority_id = arguments[_k].strip()
+                    break
+        if authority_id is not None:
+            from continuum.gate import collect_consumed_authorities
+
+            consumed = collect_consumed_authorities(self.storage.read_events(self.run_id))
+            prior_ev = consumed.get(authority_id)
+            # Allow live retry under same key with same authority
+            live_auth_match = (
+                existing is not None
+                and existing.status is ActionStatus.STARTED
+                and prior_ev is not None
+                and prior_ev.payload.get("via_action_id") == existing.action_id
+            )
+            if prior_ev is not None and not live_auth_match:
+                self.storage.append_event(
+                    self.run_id,
+                    EventType.GRANT_DENIED,
+                    {
+                        "grant_id": authority_id,
+                        "scope": prior_ev.payload.get("consumer_run_id", ""),
+                        "prior_action_id": prior_ev.payload.get("via_action_id", ""),
+                        "prior_status": "consumed",
+                        "attempted_key": key,
+                        "attempted_action_type": action_type,
+                        "authority_id": authority_id,
+                        "consumed_at_seq": prior_ev.sequence,
+                    },
+                )
+                raise LedgerError(
+                    f"Authority {authority_id!r} consumed at seq {prior_ev.sequence} by run {prior_ev.payload.get('consumer_run_id')!r}. Obtain a fresh authority."
+                )
+
         # Authorization-bound budget (issue #413): derive the stable
         # authorization bucket for this attempt. Unbound (None) means no
         # budget to enforce, which keeps runs without authorization data
@@ -1029,6 +1073,14 @@ class ActionLedger:
             }
         )
         return self._record(key, action)
+
+    def _authority_for_action(self, action: Action) -> str | None:
+        """Extract authority_id linked to an action, if any."""
+        if action.arguments and isinstance(action.arguments, Mapping):
+            for _k in ("authority_id", "authority", "token", "approval_id"):
+                if _k in action.arguments and isinstance(action.arguments[_k], str):
+                    return str(action.arguments[_k]).strip()
+        return None
 
     @_single_writer
     def reconcile(
