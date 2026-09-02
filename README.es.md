@@ -162,3 +162,18 @@ Cuatro preocupaciones se solapan en cada agente de larga duración. CONTINUUM so
 | Sustrato de verificación | Dado el checkpoint en el tiempo T y el mundo tal como está ahora, sigue siendo seguro y correcto continuar? | `src/continuum/state/validator.py` (obsolescencia `dependency -> evidence -> finding -> decision` más `PlanStep.depends_on`), `src/continuum/provenance_map.py` (`Origin` a `REQUIRES_REVIEW` hasta `REVIEW_CONFIRMED`), `src/continuum/actions/ledger.py` con `src/continuum/actions/idempotency.py` y `src/continuum/gate.py` / `src/continuum/gateway.py` (reclamar antes de ejecutar, rechaza duplicados, lanza `UnknownSideEffect` para reconciliación), `src/continuum/replayguard.py` (guardia portable), `src/continuum/pinning.py` y `src/continuum/replay_similarity.py` (corrección de reproducción), `src/continuum/budgets.py` (límites de reintentos), `src/continuum/recovery/engine.py` + `src/continuum/recovery/contract.py` + `src/continuum/recovery/planner.py` + `src/continuum/recovery/observations.py` (severidad máxima `RESUME < ... < ABORT`, contrato sellado con `evidence` / `reason` / `next_allowed_action` / `human_steps`), `src/continuum/checkpoint/rewind.py` (rebobinado atómico de doble estado), `src/continuum/analysis/prefix_trust.py` (confianza consultiva). Comprobaciones publicadas: `docs/recovery_walkthrough.md`, `benchmarks/fault_injection/` (suite que imprime `detection_rate` / `unsafe_resume_rate`), `src/continuum/benchmark/phase6/` (suite de corrección de recuperación), `docs/RESULTS.md` y el visual regenerable de abajo. |
 
 Cada fila de arriba es rastreable a una ruta que existe en `main` en el commit etiquetado. Nada en esta tabla vuelve a exponer un número de benchmark, los benchmarks solo viven en la salida de la suite que ya los imprime. Consulta `docs/research.md` para la lista completa de suites publicadas y documentos de diseño.
+
+### Recuperación tras caída, de verdad
+
+La imagen de abajo no es una maqueta. Es la salida de `python demo-run/generate_crash_visual.py`, que ejecuta `demo-run/worker.py` hasta `os._exit(9)` en el documento 399, llama a `continuum resume --env dataset=v4` y muestra la ruta de rechazo (`REQUEST_HUMAN`, `safe:false`, exit 20), reconcilia el efecto secundario incierto con una sonda, luego se reanuda desde la misma base de datos y termina sin trabajo duplicado. La transcripción también se guarda como `docs/assets/crash-recovery.txt` para auditoría.
+
+Regenerarlo:
+
+```bash
+python demo-run/generate_crash_visual.py
+# o: python scripts/generate_crash_visual.py
+```
+
+![Recuperación tras caída: muerte brusca a mitad de lote, rechazo, reconciliación, reanudación](docs/assets/crash-recovery.svg)
+
+Recorrido completo con código en `docs/recovery_walkthrough.md` (`examples/recovery_walkthrough.py`). El harness mínimo de bench está en `references/bench.md` (`continuum benchmark`).
