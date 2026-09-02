@@ -271,3 +271,24 @@ stdio를 통한 열한 개의 도구. 세 개는 읽기 전용(`continuum_valida
 | Pydantic AI | 비동기 Hooks 역량 | `Agent(capabilities=[wrap_pydantic_ai_hooks(storage, run_id)])` |
 
 이들 중 어느 것에도 닿지 않는 스택의 경우: `continuum gateway`는 모든 언어로부터의 아웃바운드 HTTP에 청구를 강제하고, `continuum.otel.make_span_processor(storage)`는 기존 OpenTelemetry 도구 스팬을 증거로 바꾸며, `continuum serve`는 MCP 도구와 동일한 작업을 언어에 구애받지 않는 JSON 와이어 프로토콜로 노출한다(stdio, 또는 `--transport http`를 통한 HTTP와 `CONTINUUM_SERVE_TOKEN` 인증).
+
+### 에이전트 또는 MCP가 보고한 실행 재개
+
+MCP를 통해, 또는 OpenAI 어댑터를 통해 보고된 상태는 출처 `Origin.EXTERNAL_AGENT`를 가지며 확인될 때까지 `request_human`으로 해결된다. LangGraph와 LangChain 실행은 `Origin.DETERMINISTIC`을 사용하고 직접 재개한다. 검토를 지우고 재개하려면:
+
+```bash
+continuum confirm <run_id>   # REVIEW_CONFIRMED를 기록하고 다시 평가
+continuum resume <run_id>    # 이제 RESUME을 보고함
+```
+
+MCP에서는 동등한 것이 `continuum_confirm` 도구 뒤의 `continuum_resume`이다. 확인은 일회성의 인간 증명 이벤트이며, 자체 인증 안전성의 탈출구이므로 외부에서 구동된 실행이 영구적으로 막히는 일은 없다.
+
+## 핵심 개념
+
+각 개념의 깊은 레퍼런스는 [references/concepts.md](references/concepts.md)에 있다.
+
+- **시맨틱 체크포인트**, 에이전트가 계속하는 데 필요한 컴팩트하고 버전 관리된 표현.
+- **상태 검증**, 각 구성 요소가 독립적으로 검증되며 오래됨은 의존성 그래프를 통해 전파된다.
+- **멱등한 액션 원장**, 외부 사이드 이펙트가 추적되고 중복排除되며, 불확실한 결과는 조용히 재시도되는 대신 발생한다.
+- **복구 모드**, `RESUME`, `REPAIR_AND_RESUME`, `ROLLBACK`, `WAIT`, `REQUEST_HUMAN`, `ABORT`(plus `REPLAN`).
+- **복구 계약**, 결정적이고 무결성이 봉인되며 게이트된 다음 액션.
