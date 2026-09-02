@@ -319,3 +319,42 @@ CONTINUUM 围绕一个不变量组织：**每个事实都携带其来源，信�
 1. **无自我认证。** 智能体报告的状态为 `EXTERNAL_AGENT` 并降级为 `REQUIRES_REVIEW` 直至人类 `REVIEW_CONFIRMED`。只有可信写入者产生 `DETERMINISTIC` 状态。
 2. **副作用需要声明。** 每个外部效应在触发前在幂等账本中声明。未声明的效应在边界被阻止，重复被拒绝，不确定的结果会抛出以供调和。
 3. **恢复对照现实进行验证。** 恢复前会检查文件摘要、依赖版本和模型身份，然后再说安全。过期性传播 `dependency -> evidence -> finding -> decision` 加上 `PlanStep.depends_on`，因此只有受影响的步骤需要修复。
+
+### 五个集成接缝
+
+| 接缝 | 如何连接 | 它为你带来什么 |
+|:--|:--|:--|
+| 1 进程内 | `GenericAgentAdapter.intercept_action(...)` 和 `wrap_tool(key_fn=...)` 用于 LangChain、LangGraph、OpenAI Agents SDK | Python 框架，可信写入 |
+| 2 MCP 服务器 | `continuum-mcp` 通过 stdio 的 12 个工具（`continuum_record_progress`、`continuum_intercept_action`、`continuum_complete_action` 等） | 任意支持 MCP 的客户端，3 个只读 + 8 个变更，allowlist `CONTINUUM_MCP_MUTATING_CLIENTS` |
+| 3 CLI 生命周期钩子 | `continuum hooks install claude-code --with-gate` 也支持 `gemini` 和 `codex` | 编码 CLI：`SessionStart briefing`、`PostToolUse observe`、`PreToolUse gate`，无需 CLAUDE.md |
+| 4 强制 HTTP 网关 | `continuum gateway --port 8765` 配合 `.continuum/gateway.json` | 任意语言，任意外发 HTTP 必须有声明，网关从真实状态码结算 |
+| 5 OpenTelemetry 桥 | `make_span_processor(storage)` | 任意已追踪应用，跨度成为 `TOOL_COMPLETED` 证据 |
+
+面向 CrewAI、AutoGen、Pydantic AI 的薄钩子面位于 `adapters/thin.py`，无需 SDK。
+
+### 强制流水线，为何无重复且无无效调用
+
+门控到观测的流水线在 Harness 边界关闭缺口。这正是节省 token 和成本并阻止无效工具调用的原因。
+
+```text
+PreToolUse 钩子                    PostToolUse 钩子
+    |                                    |
+    v                                    v
+continuum gate                    continuum observe
+    |                                    |
+    |-- 无声明？拒绝（exit 2）          |-- TOOL_COMPLETED 事件：
+    |   + 声明指引                      |     路径、字节、当前磁盘上的 sha256
+    |                                    |
+    |-- 存在有效声明？放行                |-- 磁盘检查状态：
+    |                                    |     已验证 / 已变更 / 缺失
+    v
+智能体执行效应
+    |
+    v
+continuum_complete_action  （从现实结算，而非从报告）
+    |
+    v
+账本标记为 COMPLETED，下一次重放返回缓存结果而非第二次触发
+```
+
+未知主机被默认拒绝为失败关闭，而非开放中继。Shell `Bash/curl` 是文档化的 v1 盲点。
