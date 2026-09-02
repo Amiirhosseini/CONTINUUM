@@ -417,3 +417,14 @@ CONTINUUM은 하나의 라이브러리(`src/continuum`, 104 모듈) plus 대규�
 | `cli/` | 38개 argparse 명령, 종료 코드가 평결, `runs, start, inspect, resume, verify, health, tree, benchmark, attest, dashboard` |
 | `otel.py` | OpenTelemetry 스팬 프로세서 브리지 |
 | `benchmark/` | CONTINUUM-Bench 하네스, 5개 크래시 시나리오 + 인자 드리프트 + 12 시나리오 복구 스위트 |
+
+### 정직한 제한
+
+- 게이트는 셸 명령의 내부를 볼 수 없다(Bash나 curl은 구조화된 도구 청구를 우회한다)
+- Postgres 백엔드는 CI에서 테스트되지만 프로덕션에서 단련되지 않았다
+- `request_human` 알림을 위한 웹훅 외부는 아직 없다(#305)
+- v1에서는 한 계층의 다중 에이전트 계층만
+- 큰 페이로드 오프로딩(#254)은 아직 미구현
+- 수 주 규모의 벤치마크와 토큰 비용 표는 보드 #550(#568에서 #570)에 착륙한다
+
+완전한 레퍼런스는 [references/architecture.md](references/architecture.md)에 있다. 그리고 이 위에 구축되는 수개월 평면, 출처 인과 그래프, 권한 부활, 허용 가능성, 활성성은 보드 #550와 그 20개 하위 이슈 #551부터 #570으로 고정되어 있다.
