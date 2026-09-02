@@ -490,3 +490,19 @@ Más allá del plan original: el servidor MCP, las capas de autorización MCP y 
 | Un motor de flujo de trabajo | Una capa de recuperación, no un orquestador |
 
 La abstracción central: `estado semántico + validación del entorno + reconciliación de acciones = recuperación segura`.
+
+## Trabajo relacionado
+
+CONTINUUM se sitúa en la intersección de ejecución durable, seguimiento idempotente de efectos secundarios y recuperación tras caída para agentes LLM. Los vecinos más cercanos son contratos de reanudación verificados por máquina (Khan 2026), procesamiento transaccional agéntico con admisión protegida por restricciones (Mnemosyne 2026), análisis de ataques de reversión de checkpoint (ACRFence 2026) y defensa de inyección de prompt a nivel de diseño (CaMeL 2025). La lista completa anotada, fundamentos y auditoría de citas están en [references/related-work.md](references/related-work.md).
+
+## Estado y limitaciones
+
+- **Probado**: 1,360 pasados + 23 saltados en una ejecución completa en la auditoría del 2026-08-24 de este árbol, CI hace cumplir la suite en Python 3.11, 3.12 y 3.13, y los conteos varían por plataforma y servicios opcionales como Postgres (ver [STATUS.md](STATUS.md)). La superficie MCP también ha sido auditada de forma adversarial sobre el protocolo en vivo, ver [test.md](test.md).
+- **En PyPI como `continuum-agent` 0.1.0** (`pip install continuum-agent`, el clon aún funciona vía `pip install .` ver Inicio rápido).
+- **La autenticación de llamante MCP es opcional por despliegue.** Cuando se establece `CONTINUUM_MCP_TOKEN`, el servidor rechaza cada herramienta mutante a menos que el llamante presente ese secreto compartido en el `_meta.authToken` del handshake `initialize`, secretos por llamante disponibles vía `CONTINUUM_MCP_CLIENT_TOKENS` (pares `name:secret`). Sin ningún token configurado, la autorización es solo por identidad declarada (el valor histórico por defecto, preservado para uso local de un solo usuario).
+- **Confirmar estado auto reportado vía MCP requiere un secreto separado.** `continuum_confirm` rechaza a cada llamante hasta que el operador establece `CONTINUUM_MCP_CONFIRM_TOKEN`, porque un agente al que se le permite registrar progreso no debe poder confirmarlo también. La ruta por defecto sigue siendo conducida por humano: ejecuta `continuum confirm <run_id>` en el host.
+- **Componentes no construidos**: API en la nube (Fase 13).
+- **Brecha de cumplimiento en comandos shell**: la puerta impone reclamos para llamadas a herramientas estructuradas pero no puede ver dentro de comandos Bash o curl. Documentado como alcance v1 rechazado.
+- **Los adaptadores de framework siguen siendo experimentales.** Los tres adaptadores de framework ahora llevan pruebas de reanudación suave y caída dura con modelo vivo (OpenRouter, `gpt-4o-mini`), incluida la prueba de contrato de caída que bloquea la reanudación sobre un efecto secundario incierto, y ahora tienen tests de verificación de caída y reanudación que alcanzan paridad con la fachada genérica (Refs #285). Prefiere `GenericAgentAdapter` para recuperación en producción.
+- **Las ejecuciones de agente y MCP necesitan una confirmación explícita antes de la reanudación automática.** El estado reportado externamente es `REQUIRES_REVIEW`, por lo que `continuum resume` devuelve `request_human` hasta que un humano confirma. Por diseño, no es un defecto, ver [Integración de frameworks](#integración-de-frameworks).
+- **Serie de tests de autonomía e2e** (issue [#6](https://github.com/Cyrax321/CONTINUUM/issues/6)): tres ejecuciones completas de Claude Code puntuaron 7/7 en mecánicas con comportamiento de recuperación no solicitado observado. Más iteraciones a través de diversos estilos de prompt permanecen abiertas.
