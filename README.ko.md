@@ -228,3 +228,46 @@ CONTINUUM은 목업 단위 테스트뿐만 아니라 실제 LLM 에이전트, �
 - **자기 치유**: 하드킬된 서버는 시작 시 한 번의 재시도로 고립된 SQLite `-wal`/`-shm` 사이드카를 정리하여 복구한다.
 - **규모**: 약 1,380개 테스트가 수집됨(약 1,360개 통과, 나머지는 선택적 서비스 없이 스킵), Python 3.11, 3.12, 3.13에서 실행(unit, `hypothesis` 기반 속성 테스트, 동시성, 적대적). CONTINUUM-Bench는 다섯 개의 크래시 시나리오에 전용 argument-drift 시나리오를 더해 실행하며, CONTINUUM에 대해 0 중복 작업과 0 중복 사이드 이펙트를, 단순 재생에 대해 완전한 중복을 측정한다. 추가로 12 시나리오 복구 정확성 스위트(`continuum.benchmark.phase6`)가 내구성 실행 서베이의 크래시 지점을 실행 가능한 어설션으로 인코딩한다.
 - **적대적 감사**: 전체 MCP 표면이 라이브 프로토콜 위에서 감사되었고, 세 가지 결함이 발견되어 수정되었다. 방법과 재현 단계는 [test.md](test.md)에 있다.
+
+## MCP 통합
+
+CONTINUUM은 MCP 서버를 제공한다. 에이전트는 라이브러리를 임베드하지 않고도 진행 상황을 기록하고, 체크포인트를 만들고, 사이드 이펙트를 원장을 통해 라우팅할 수 있다.
+
+```bash
+uv pip install -e ".[mcp]"
+CONTINUUM_MCP_MUTATING_CLIENTS=your-client-name continuum-mcp
+```
+
+stdio를 통한 열한 개의 도구. 세 개는 읽기 전용(`continuum_validate`, `continuum_resume`, `continuum_list_actions`), 여덟 개는 변경한다. 사이드 이펙트는 2단계(청구, 실행, 완료)이며, 변경 도구는 기본적으로 allowlist 뒤에서 거부된다. 에이전트가 보고한 상태는 출처 `Origin.EXTERNAL_AGENT`로 기록되고 `REQUIRES_REVIEW`로 표시된다.
+
+검증 세부사항(시작 시 크래시 복구와 Claude Code를 통한 엔드투엔드 테스트 포함)은 [references/mcp.md](references/mcp.md)에 있다. 등록된 서버가 `CONNECTION_CLOSED`를 보고하면, 원인은 거의 항상 `PATH` 해결이며 서버 자체가 아니다. [docs/api/mcp.md](docs/api/mcp.md#troubleshooting)에 진단과 두 가지 수정책이 있다.
+
+## 프레임워크 통합
+
+아홉 개의 어댑터가 `src/continuum/adapters/`에 제공된다(하나의 인프로세스 퍼사드 plus 여덟 개의 통합). 모두 선택적 설치이므로 코어는 표준 라이브러리만 유지한다.
+
+| 어댑터 | 클래스 | 비고 |
+|:--|:--|:--|
+| 범용 Python 에이전트 | `GenericAgentAdapter` | 인프로세스 퍼사드. 신뢰할 수 있는(`Origin.DETERMINISTIC`) 상태를 쓴다. |
+| 파일시스템 샌드박스 | `FilesystemSandboxAdapter` | 로컬 디렉터리 샌드박스. 외부 서비스 없음. 문서와 CI의 기본값. |
+| Python 인프로세스 | `PythonInProcAdapter` | 임시 작업 디렉터리에서 Python을 실행하고 원장을 통해 기록한다. |
+| 컨테이너 | `ContainerAdapter` | Docker 기반. `docker`가 없을 때 보호된 스킵. |
+| 브라우저 | `BrowserAdapter` | Playwright 기반. 설치되지 않았을 때 보호된 스킵. |
+| Kubernetes | `KubernetesAdapter` | `kubectl` 기반. 구성되지 않았을 때 보호된 스킵. |
+| OpenAI Agents SDK | `OpenAIAgentAdapter` | 실험적. `ToolContext` / `RunHooks`에 후크. 선택적 `openai-agents`. |
+| LangGraph | `LangGraphAgentAdapter` | 실험적. `StateGraph`를 래핑. 선택적 `langgraph`. |
+| LangChain | `LangChainAgentAdapter` | 실험적. LCEL `Runnable` 파이프라인과 `create_agent` 도구 호출 루프에 `checkpoint_node`를 드롭. 선택적 `langchain`. |
+
+각 어댑터는 원장을 통해 진행 상황을 기록하고 2단계 인터셉트와 완료 프로토콜로 외부 효과를 라우팅한다. 세 개의 프레임워크 어댑터는 모두 엔드투엔드 통합 테스트를 가지고 있으며, **라이브 OpenRouter 모델**에 대해 구동되었고, 그 실행에서 LLM 인자 드리프트 중복排除 갭과 두 개의 OpenAI 어댑터 결함(어댑터별 라이브 하드 크래시(사이드 이펙트 중 `os._exit(137)`) 증명 포함)이 드러나고 닫혔다. 전체 사용법, 라이브 모델 결과, 실행 가능한 예제는 [references/adapters.md](references/adapters.md)에 있다.
+
+프로덕션 LangGraph 앱은 네이티브 영속성 API를 유지할 수도 있다. `make_continuum_checkpointer(storage)`는 LangGraph의 `BaseCheckpointSaver`를 CONTINUUM 저장소 위에서 구현하므로, 각 put은 동일한 해시 체인 출처 태그된 이벤트 로그에 착륙한다([references/adapters.md](references/adapters.md) 참조).
+
+추가로 세 개의 프로덕션 프레임워크가 [`adapters/thin.py`](src/continuum/adapters/thin.py)의 SDK가 필요 없는 얇은 훅 표면으로 커버된다.
+
+| 프레임워크 | 인터셉트 표면 | 진입점 |
+|:--|:--|:--|
+| CrewAI | 전역 도구 호출 전후 훅 | `install_crewai_hooks(storage, run_id)` |
+| AutoGen core | `FunctionTool.run_json`을 현장에서 래핑 | `wrap_autogen_tool(tool, storage, run_id)` |
+| Pydantic AI | 비동기 Hooks 역량 | `Agent(capabilities=[wrap_pydantic_ai_hooks(storage, run_id)])` |
+
+이들 중 어느 것에도 닿지 않는 스택의 경우: `continuum gateway`는 모든 언어로부터의 아웃바운드 HTTP에 청구를 강제하고, `continuum.otel.make_span_processor(storage)`는 기존 OpenTelemetry 도구 스팬을 증거로 바꾸며, `continuum serve`는 MCP 도구와 동일한 작업을 언어에 구애받지 않는 JSON 와이어 프로토콜로 노출한다(stdio, 또는 `--transport http`를 통한 HTTP와 `CONTINUUM_SERVE_TOKEN` 인증).
