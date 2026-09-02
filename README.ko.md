@@ -161,3 +161,18 @@ CONTINUUM은 **LLM 컨텍스트**(일시적)와 **지속적인 작업 상태**(�
 | 검증 기판 | 시간 T의 체크포인트와 지금의 세계가 주어졌을 때, 계속하는 것이 여전히 안전하고 정확한가 | `src/continuum/state/validator.py`(오래됨 `dependency -> evidence -> finding -> decision` plus `PlanStep.depends_on`), `src/continuum/provenance_map.py`(`Origin`에서 `REQUIRES_REVIEW`까지 `REVIEW_CONFIRMED`까지), `src/continuum/actions/ledger.py`와 `src/continuum/actions/idempotency.py` 및 `src/continuum/gate.py` / `src/continuum/gateway.py`(실행 전 청구, 중복 거부, 조정을 위해 `UnknownSideEffect` 발생), `src/continuum/replayguard.py`(휴대용 가드), `src/continuum/pinning.py`와 `src/continuum/replay_similarity.py`(재생 정확성), `src/continuum/budgets.py`(재시도 상한), `src/continuum/recovery/engine.py` + `src/continuum/recovery/contract.py` + `src/continuum/recovery/planner.py` + `src/continuum/recovery/observations.py`(최대 심각도 `RESUME < ... < ABORT`, `evidence` / `reason` / `next_allowed_action` / `human_steps`가 있는 봉인된 계약), `src/continuum/checkpoint/rewind.py`(원자적 이중 상태 되감기), `src/continuum/analysis/prefix_trust.py`(조언적 신뢰). 게시된 검사: `docs/recovery_walkthrough.md`, `benchmarks/fault_injection/`(`detection_rate` / `unsafe_resume_rate`를 출력하는 스위트), `src/continuum/benchmark/phase6/`(복구 정확성 스위트), `docs/RESULTS.md` 그리고 아래의 재생성 가능한 시각화. |
 
 위의 각 행은 태그가 지정된 커밋 시점에 `main`에 존재하는 경로로 추적 가능하다. 이 표에서는 벤치마크 수치를 다시 게시하지 않는다. 벤치마크는 이미 출력한 스위트 출력에만 존재한다. 게시된 스위트와 설계 문서의 전체 목록은 `docs/research.md`에 있다.
+
+### 크래시 복구, 실제로
+
+아래 이미지는 목업이 아니다. `python demo-run/generate_crash_visual.py`의 출력이며, `demo-run/worker.py`를 문서 399에서 `os._exit(9)`까지 실행하고, `continuum resume --env dataset=v4`를 호출하여 거부 경로(`REQUEST_HUMAN`, `safe:false`, exit 20)를 보여주고, 불확실한 사이드 이펙트를 프로브로 조정하며, 동일한 데이터베이스에서 재개하여 중복 작업 없이 완료한다. 트랜스크립트는 감사를 위해 `docs/assets/crash-recovery.txt`로도 저장된다.
+
+재생성:
+
+```bash
+python demo-run/generate_crash_visual.py
+# 또는: python scripts/generate_crash_visual.py
+```
+
+![크래시 복구: 배치 중 하드 킬, 거부, 조정, 재개](docs/assets/crash-recovery.svg)
+
+코드가 포함된 전체 워크스루는 `docs/recovery_walkthrough.md`(`examples/recovery_walkthrough.py`)에 있다. 최소 bench harness는 `references/bench.md`(`continuum benchmark`)에 있다.
