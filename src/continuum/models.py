@@ -722,9 +722,27 @@ class Action(BaseModel):
     side_effect_uncertain: bool = False
     compensated_by: list[str] = Field(default_factory=list)
     last_error: str | None = None
+    origin_digest: str | None = None
+    """Optional hash of the originating observation that motivated this write.
+
+    Stored as 64 lowercase hex (SHA-256) when present. Gives poisoning
+    forensics: a bad record can be joined back to the perception or
+    tool result that caused it, then sibling writes from the same
+    contaminated origin can be enumerated. Round-tripped via the ledger
+    payload and ``Action`` so the chain keeps the attribution.
+    """
     created_at: datetime = Field(default_factory=utcnow)
     started_at: datetime | None = None
     completed_at: datetime | None = None
+
+    @field_validator("origin_digest")
+    @classmethod
+    def _origin_digest_is_sha256(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not _SHA256_PATTERN.fullmatch(value):
+            raise ValueError("origin_digest must be 64 lowercase hex characters")
+        return value
 
 
 class UnknownSideEffect(RuntimeError):
