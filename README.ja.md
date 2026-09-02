@@ -68,3 +68,34 @@ PyPI に `continuum-agent` 0.1.0 として公開。`pip install continuum-agent`
 | ブラウザで完全な開発環境 | [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/Cyrax321/CONTINUUM?quickstart=1) |
 
 Docker イメージは CI によって `main` への各 push と各リリースタグで GHCR に公開される（`.github/workflows/docker-publish.yml`）。Codespace は `.devcontainer/` で定義される。
+
+```bash
+git clone https://github.com/Cyrax321/CONTINUUM.git
+cd CONTINUUM
+
+uv venv && source .venv/bin/activate     # macOS / Linux; Windows: .venv\Scripts\activate
+
+# コントリビューター（推奨）：ライブラリ + CLI + すべてのテストツール + すべてのアダプター
+uv pip install -e ".[dev]"
+
+# または必要なものだけを選ぶ：.（最小）、[mcp]、[otel]、[langgraph]、
+# [openai]、[langchain]、[attest]、[postgres]
+
+# またはクローンを完全にスキップ：
+uv pip install git+https://github.com/Cyrax321/CONTINUUM.git
+uv pip install "continuum-agent[mcp] @ git+https://github.com/Cyrax321/CONTINUUM.git"
+```
+
+> **pip フォールバック：** 上記のすべてのコマンドで `uv pip install` を `pip install` に置き換えてください。
+
+検証：
+
+```bash
+continuum --help                 # CLI エントリーポイント
+continuum-mcp --help             # MCP サーバーエントリーポイント（[mcp] または [dev] が必要）
+pytest -q                        # 約 1,380 件が収集される（正確な数とスキップ数は環境により異なる）
+ruff check src/ tests/ examples/ && ruff format --check src/ tests/ examples/
+mypy src/continuum               # CI が強制する三つのゲート
+```
+
+コアライブラリは一つのランタイム依存（`pydantic>=2.7`）のみを持ち、残りはすべてオプションである。完全なパッケージマップ、extras 行列、Postgres テスト設定、コマンドごとの検証は [references/install.md](references/install.md) にある。
