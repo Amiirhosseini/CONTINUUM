@@ -320,3 +320,42 @@ CONTINUUM は一つの不変条件を中心に構成される。**すべての�
 1. **自己認証なし。** エージェントが報告した状態は `EXTERNAL_AGENT` であり、人間による `REVIEW_CONFIRMED` まで `REQUIRES_REVIEW` に降格する。信頼できる書き込みだけが `DETERMINISTIC` 状態を生む。
 2. **副作用はクレームを要する。** すべての外部効果は発火前に冪等な台帳でクレームされる。未請求の効果は境界でブロックされ、重複は拒否され、不確かな結果は照合のために送出される。
 3. **リカバリは現実に対して検証する。** 再開は安全と言う前にファイルダイジェスト、依存バージョン、モデル同一性をチェックする。陳腐化は `dependency -> evidence -> finding -> decision` に加え `PlanStep.depends_on` で伝播するため、影響を受けたステップだけが修復される。
+
+### 五つの統合の継ぎ目
+
+| 継ぎ目 | 接続方法 | 得られるもの |
+|:--|:--|:--|
+| 1 インプロセス | `GenericAgentAdapter.intercept_action(...)` と `wrap_tool(key_fn=...)`（LangChain、LangGraph、OpenAI Agents SDK 向け） | Python フレームワーク、信頼できる書き込み |
+| 2 MCP サーバー | `continuum-mcp` 12 ツールを stdio 経由（`continuum_record_progress`、`continuum_intercept_action`、`continuum_complete_action` など） | 任意の MCP 対応クライアント、3 読み取り専用 + 8 変更、allowlist `CONTINUUM_MCP_MUTATING_CLIENTS` |
+| 3 CLI ライフサイクルフック | `continuum hooks install claude-code --with-gate`（`gemini` と `codex` も） | コーディング CLI：`SessionStart briefing`、`PostToolUse observe`、`PreToolUse gate`、CLAUDE.md 不要 |
+| 4 強制 HTTP ゲートウェイ | `continuum gateway --port 8765` と `.continuum/gateway.json` | 任意の言語、任意の外向き HTTP はクレームを要し、ゲートウェイは実際のステータスコードから決着させる |
+| 5 OpenTelemetry ブリッジ | `make_span_processor(storage)` | 任意のトレース済みアプリ、スパンが `TOOL_COMPLETED` 証拠になる |
+
+CrewAI、AutoGen、Pydantic AI 向けの薄いフック面は SDK なしで `adapters/thin.py` に存在する。
+
+### 強制パイプライン、なぜ重複も無効な呼び出しもないのか
+
+ゲートから観測へのパイプラインがハーネス境界の隙間を閉じる。これがトークンとコストを節約し、無効なツール呼び出しをブロックするものである。
+
+```text
+PreToolUse フック                    PostToolUse フック
+    |                                    |
+    v                                    v
+continuum gate                    continuum observe
+    |                                    |
+    |-- クレームなし？拒否（exit 2）          |-- TOOL_COMPLETED イベント：
+    |   + クレーム手順                      |     パス、バイト、現時点のディスク上の sha256
+    |                                    |
+    |-- 有効なクレームあり？許可                |-- ディスク検証状態：
+    |                                    |     検証済み / 変更済み / 欠落
+    v
+エージェントが効果を実行
+    |
+    v
+continuum_complete_action  （現実から決着、報告からではない）
+    |
+    v
+台帳は COMPLETED と印付けされ、次回の再生は二度目の発火ではなくキャッシュされた結果を返す
+```
+
+未知のホストはフェイルクローズで拒否され、オープンリレーではない。Shell `Bash/curl` は文書化された v1 の盲点である。
