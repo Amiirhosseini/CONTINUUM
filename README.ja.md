@@ -428,3 +428,39 @@ CONTINUUM は一つのライブラリ（`src/continuum`、104 モジュール）
 - 数週間スケールのベンチマークとトークンコスト表はボード #550（#568 から #570）に着地する
 
 完全なリファレンスは [references/architecture.md](references/architecture.md) にある。そしてこの上に構築される数ヶ月平面、来歴因果グラフ、権限の復活、許容性、活性はボード #550 とその 20 のサブ issue #551 から #570 として固定されている。
+
+## API と CLI
+
+Python 面（`EventType`、`Run`、`SQLiteStorage`、`diff_states`、`project`）とアダプター API は実行可能な例とともに [references/api.md](references/api.md) に文書化されている。CLI は同じ面をシェル形式にしたものである。
+
+```bash
+continuum runs                                   # 実行を一覧表示
+continuum inspect <run_id>                       # 意味的状態
+continuum validate <run_id> --env dataset=v4     # 検証、読み取り専用
+continuum resume <run_id> --env dataset=v4       # リカバリ決定 + 契約 + 次のステップ
+continuum checkpoint <run_id>                    # チェックポイントを強制、変更する
+continuum actions <run_id>                       # 外部副作用
+continuum reconcile <run_id>                     # プローブで不確かな効果を決着させる
+continuum complete <run_id>                      # キーボードから実行を完了として閉じる
+continuum verify <run_id>                        # イベントハッシュチェーンを再監査
+continuum budget <run_id>                        # アクションタイプごとのリトライ予算使用量
+continuum compact <run_id>                       # アンカー前のログ接頭辞をアーカイブ
+continuum tree <parent_run_id>                   # 親 + 子とリカバリ状態を表示
+continuum attest <run_id> --key signer.pem       # 外部検証者のためにチェーンヘッドに署名
+```
+
+すべての配線はホスト側であり、モデルの協力は任意である。
+
+```bash
+continuum hooks install claude-code --with-gate   # コーディング CLI：証拠、ブリーフィング、ゲート
+continuum gateway --port 8765                     # それ以外すべてのための強制 HTTP プロキシ
+provider.add_span_processor(continuum.otel.make_span_processor(storage))  # OTel を証拠に
+continuum-mcp                                     # MCP 対応のものなら何でも：十一ツールサーバー
+continuum briefing                                # セッション開始時のコンテキスト注入
+continuum budget <run_id>                        # リトライ予算使用量レポート
+continuum tree <parent_run_id>                   # マルチエージェント階層ビュー
+```
+
+オプションのレジストリはコードの傍らに存在し、データでありコードではない。`.continuum/gate.json`（副作用ツール + 安定キーテンプレート）、`.continuum/reconcilers.json`（外部システムをチェックするプローブ）、`.continuum/gateway.json`（上流ルート）。
+
+各コマンドは `--json` を受け付け、読み取り専用コマンドは決して書き込まない。したがってエージェントが実行中でもライブデータベースに対して安全である。終了コードは安全性契約である（検証済みで安全な実行のみが 0 で終了する）。完全なコマンドリスト、終了コード表、状態差分出力は [references/cli.md](references/cli.md) にある。
