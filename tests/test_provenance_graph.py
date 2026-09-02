@@ -32,7 +32,7 @@ def test_build_graph_with_caused_by_edges():
     ev = storage.append_event(
         run_id, EventType.EVIDENCE_ADDED, {"evidence_id": "ev1", "summary": "s"}
     )
-    find = storage.append_event(
+    _find = storage.append_event(
         run_id, EventType.FINDING_ADDED, {"finding_id": "f1", "claim": "c", "evidence": ["ev1"]}
     )
     # decision caused by evidence
