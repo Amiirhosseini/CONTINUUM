@@ -360,3 +360,19 @@ libro mayor marcado COMPLETADO, la próxima reproducción devuelve resultado cac
 ```
 
 Host desconocido se deniega cerrado por fallo, no como relay abierto. Shell `Bash/curl` es el punto ciego documentado de v1.
+
+### Árbol de decisión de recuperación, semanas hasta terminar, correcto y exacto
+
+El motor toma la señal más cautelosa, por lo que la seguridad nunca pierde ante la conveniencia.
+
+```text
+RESUME < REPAIR_AND_RESUME < REPLAN < WAIT < REQUEST_HUMAN < ROLLBACK < ABORT
+```
+
+Cada `continuum resume` devuelve un contrato sellado con: estado de recuperación y `safe`, componentes verificados e invalidados, `human_steps` ejecutables (shell exacto a ejecutar), observaciones tras checkpoint verificadas en disco, deriva de fijación y agregación familiar para `continuum tree` multiagente. El briefing `continuum briefing` inyecta ese contrato en cada `claude` SessionStart fresco, por lo que decir `hola` después de matar la terminal se reanuda desde el último prefijo bueno.
+
+### Por qué esto ahorra tokens, coste y llamadas inválidas
+
+* **Tokens:** El checkpoint semántico almacena `Goal + Plan + Progress` no un volcado de transcripción. El briefing sirve solo estado verificado más un resumen de razonamiento con tope de 4096, no la cola de errores que el auto condicionamiento muestra que degrada la siguiente sesión. El reintento informado `recovery/summary.py` inyecta un resumen redactado por el motor, no historial crudo.
+* **Coste:** El libro mayor `action_index` rechaza efectos secundarios duplicados incluso bajo deriva de argumentos como rutas relativas frente a absolutas (`invoice:INV-001` clave estable), por lo que la misma API no se paga dos veces tras una reanudación. Los presupuestos `budgets.py` limitan tormentas de reintentos al reclamar. `continuum benchmark` imprime `0 duplicados` para continuum frente a `50` para el ingenuo.
+* **Llamadas inválidas:** La puerta, el gateway y `replayguard` con `langgraph_protected_node` bloquean llamadas a herramientas no reclamadas o reproducidas antes de dispararse. La fijación `pinning.py` expone deriva de prompt o herramienta al reanudar.
