@@ -57,6 +57,8 @@ DEFAULT_GATE_CONFIG_PATH = ".continuum/gate.json"
 
 class GateConfigError(ValueError):
     """The gate configuration exists but cannot be honoured."""
+
+
 def collect_consumed_authorities(events: Any) -> dict[str, Any]:
     """Scan events for AUTHORITY_CONSUMED and return map authority_id to event.
 
@@ -79,8 +81,6 @@ def is_authority_consumed(authority_id: str, consumed: Any) -> bool:
     if not consumed:
         return False
     return authority_id in consumed
-
-
 
 
 @dataclass(frozen=True)
@@ -196,13 +196,17 @@ def decide(
         for _key, _value in tool_input.items():
             if isinstance(_value, str) and _value in consumed_authorities:
                 ev = consumed_authorities[_value]
-                seq = getattr(ev, "sequence", "?") if hasattr(ev, "sequence") else ev.get("sequence", "?")  # type: ignore[union-attr]
+                seq = (
+                    getattr(ev, "sequence", "?")
+                    if hasattr(ev, "sequence")
+                    else ev.get("sequence", "?")
+                )
                 payload = getattr(ev, "payload", {}) or {}
                 if hasattr(ev, "payload"):
-                    seq = ev.sequence  # type: ignore[union-attr]
-                    payload = ev.payload  # type: ignore[union-attr]
+                    seq = ev.sequence
+                    payload = ev.payload
                 else:
-                    payload = ev.get("payload", {})  # type: ignore[union-attr]
+                    payload = ev.get("payload", {})
                 consumer = payload.get("consumer_run_id", "?")
                 return Decision(
                     False,

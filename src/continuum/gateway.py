@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Any
 
 from continuum.events import EventType
-from continuum.gate import collect_consumed_authorities, normalize_key_value
+from continuum.gate import normalize_key_value
 from continuum.models import Origin
 
 __all__ = [
@@ -161,13 +161,17 @@ def match_route(
         for _v in body.values():
             if isinstance(_v, str) and _v in consumed_authorities:
                 ev = consumed_authorities[_v]
-                seq = getattr(ev, "sequence", "?") if hasattr(ev, "sequence") else ev.get("sequence", "?")  # type: ignore[union-attr]
+                seq = (
+                    getattr(ev, "sequence", "?")
+                    if hasattr(ev, "sequence")
+                    else ev.get("sequence", "?")
+                )
                 payload = getattr(ev, "payload", {}) or {}
                 if hasattr(ev, "payload"):
-                    seq = ev.sequence  # type: ignore[union-attr]
-                    payload = ev.payload  # type: ignore[union-attr]
+                    seq = ev.sequence
+                    payload = ev.payload
                 else:
-                    payload = ev.get("payload", {})  # type: ignore[union-attr]
+                    payload = ev.get("payload", {})
                 consumer = payload.get("consumer_run_id", "?")
                 return Decision(
                     False,

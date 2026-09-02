@@ -52,7 +52,6 @@ from pathlib import Path
 from typing import Any, Concatenate, ParamSpec, TypeVar
 
 from continuum.actions.grants import GrantDenied, normalize_grant, scan_grants
-from continuum.events import EventType as LedgerEventType
 from continuum.actions.idempotency import (
     IdempotencyKey,
     arguments_hash,
@@ -869,7 +868,7 @@ class ActionLedger:
             if prior_ev is not None and not live_auth_match:
                 self.storage.append_event(
                     self.run_id,
-                    LedgerEventType.GRANT_DENIED,
+                    EventType.GRANT_DENIED,
                     {
                         "grant_id": authority_id,
                         "scope": prior_ev.payload.get("consumer_run_id", ""),
