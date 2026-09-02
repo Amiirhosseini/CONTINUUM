@@ -183,9 +183,7 @@ def downstream_of(graph: ProvenanceGraph, evidence_id: str) -> list[ProvenanceNo
             or node.payload.get("finding_id")
             or node.payload.get("decision_id")
         )
-        if pid == evidence_id:
-            start_ids.append(node.event_id)
-        elif node.payload.get("evidence_id") == evidence_id:
+        if pid == evidence_id or node.payload.get("evidence_id") == evidence_id:
             start_ids.append(node.event_id)
     result: list[ProvenanceNode] = []
     seen: set[str] = set()
