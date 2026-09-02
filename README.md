@@ -33,7 +33,7 @@
 </p>
 
 <p align="center">
-  <sub><strong>English</strong> | <a href="README.zh-CN.md">简体中文</a> | <a href="README.es.md">Español</a> | <a href="README.ja.md">日本語</a> | <a href="README.pt-BR.md">Português</a></sub>
+  <sub><strong>English</strong> | <a href="README.zh-CN.md">简体中文</a> | <a href="README.es.md">Español</a> | <a href="README.ja.md">日本語</a> | <a href="README.pt-BR.md">Português</a> | <a href="README.ko.md">한국어</a></sub>
 </p>
 
 ---
