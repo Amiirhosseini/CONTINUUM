@@ -504,3 +504,56 @@ CONTINUUM 位于持久执行、幂等副作用追踪和针对 LLM 智能体的�
 - **框架适配器仍为实验性。** 全部三个框架适配器现在都携带真实模型的软恢复和硬崩溃证明（OpenRouter，`gpt-4o-mini`），包括阻塞在不确定副作用上的崩溃合约，并且现在拥有与通用门面一致的崩溃与恢复验证测试（Refs #285）。生产恢复请优先使用 `GenericAgentAdapter`。
 - **智能体和 MCP 运行在自动恢复前需要显式确认。** 外部报告的状态为 `REQUIRES_REVIEW`，因此 `continuum resume` 会返回 `request_human` 直至人类确认。按设计如此，不是缺陷，见 [框架集成](#框架集成)。
 - **e2e 自主测试系列**（issue [#6](https://github.com/Cyrax321/CONTINUUM/issues/6)）：三轮完整 Claude Code 运行在机制上取得 7/7 评分，观察到无提示的恢复行为。跨多样 prompt 风格的进一步迭代仍开放。
+
+## 关于
+
+在 2026 年初，我看到长时间运行的智能体在恢复而非推理上失败。检查点被视为继续的证明，而非待验证的证据。调研 Temporal、LangGraph、ACRFence 2603.20625 和 self conditioning 2509.09677 后，我发现缺口是一个可移植的验证基座，它会问：给定时间 T 的状态和当下的世界，继续是否仍然安全。
+
+在三周内，我从一个不变量出发构建了 CONTINUUM：每个事实都携带其来源。结果是一个带 `verify()` 的哈希链日志、带稳定键去重的账本、阻止未声明效应的门控与网关，以及密封合约的恢复引擎。五个接缝将同一日志暴露给 Claude Code、LangGraph、LangChain、OpenAI、HTTP 和 OpenTelemetry。经真实杀死和 1380 个测试验证，它在朴素重放打印 `50` 的地方打印 `0 重复`。
+
+CONTINUUM 由 **Anandhu P Shaji**（[@Cyrax321](https://github.com/Cyrax321) · [LinkedIn](https://www.linkedin.com/in/anandhupshaji/)）创建并由原始创建者维护。基于 [Apache-2.0](LICENSE) 开源。社区贡献欢迎通过 [CONTRIBUTING.md](CONTRIBUTING.md)，并在 [AUTHORS.md](AUTHORS.md) 和 [graphs/contributors](https://github.com/Cyrax321/CONTINUUM/graphs/contributors) 中致谢。
+
+## 贡献
+
+本项目基于 Apache 2.0 开源，并有意构建为可扩展：面向验证恢复语义的研究者、面向将账本或 MCP 服务器移植到其他框架或语言的工程师，以及面向将规划路线图变为现实的任何人。一个好的起点是 issue 跟踪器上的 `good first issue` 标签，或 STATUS.md 中列出的开放正确性缺陷。
+
+在提交大型 PR 前请先开 issue。完整贡献指南见 [CONTRIBUTING.md](CONTRIBUTING.md)，包括 [Code of Conduct](CODE_OF_CONDUCT.md)。
+
+### 贡献者
+
+<a href="https://github.com/Cyrax321/CONTINUUM/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=Cyrax321/CONTINUUM" />
+</a>
+
+## 赞助
+
+如果 CONTINUUM 帮助你的智能体可靠恢复，请考虑赞助以支持长期维护。
+
+<p align="center">
+  <a href="https://github.com/sponsors/Cyrax321"><img src="https://img.shields.io/badge/Sponsor-❤-ff69b4?style=for-the-badge&logo=githubsponsors" alt="Sponsor Cyrax321" /></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/sponsors/Cyrax321">成为赞助者</a>，GitHub Sponsors，或在 FUNDING.yml 中添加自定义链接如果你偏好其他平台。
+</p>
+
+## 许可证
+
+Apache 2.0，见 [LICENSE](LICENSE)。
+
+---
+
+深度参考资料：
+
+- [references/install.md](references/install.md) - 前置条件、安装层级、包映射、验证
+- [references/concepts.md](references/concepts.md) - 语义检查点、验证、账本、恢复模式、合约
+- [references/architecture.md](references/architecture.md) - 数据模型、事件日志、投影、存储、检查点、恢复引擎、安全
+- [references/adapters.md](references/adapters.md) - 框架适配器用法和真实模型验证结果
+- [references/api.md](references/api.md) - Python 和适配器 API
+- [references/cli.md](references/cli.md) - 完整 CLI 命令列表、退出码、状态差异
+- [references/mcp.md](references/mcp.md) - MCP 服务器状态、验证、开放问题
+- [references/bench.md](references/bench.md) - CONTINUUM-Bench 设计
+- [references/quickstart.md](references/quickstart.md) - 安装、示例、验证脚本
+- [references/e2e.md](references/e2e.md) - 端到端自主测试 walkthrough
+- [references/testing.md](references/testing.md) - 测试套件布局和约定
+- [references/related-work.md](references/related-work.md) - 带注释的相关工作和引用审计
