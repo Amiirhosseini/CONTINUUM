@@ -141,3 +141,24 @@ python scripts/mcp_smoke.py               # subproceso real, tráfico JSON-RPC r
 ```
 
 El kit `e2e-autonomy-test/` guioniza una tarea real de lotes de facturas, una muerte brusca a mitad de ejecución y una sesión fresca de reanudación, luego puntúa el outbox, el libro mayor y la cadena de eventos fuera de banda. La ejecución 1 obtuvo **7/7 en mecánicas** contra una sesión real de Claude Code. Recorrido completo en [references/e2e.md](references/e2e.md).
+
+## Cómo funciona
+
+CONTINUUM separa el **contexto LLM** (temporal) del **estado duradero de la tarea** (permanente). En lugar de guardar el historial de conversación, construye un checkpoint semántico, la mínima información verificada necesaria para continuar.
+
+![Cómo funciona CONTINUUM](docs/assets/architecture.svg)
+
+La explicación detallada, el modelo de proyección y el contexto de recuperación están en [references/architecture.md](references/architecture.md).
+
+## Dónde se sitúa CONTINUUM
+
+Cuatro preocupaciones se solapan en cada agente de larga duración. CONTINUUM solo es dueño de la última y toca las otras tres a través de costuras explícitas. No se nombra a ningún competidor y no se hace ninguna afirmación sin un módulo entregado o una suite publicada que ya lo imprima.
+
+| Capa | Responde | Cómo se conecta (módulos entregados o salidas publicadas) |
+|:--|:--|:--|
+| Harness | Cómo el agente llama a herramientas y avanza hacia un objetivo? | Fuera de CONTINUUM. Puntos de conexión entregados en `src/continuum/adapters/generic.py` (`GenericAgentAdapter`), `src/continuum/adapters/thin.py` (hooks de CrewAI, AutoGen, Pydantic AI), `src/continuum/mcp/server.py` (MCP stdio), `src/continuum/hooks.py` y `src/continuum/clienthooks.py` (hooks de ciclo de vida de CLI de código), `src/continuum/gateway.py` (proxy HTTP de cumplimiento para cualquier lenguaje) y `src/continuum/otel.py` (puente OpenTelemetry). Recetas en `docs/recipes/` y `references/adapters.md`. |
+| Ejecución durable | Qué pasó antes de una caída y qué puede reproducirse sin perder trabajo? | Registro de eventos encadenado `src/continuum/events.py` con `verify()` y `trusted_through`, almacenamiento durable `src/continuum/storage/sqlite.py` (WAL, `synchronous=FULL`, schema v6) y `src/continuum/storage/postgres.py` más `src/continuum/storage/migrations.py`, checkpoints dirigidos por políticas `src/continuum/checkpoint/manager.py` y `src/continuum/checkpoint/policy.py` que reproducen el hueco en `restore()`. Recorrido en `docs/recovery_walkthrough.md` (salida de `examples/recovery_walkthrough.py`). |
+| Plano de control | Qué ejecución está activa, quién puede actuar sobre ella y a dónde va la salida? | Registro de ejecuciones y jerarquía padre/hijo `src/continuum/storage/` y `src/continuum/recovery/family.py` (`continuum tree`), autorización allowlist `src/continuum/mcp/authz.py` (`CONTINUUM_MCP_MUTATING_CLIENTS` / `CONTINUUM_MCP_TOKEN`), superficies de presentación `src/continuum/dashboard/app.py` y `src/continuum/serve/server.py`, CLI `src/continuum/cli/main.py` (`continuum runs`, `continuum tree`, `continuum health`). |
+| Sustrato de verificación | Dado el checkpoint en el tiempo T y el mundo tal como está ahora, sigue siendo seguro y correcto continuar? | `src/continuum/state/validator.py` (obsolescencia `dependency -> evidence -> finding -> decision` más `PlanStep.depends_on`), `src/continuum/provenance_map.py` (`Origin` a `REQUIRES_REVIEW` hasta `REVIEW_CONFIRMED`), `src/continuum/actions/ledger.py` con `src/continuum/actions/idempotency.py` y `src/continuum/gate.py` / `src/continuum/gateway.py` (reclamar antes de ejecutar, rechaza duplicados, lanza `UnknownSideEffect` para reconciliación), `src/continuum/replayguard.py` (guardia portable), `src/continuum/pinning.py` y `src/continuum/replay_similarity.py` (corrección de reproducción), `src/continuum/budgets.py` (límites de reintentos), `src/continuum/recovery/engine.py` + `src/continuum/recovery/contract.py` + `src/continuum/recovery/planner.py` + `src/continuum/recovery/observations.py` (severidad máxima `RESUME < ... < ABORT`, contrato sellado con `evidence` / `reason` / `next_allowed_action` / `human_steps`), `src/continuum/checkpoint/rewind.py` (rebobinado atómico de doble estado), `src/continuum/analysis/prefix_trust.py` (confianza consultiva). Comprobaciones publicadas: `docs/recovery_walkthrough.md`, `benchmarks/fault_injection/` (suite que imprime `detection_rate` / `unsafe_resume_rate`), `src/continuum/benchmark/phase6/` (suite de corrección de recuperación), `docs/RESULTS.md` y el visual regenerable de abajo. |
+
+Cada fila de arriba es rastreable a una ruta que existe en `main` en el commit etiquetado. Nada en esta tabla vuelve a exponer un número de benchmark, los benchmarks solo viven en la salida de la suite que ya los imprime. Consulta `docs/research.md` para la lista completa de suites publicadas y documentos de diseño.
