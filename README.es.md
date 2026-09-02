@@ -272,3 +272,24 @@ Otras tres frameworks de producción están cubiertos por superficies delgadas d
 | Pydantic AI | capacidad asíncrona de Hooks | `Agent(capabilities=[wrap_pydantic_ai_hooks(storage, run_id)])` |
 
 Para stacks que ninguno de estos alcanza: `continuum gateway` impone reclamos en HTTP saliente desde cualquier lenguaje, `continuum.otel.make_span_processor(storage)` convierte spans existentes de OpenTelemetry de herramientas en evidencia, y `continuum serve` expone las mismas operaciones que las herramientas MCP sobre un protocolo de cable JSON agnóstico al lenguaje (stdio, o HTTP vía `--transport http` con autenticación `CONTINUUM_SERVE_TOKEN`).
+
+### Reanudando ejecuciones reportadas por agente o MCP
+
+El estado reportado vía MCP, o a través del adaptador de OpenAI, lleva procedencia `Origin.EXTERNAL_AGENT` y se resuelve a `request_human` hasta confirmarse. Las ejecuciones de LangGraph y LangChain usan `Origin.DETERMINISTIC` y se reanudan directamente. Para limpiar la revisión y reanudar:
+
+```bash
+continuum confirm <run_id>   # registra REVIEW_CONFIRMED, luego reevalúa
+continuum resume <run_id>    # ahora reporta RESUME
+```
+
+Sobre MCP el equivalente es la herramienta `continuum_confirm` seguida de `continuum_resume`. La confirmación es un evento único y atestiguado por humano: la escotilla de escape para la seguridad de auto certificación, por lo que una ejecución dirigida externamente nunca queda atascada de forma permanente.
+
+## Conceptos clave
+
+La referencia profunda para cada concepto vive en [references/concepts.md](references/concepts.md).
+
+- **Checkpoints semánticos**, una representación compacta y versionada de lo que el agente necesita para continuar.
+- **Validación de estado**, cada componente verificado de forma independiente, la obsolescencia se propaga por el grafo de dependencias.
+- **Libro mayor idempotente**, los efectos secundarios externos se rastrean y deduplican, los resultados inciertos lanzan en lugar de reintentar silenciosamente.
+- **Modos de recuperación**, `RESUME`, `REPAIR_AND_RESUME`, `ROLLBACK`, `WAIT`, `REQUEST_HUMAN`, `ABORT` (más `REPLAN`).
+- **Contrato de recuperación**, una siguiente acción determinista, sellada por integridad y protegida.
