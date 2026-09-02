@@ -31,7 +31,7 @@
 </p>
 
 <p align="center">
-  <sub><a href="README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | <a href="README.es.md">Español</a> | <strong>日本語</strong></sub>
+  <sub><a href="README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | <a href="README.es.md">Español</a> | <strong>日本語</strong> | <a href="README.pt-BR.md">Português</a></sub>
 </p>
 
 ---
