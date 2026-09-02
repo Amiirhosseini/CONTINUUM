@@ -358,3 +358,19 @@ continuum_complete_action  （从现实结算，而非从报告）
 ```
 
 未知主机被默认拒绝为失败关闭，而非开放中继。Shell `Bash/curl` 是文档化的 v1 盲点。
+
+### 恢复决策树，数周直至完成，正确且精确
+
+引擎采纳最谨慎的信号，因此安全永远胜过便利。
+
+```text
+RESUME < REPAIR_AND_RESUME < REPLAN < WAIT < REQUEST_HUMAN < ROLLBACK < ABORT
+```
+
+每个 `continuum resume` 都会返回密封合约，包含：恢复状态和 `safe`、已验证和已失效组件、可执行的 `human_steps`（要运行的精确 shell）、检查点后观测的磁盘检查、钉扎漂移，以及面向多智能体的 `continuum tree` 家族聚合。简报 `continuum briefing` 在每个全新的 `claude` SessionStart 时注入该合约，因此在你杀掉终端后说 `hi` 也会从最后一个良好前缀恢复。
+
+### 为何这能节省 token、成本和无效调用
+
+* **Token：** 语义检查点存储 `Goal + Plan + Progress` 而非转录转储。简报仅提供已验证状态加上 4096 字符上限的推理摘要，而非导致下一会话退化的错误尾部。带信息的重试 `recovery/summary.py` 注入引擎撰写的摘要，而非原始历史。
+* **成本：** 账本 `action_index` 即使在参数漂移如相对与绝对路径（`invoice:INV-001` 稳定键）下也拒绝重复副作用，因此同一 API 在恢复后不会被二次付费。预算 `budgets.py` 在声明时限制重试风暴。`continuum benchmark` 为 continuum 打印 `0 重复`，而对朴素方案则为 `50`。
+* **无效调用：** 门控、网关和 `replayguard` 的 `langgraph_protected_node` 在触发前阻止未声明或被重放的工具调用。钉扎 `pinning.py` 在恢复时显露 prompt 或工具漂移。
