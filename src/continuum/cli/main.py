@@ -2037,6 +2037,7 @@ def cmd_gateway(args: argparse.Namespace, storage: Storage, out: Any, err: Any) 
         GatewayConfigError,
         GatewayServer,
         load_gateway_config,
+        load_gateway_tenant,
     )
 
     config_path = Path(args.config) if args.config else Path(DEFAULT_GATEWAY_CONFIG_PATH)
@@ -2053,9 +2054,12 @@ def cmd_gateway(args: argparse.Namespace, storage: Storage, out: Any, err: Any) 
         )
         return ExitCode.ERROR
 
+    bound_tenant = load_gateway_tenant(config_path)
     active = storage.get_active_run()
     run_id = args.run_id or (active.run_id if active else None)
-    server = GatewayServer(lambda: open_storage(args.db), run_id, routes, port=args.port)
+    server = GatewayServer(
+        lambda: open_storage(args.db), run_id, routes, port=args.port, bound_tenant=bound_tenant
+    )
     print(
         f"CONTINUUM gateway listening on 127.0.0.1:{server.port} "
         f"({len(routes)} upstream route(s), run={run_id or 'dynamic'})",
