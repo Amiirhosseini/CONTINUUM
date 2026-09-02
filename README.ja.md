@@ -161,3 +161,18 @@ CONTINUUM は **LLM コンテキスト**（一時的）と **永続的なタス�
 | 検証基盤 | 時刻 T のチェックポイントと今の世界が与えられたとき、継続しても安全かつ正確か | `src/continuum/state/validator.py`（陳腐化 `dependency -> evidence -> finding -> decision` に加え `PlanStep.depends_on`）、`src/continuum/provenance_map.py`（`Origin` から `REQUIRES_REVIEW` まで `REVIEW_CONFIRMED` まで）、`src/continuum/actions/ledger.py` と `src/continuum/actions/idempotency.py` および `src/continuum/gate.py` / `src/continuum/gateway.py`（実行前にクレーム、重複を拒否し、照合のために `UnknownSideEffect` を送出）、`src/continuum/replayguard.py`（ポータブルガード）、`src/continuum/pinning.py` と `src/continuum/replay_similarity.py`（再生の正確性）、`src/continuum/budgets.py`（リトライ上限）、`src/continuum/recovery/engine.py` + `src/continuum/recovery/contract.py` + `src/continuum/recovery/planner.py` + `src/continuum/recovery/observations.py`（最大深刻度 `RESUME < ... < ABORT`、`evidence` / `reason` / `next_allowed_action` / `human_steps` を持つ密封契約）、`src/continuum/checkpoint/rewind.py`（アトミックな二重状態巻き戻し）、`src/continuum/analysis/prefix_trust.py`（助言的信頼）。公開済みチェック：`docs/recovery_walkthrough.md`、`benchmarks/fault_injection/`（`detection_rate` / `unsafe_resume_rate` を印字するスイート）、`src/continuum/benchmark/phase6/`（リカバリ正確性スイート）、`docs/RESULTS.md`、そして下の再生成可能なビジュアル。 |
 
 上記の各行は、タグ付けされたコミット時点で `main` に存在するパスに追跡可能である。この表ではベンチマーク数値を再掲しない。ベンチマークはそれらを既に印字したスイート出力の中にのみ生きる。公開済みスイートと設計文書の完全なリストは `docs/research.md` にある。
+
+### クラッシュリカバリ、実際に
+
+下の画像はモックではない。`python demo-run/generate_crash_visual.py` の出力であり、`demo-run/worker.py` をドキュメント 399 で `os._exit(9)` まで実行し、`continuum resume --env dataset=v4` を呼び出して拒否パス（`REQUEST_HUMAN`、`safe:false`、exit 20）を示し、不確かな副作用を探査で調停し、同じデータベースから再開して重複作業なしで完了する。トランスクリプトは監査用に `docs/assets/crash-recovery.txt` としても保存される。
+
+再生成：
+
+```bash
+python demo-run/generate_crash_visual.py
+# または：python scripts/generate_crash_visual.py
+```
+
+![クラッシュリカバリ：バッチ途中のハードキル、拒否、調停、再開](docs/assets/crash-recovery.svg)
+
+コード付きの完全なウォークスルーは `docs/recovery_walkthrough.md`（`examples/recovery_walkthrough.py`）にある。最小の bench harness は `references/bench.md`（`continuum benchmark`）にある。
