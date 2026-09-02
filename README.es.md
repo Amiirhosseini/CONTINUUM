@@ -177,3 +177,35 @@ python demo-run/generate_crash_visual.py
 ![Recuperación tras caída: muerte brusca a mitad de lote, rechazo, reconciliación, reanudación](docs/assets/crash-recovery.svg)
 
 Recorrido completo con código en `docs/recovery_walkthrough.md` (`examples/recovery_walkthrough.py`). El harness mínimo de bench está en `references/bench.md` (`continuum benchmark`).
+
+## Características
+
+| Capacidad | Qué te aporta |
+|:--|:--|
+| Checkpoints semánticos | Estado compacto, versionado e inspeccionable, no un volcado de transcripción |
+| Libro mayor idempotente | Rechaza efectos secundarios externos duplicados, expone los inciertos para reconciliación |
+| Revalidación del entorno | Cada componente del checkpoint se verifica contra el mundo actual antes de reanudar |
+| Estado con procedencia | El progreso reportado por el agente se marca `REQUIRES_REVIEW`, nunca se auto certifica |
+| Motor de recuperación | Siete modos de recuperación con un contrato determinista y sellado para la siguiente acción |
+| Servidor MCP que deniega por defecto | Once herramientas, separación lectura/mutación, allowlist de llamantes |
+| Adaptadores de frameworks | Integraciones Python genérico, OpenAI Agents SDK, LangGraph y LangChain |
+| Bucle de planificación seguro | La verificación de observaciones con dos señales escala ramas de alto riesgo a REQUIRES_REVIEW |
+| Revalidación periódica | El entorno se vuelve a comprobar según agenda, detectando deriva a mitad de ejecución dentro de un ciclo |
+| Registro a prueba de manipulaciones | Registro de eventos encadenado (36 tipos de eventos) con verificación de integridad |
+| Puerta de cumplimiento | Llamadas a efectos secundarios no reclamadas se rechazan antes de ejecutarse, los mensajes de denegación enseñan el protocolo de reclamo |
+| Hooks de observación | Cada archivo que una CLI de código escribe se convierte en evidencia verificada por digest, fuera del control del modelo |
+| Briefing de sesión | Sesiones frescas aprenden el estado de la ejecución de forma determinista al inicio, incluido el resumen de razonamiento de la sesión anterior |
+| Sondas reconciliadoras | Comandos registrados liquidan efectos secundarios inciertos automáticamente, los humanos solo ven el resto |
+| Guía ejecutable | Resume y validate renderizan los siguientes pasos como comandos ejecutables, no como estados |
+| Gateway HTTP de cumplimiento | Llamadas salientes en cualquier lenguaje requieren reclamos, las respuestas se liquidan desde el código de estado real |
+| Puente OpenTelemetry | Los spans de llamadas a herramientas del tracing de producción se convierten en evidencia sin cambios de código |
+| Índice de acciones | Las búsquedas de idempotencia entre ejecuciones son lecturas indexadas, no escaneos completos |
+| Fijación de versiones | Hashes de prompt, herramienta y modelo afirmados por el llamante se almacenan por reclamo, la deriva aflora al reanudar |
+| Presupuestos de reintentos | Límites de intentos por tipo de acción impuestos al reclamar, los agentes ven los intentos restantes |
+| Padre/hijo multiagente | La reanudación del padre compone el peor estado de la familia, el hijo incierto bloquea al padre |
+| Reintento informado | Resúmenes de fallo redactados por el motor se inyectan en reanudaciones posteriores a la recuperación |
+| Semántica de bifurcación | Continuaciones divergentes se ramifican en ejecuciones hijas con autoridad fresca |
+| Compactación de registro | El prefijo pre-ancla se archiva verbatim, el registro vivo permanece acotado para ejecuciones de meses |
+| Seguimiento de concesiones consumidas | Referencias de autoridad de un solo uso se marcan como gastadas en estado terminal, la reutilización tras restaurar se rechaza (`GRANT_DENIED`), defendiendo la ruta de restauración contra resurrección de autoridad |
+| Atestación de cadena | `continuum attest` firma la cabeza de cadena de una ejecución con Ed25519 para que un verificador externo pueda probar que el historial no fue alterado con una clave conocida |
+| Superficie HITL del dashboard | Botones de confirmar, reconciliar y completar con paridad de auditoría respecto a la CLI |
