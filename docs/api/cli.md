@@ -98,9 +98,9 @@ settings files (for example `.claude/settings.json` or `.gemini/settings.json`).
 The installed `observe` command is baked in at install time and may take one of
 two shapes:
 
-- **`continuum` on PATH** — an absolute path to the resolved executable, for
+- **`continuum` on PATH**: an absolute path to the resolved executable, for
   example `/usr/local/bin/continuum observe`.
-- **Editable / interpreter-only installs** — `python -m continuum.cli observe`
+- **Editable / interpreter-only installs**: `/path/to/python -m continuum.cli observe`
   when no `continuum` executable is found on PATH.
 
 If you pass `--db`, that path is baked into the command too (for example
@@ -110,7 +110,7 @@ project root as cwd and the default database path would otherwise be ambiguous.
 To see what was installed, inspect the settings file after install:
 
 ```bash
-continuum hooks install claude-code --db /tmp/test.db
+continuum --db /tmp/test.db hooks install claude-code
 cat .claude/settings.json
 ```
 
