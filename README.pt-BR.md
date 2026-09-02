@@ -100,3 +100,44 @@ mypy src/continuum               # os três portões que o CI exige
 ```
 
 A biblioteca central tem uma única dependência de runtime (`pydantic>=2.7`), todo o resto é opcional. O mapa completo de pacotes, a matriz de extras, a configuração de testes do Postgres e a verificação por comando estão em [references/install.md](references/install.md).
+
+### Conecte um agente de código em dois minutos
+
+Para Claude Code, Gemini CLI ou Codex, você não escreve Python e não precisa de arquivo de prompts:
+
+```bash
+continuum start my-task --goal "O que o agente deve fazer"
+continuum hooks install claude-code --with-gate   # também: gemini, codex
+```
+
+A partir daí cada arquivo que o agente escreve é capturado como evidência encadeada, sua sessão começa com um briefing automático de estado, efeitos colaterais não declarados registrados em `.continuum/gate.json` são recusados antes de disparar, e uma sessão fresca após qualquer queda retoma com próximos passos executáveis. Não é necessário CLAUDE.md.
+
+Exemplo mínimo de biblioteca, registro e recuperação:
+
+```python
+from continuum import EventType, Run, SQLiteStorage, project
+
+store = SQLiteStorage("agent.db")
+store.create_run(Run(run_id="run_4821", goal="Analisar 10,000 documentos"))
+store.append_event("run_4821", EventType.RUN_STARTED, {"goal": "Analisar 10,000 documentos", "total": 10_000})
+
+for i, doc in enumerate(documents):
+    analyze(doc)
+    store.append_event("run_4821", EventType.WORK_COMPLETED, {"doc": i})
+
+# Após uma queda, um processo novo retoma exatamente de onde parou:
+state = project("run_4821", store.read_events("run_4821"))
+print(state.progress.completed)            # já feito, não se repete
+print(store.verify_events("run_4821").ok)  # True, cadeia intacta após a queda
+```
+
+**Execute a prova você mesmo:**
+
+```bash
+python examples/crash_recovery_agent.py   # morte real do processo, efeito colateral real
+python examples/context_compaction.py     # transcrição perdida, checkpoint sobrevive
+python examples/model_switch.py           # Modelo A morre, Modelo B retoma com segurança
+python scripts/mcp_smoke.py               # subprocesso real, tráfego JSON-RPC real
+```
+
+O kit `e2e-autonomy-test/` roteiriza uma tarefa real de lotes de faturas, uma morte brusca no meio da execução e uma sessão fresca de retomada, depois pontua o outbox, o ledger e a cadeia de eventos fora de banda. A execução 1 obteve **7/7 em mecânicas** contra uma sessão real do Claude Code. Passo a passo completo em [references/e2e.md](references/e2e.md).
