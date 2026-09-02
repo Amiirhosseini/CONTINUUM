@@ -33,7 +33,7 @@
 </p>
 
 <p align="center">
-  <sub><strong>English</strong> | <a href="README.zh-CN.md">简体中文</a></sub>
+  <sub><strong>English</strong> | <a href="README.zh-CN.md">简体中文</a> | <a href="README.es.md">Español</a></sub>
 </p>
 
 ---
