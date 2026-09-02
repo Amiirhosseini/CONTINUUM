@@ -99,3 +99,44 @@ mypy src/continuum               # CI가 강제하는 세 가지 게이트
 ```
 
 코어 라이브러리는 하나의 런타임 의존성(`pydantic>=2.7`)만 가지며, 나머지는 모두 선택 사항이다. 전체 패키지 맵, extras 행렬, Postgres 테스트 설정, 명령별 검증은 [references/install.md](references/install.md)에 있다.
+
+### 코딩 에이전트를 2분 안에 연결
+
+Claude Code, Gemini CLI 또는 Codex의 경우 Python을 작성할 필요도 없고 프롬프트 파일도 필요하지 않다.
+
+```bash
+continuum start my-task --goal "에이전트가 해야 할 일"
+continuum hooks install claude-code --with-gate   # 동일하게: gemini, codex
+```
+
+그 이후 에이전트가 작성하는 모든 파일은 해시 체인 증거로 캡처되고, 세션 시작 시 자동으로 상태 브리핑이 제공되며, `.continuum/gate.json`에 등록된 청구되지 않은 사이드 이펙트는 실행 전에 거부되고, 어떤 충돌 후의 새로운 세션도 실행 가능한 다음 단계로 재개된다. CLAUDE.md는 필요하지 않다.
+
+최소 라이브러리 예제, 기록과 복구:
+
+```python
+from continuum import EventType, Run, SQLiteStorage, project
+
+store = SQLiteStorage("agent.db")
+store.create_run(Run(run_id="run_4821", goal="10,000개 문서 분석"))
+store.append_event("run_4821", EventType.RUN_STARTED, {"goal": "10,000개 문서 분석", "total": 10_000})
+
+for i, doc in enumerate(documents):
+    analyze(doc)
+    store.append_event("run_4821", EventType.WORK_COMPLETED, {"doc": i})
+
+# 충돌 후, 새로운 프로세스는 중단된 지점에서 정확히 재개한다:
+state = project("run_4821", store.read_events("run_4821"))
+print(state.progress.completed)            # 이미 완료, 반복하지 않음
+print(store.verify_events("run_4821").ok)  # True, 충돌 후에도 체인은 온전함
+```
+
+**직접 증명을 실행:**
+
+```bash
+python examples/crash_recovery_agent.py   # 실제 프로세스 킬, 실제 사이드 이펙트
+python examples/context_compaction.py     # 트랜스크립트 손실, 체크포인트는 생존
+python examples/model_switch.py           # 모델 A 사망, 모델 B가 안전하게 인계
+python scripts/mcp_smoke.py               # 실제 서브프로세스, 실제 JSON-RPC 트래픽
+```
+
+`e2e-autonomy-test/` 키트는 실제 인보이스 배치 작업, 실행 중 하드킬, 그리고 새로운 재개 세션을 스크립트화한 뒤, outbox, 원장, 이벤트 체인을 대역 외에서 채점한다. 실행 1은 실제 Claude Code 세션에서 **7/7 메커니즘**을 획득했다. 전체 워크스루는 [references/e2e.md](references/e2e.md)에 있다.
