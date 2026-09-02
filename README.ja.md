@@ -99,3 +99,44 @@ mypy src/continuum               # CI が強制する三つのゲート
 ```
 
 コアライブラリは一つのランタイム依存（`pydantic>=2.7`）のみを持ち、残りはすべてオプションである。完全なパッケージマップ、extras 行列、Postgres テスト設定、コマンドごとの検証は [references/install.md](references/install.md) にある。
+
+### コーディングエージェントを2分で接続
+
+Claude Code、Gemini CLI、または Codex の場合、Python を書く必要もプロンプトファイルも不要である。
+
+```bash
+continuum start my-task --goal "エージェントにやらせたいこと"
+continuum hooks install claude-code --with-gate   # 同様に：gemini、codex
+```
+
+それ以降、エージェントが書き込むすべてのファイルはハッシュチェーン証拠としてキャプチャされ、セッション開始時に自動的に状態ブリーフィングが入り、`.continuum/gate.json` に登録された未請求の副作用は実行前に拒否され、どんなクラッシュ後の新しいセッションも実行可能な次のステップで再開する。CLAUDE.md は不要である。
+
+最小限のライブラリ例。記録とリカバリ：
+
+```python
+from continuum import EventType, Run, SQLiteStorage, project
+
+store = SQLiteStorage("agent.db")
+store.create_run(Run(run_id="run_4821", goal="10,000 ドキュメントを分析"))
+store.append_event("run_4821", EventType.RUN_STARTED, {"goal": "10,000 ドキュメントを分析", "total": 10_000})
+
+for i, doc in enumerate(documents):
+    analyze(doc)
+    store.append_event("run_4821", EventType.WORK_COMPLETED, {"doc": i})
+
+# クラッシュ後、新しいプロセスは停止した場所から正確に再開する：
+state = project("run_4821", store.read_events("run_4821"))
+print(state.progress.completed)            # すでに完了、繰り返さない
+print(store.verify_events("run_4821").ok)  # True、クラッシュ後もチェーンは無傷
+```
+
+**自分で証明を実行：**
+
+```bash
+python examples/crash_recovery_agent.py   # 実際のプロセスキル、実際の副作用
+python examples/context_compaction.py     # トランスクリプト喪失、チェックポイントは生存
+python examples/model_switch.py           # モデル A が死亡、モデル B が安全に引き継ぎ
+python scripts/mcp_smoke.py               # 実際の子プロセス、実際の JSON-RPC トラフィック
+```
+
+`e2e-autonomy-test/` キットは実際の請求書バッチタスク、実行中のハードキル、そして新しい再開セッションをスクリプト化し、その後 outbox、台帳、イベントチェーンを帯域外で採点する。実行 1 は実際の Claude Code セッションで **7/7 のメカニクス** を獲得した。完全なウォークスルーは [references/e2e.md](references/e2e.md) にある。
