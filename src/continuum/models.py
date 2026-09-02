@@ -38,6 +38,8 @@ __all__ = [
     "ApprovalStatus",
     "PlanStepStatus",
     "utcnow",
+    "DecisionPayload",
+    "ActionRecordPayload",
     "Goal",
     "PlanStep",
     "Progress",
@@ -297,6 +299,36 @@ class Decision(BaseModel):
     invalidated_at: datetime | None = None
     invalidated_reason: str | None = None
     provenance: Provenance = Field(default_factory=Provenance)
+
+
+class DecisionPayload(BaseModel):
+    """Payload for DECISION_CREATED (issue #551).
+
+    ``caused_by`` records the event ids that caused this decision, enabling
+    the causal graph evidence -> finding -> decision -> action. Optional,
+    at most 32 ids of 1-128 chars each, defaults to [] for backward compat.
+    Unknown ids are refused by the writer (ValueError).
+    """
+
+    model_config = Frozen
+
+    decision_id: str = Field(default_factory=lambda: make_id("decision"))
+    decision: str
+    reason: str = ""
+    evidence: list[str] = Field(default_factory=list)
+    caused_by: list[str] = Field(default_factory=list)
+
+    @field_validator("caused_by")
+    @classmethod
+    def _validate_caused_by(cls, value: list[str]) -> list[str]:
+        if len(value) > 32:
+            raise ValueError("caused_by must contain at most 32 ids")
+        for item in value:
+            if not isinstance(item, str):
+                raise ValueError("caused_by entries must be strings")
+            if not 1 <= len(item) <= 128:
+                raise ValueError("caused_by entries must be 1-128 chars")
+        return value
 
 
 class Evidence(BaseModel):
