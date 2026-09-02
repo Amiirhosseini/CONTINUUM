@@ -38,6 +38,8 @@ __all__ = [
     "ApprovalStatus",
     "PlanStepStatus",
     "utcnow",
+    "DecisionPayload",
+    "ActionRecordPayload",
     "Goal",
     "PlanStep",
     "Progress",
@@ -297,6 +299,36 @@ class Decision(BaseModel):
     invalidated_at: datetime | None = None
     invalidated_reason: str | None = None
     provenance: Provenance = Field(default_factory=Provenance)
+
+
+class DecisionPayload(BaseModel):
+    """Payload for DECISION_CREATED (issue #551).
+
+    ``caused_by`` records the event ids that caused this decision, enabling
+    the causal graph evidence -> finding -> decision -> action. Optional,
+    at most 32 ids of 1-128 chars each, defaults to [] for backward compat.
+    Unknown ids are refused by the writer (ValueError).
+    """
+
+    model_config = Frozen
+
+    decision_id: str = Field(default_factory=lambda: make_id("decision"))
+    decision: str
+    reason: str = ""
+    evidence: list[str] = Field(default_factory=list)
+    caused_by: list[str] = Field(default_factory=list)
+
+    @field_validator("caused_by")
+    @classmethod
+    def _validate_caused_by(cls, value: list[str]) -> list[str]:
+        if len(value) > 32:
+            raise ValueError("caused_by must contain at most 32 ids")
+        for item in value:
+            if not isinstance(item, str):
+                raise ValueError("caused_by entries must be strings")
+            if not 1 <= len(item) <= 128:
+                raise ValueError("caused_by entries must be 1-128 chars")
+        return value
 
 
 class Evidence(BaseModel):
@@ -725,6 +757,60 @@ class Action(BaseModel):
     created_at: datetime = Field(default_factory=utcnow)
     started_at: datetime | None = None
     completed_at: datetime | None = None
+
+
+class ActionRecordPayload(BaseModel):
+    """Payload for ACTION_RECORDED (issue #551).
+
+    ``caused_by`` records the event ids that caused this action, completing
+    the causal chain. Same caps as DecisionPayload: optional, max 32 ids
+    of 1-128 chars, default [], unknown ids raise ValueError.
+    """
+
+    model_config = Frozen
+
+    action_id: str = Field(default_factory=lambda: make_id("action"))
+    action_type: str
+    arguments: Mapping[str, Any] = Field(default_factory=dict)
+    caused_by: list[str] = Field(default_factory=list)
+
+    @field_validator("caused_by")
+    @classmethod
+    def _validate_caused_by(cls, value: list[str]) -> list[str]:
+        if len(value) > 32:
+            raise ValueError("caused_by must contain at most 32 ids")
+        for item in value:
+            if not isinstance(item, str):
+                raise ValueError("caused_by entries must be strings")
+            if not 1 <= len(item) <= 128:
+                raise ValueError("caused_by entries must be 1-128 chars")
+        return value
+
+
+def _validate_caused_by_known(caused_by: list[str], known_ids: set[str]) -> None:
+    """Raise ValueError if any id in caused_by is not in known_ids."""
+    for cid in caused_by:
+        if cid not in known_ids:
+            raise ValueError(f"unknown caused_by id {cid!r}")
+
+
+def validate_caused_by(caused_by: list[str] | None, known_ids: set[str] | None = None) -> list[str]:
+    """Validate caused_by list and optionally check existence.
+
+    Caps are enforced (max 32, each 1-128 chars). When known_ids is given,
+    every entry must be present or ValueError is raised. Empty or None
+    returns [] for backward compat.
+    """
+    if not caused_by:
+        return []
+    if len(caused_by) > 32:
+        raise ValueError("caused_by must contain at most 32 ids")
+    for cid in caused_by:
+        if not isinstance(cid, str) or not 1 <= len(cid) <= 128:
+            raise ValueError("caused_by entries must be 1-128 chars")
+    if known_ids is not None:
+        _validate_caused_by_known(caused_by, known_ids)
+    return list(caused_by)
 
 
 class UnknownSideEffect(RuntimeError):
