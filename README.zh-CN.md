@@ -427,3 +427,39 @@ CONTINUUM 是一个库（`src/continuum`，104 个模块）加上大型测试套
 - 数周尺度的基准与 token 成本表落在 #550 看板（#568 至 #570）
 
 完整参考见 [references/architecture.md](references/architecture.md)。而构建于此之上的数月平面，溯源因果图、授权复活、可采纳性、活性，均作为看板 #550 及其 20 个子 issue #551 至 #570 被钉住。
+
+## API 和 CLI
+
+Python 接口（`EventType`、`Run`、`SQLiteStorage`、`diff_states`、`project`）和适配器 API 在 [references/api.md](references/api.md) 中配有可运行示例。CLI 是同一接口的 shell 形式：
+
+```bash
+continuum runs                                   # 列出 runs
+continuum inspect <run_id>                       # 语义状态
+continuum validate <run_id> --env dataset=v4     # 验证，只读
+continuum resume <run_id> --env dataset=v4       # 恢复决策 + 合约 + 下一步
+continuum checkpoint <run_id>                    # 强制检查点，会变更
+continuum actions <run_id>                       # 外部副作用
+continuum reconcile <run_id>                     # 使用探针结算不确定效应
+continuum complete <run_id>                      # 从键盘将 run 关闭为完成
+continuum verify <run_id>                        # 重新审计事件哈希链
+continuum budget <run_id>                        # 按动作类型的重试预算使用
+continuum compact <run_id>                       # 归档预锚点日志前缀
+continuum tree <parent_run_id>                   # 展示父级 + 子级及恢复状态
+continuum attest <run_id> --key signer.pem       # 为外部验证者签署链头
+```
+
+所有接线都在主机侧，模型的配合是可选的：
+
+```bash
+continuum hooks install claude-code --with-gate   # 编码 CLI：证据、简报、门控
+continuum gateway --port 8765                     # 面向其他一切的强制 HTTP 代理
+provider.add_span_processor(continuum.otel.make_span_processor(storage))  # OTel 转证据
+continuum-mcp                                     # 任意支持 MCP 的端：十一工具服务器
+continuum briefing                                # 会话开始上下文注入
+continuum budget <run_id>                        # 重试预算使用报告
+continuum tree <parent_run_id>                   # 多智能体层级视图
+```
+
+可选注册表位于代码旁且是数据而非代码：`.continuum/gate.json`（副作用工具 + 稳定键模板）、`.continuum/reconcilers.json`（检查外部系统的探针）、`.continuum/gateway.json`（上游路由）。
+
+每个命令都接受 `--json`，且只读命令永不写入，因此在智能体运行中对活跃数据库也是安全的。退出码是安全合约（只有经验证安全的 run 才以 0 退出）。完整命令列表、退出码表和状态差异输出见 [references/cli.md](references/cli.md)。
