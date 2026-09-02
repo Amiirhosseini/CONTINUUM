@@ -95,7 +95,7 @@ Verify:
 ```bash
 continuum --help                 # CLI entrypoint
 continuum-mcp --help             # MCP server entrypoint (needs [mcp] or [dev])
-pytest -q                        # ~1,380 collected (exact count and skips vary by environment)
+pytest -q                        # ~1,918 collected, ~1,880 passed, ~38 skipped on a minimal env (exact counts vary) <!-- generated via: pytest --collect-only -q; pytest -q -->
 ruff check src/ tests/ examples/ && ruff format --check src/ tests/ examples/
 mypy src/continuum               # the three gates CI enforces
 ```
