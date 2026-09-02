@@ -270,3 +270,24 @@ CONTINUUM_MCP_MUTATING_CLIENTS=your-client-name continuum-mcp
 | Pydantic AI | 异步 Hooks 能力 | `Agent(capabilities=[wrap_pydantic_ai_hooks(storage, run_id)])` |
 
 对于这些都未覆盖的栈：`continuum gateway` 对来自任意语言的外发 HTTP 强制声明，`continuum.otel.make_span_processor(storage)` 将现有的 OpenTelemetry 工具跨度转为证据，而 `continuum serve` 以与 MCP 工具相同的操作通过语言无关的 JSON 线路协议暴露（stdio，或通过 `--transport http` 的 HTTP 并使用 `CONTINUUM_SERVE_TOKEN` 鉴权）。
+
+### 恢复由智能体或 MCP 报告的运行
+
+通过 MCP 或通过 OpenAI 适配器报告的状态携带 `Origin.EXTERNAL_AGENT` 可溯源性，并在确认前解析为 `request_human`。LangGraph 和 LangChain 运行使用 `Origin.DETERMINISTIC` 并直接恢复。要清除复审并恢复：
+
+```bash
+continuum confirm <run_id>   # 记录 REVIEW_CONFIRMED，然后重新评估
+continuum resume <run_id>    # 现在报告 RESUME
+```
+
+在 MCP 上等价的是 `continuum_confirm` 工具后跟 `continuum_resume`。确认是一次性的、经人类证明的事件：自我认证安全的逃生舱，因此外部驱动的 run 永远不会永久卡住。
+
+## 核心概念
+
+每个概念的深度参考见 [references/concepts.md](references/concepts.md)。
+
+- **语义检查点**，继续所需内容的紧凑、带版本的表示。
+- **状态验证**，每个组件独立验证，过期性通过依赖图传播。
+- **幂等动作账本**，外部副作用被追踪和去重，不确定的结果会抛出而非静默重试。
+- **恢复模式**，`RESUME`、`REPAIR_AND_RESUME`、`ROLLBACK`、`WAIT`、`REQUEST_HUMAN`、`ABORT`（加上 `REPLAN`）。
+- **恢复合约**，确定性的、完整性密封的、门控的下一步。
