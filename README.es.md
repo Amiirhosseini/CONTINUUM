@@ -293,3 +293,31 @@ La referencia profunda para cada concepto vive en [references/concepts.md](refer
 - **Libro mayor idempotente**, los efectos secundarios externos se rastrean y deduplican, los resultados inciertos lanzan en lugar de reintentar silenciosamente.
 - **Modos de recuperación**, `RESUME`, `REPAIR_AND_RESUME`, `ROLLBACK`, `WAIT`, `REQUEST_HUMAN`, `ABORT` (más `REPLAN`).
 - **Contrato de recuperación**, una siguiente acción determinista, sellada por integridad y protegida.
+
+## Arquitectura
+
+CONTINUUM se organiza en torno a un invariante: **cada hecho lleva su origen, y la confianza se gana, nunca se asume.** Por qué importa para una startup: un agente que corre durante semanas no debe perder trabajo cuando su contexto se pierde, y no debe malgastar tokens, coste o disparar una herramienta dos veces.
+
+### Sistema de un vistazo, adaptador universal, un registro, cualquier harness
+
+Cualquier harness se conecta al mismo registro encadenado. La misma ejecución puede ser escrita por Claude Code, reanudada por LangGraph, inspeccionada por la CLI y aprobada en el dashboard. No se requiere cooperación del framework.
+
+```text
+  Claude Code ─┐
+  Gemini CLI ──┤
+  Codex ───────┤
+  LangGraph ───┼── 5 costuras ──►  Un registro durable  ──►  Recuperación + Dashboard + CLI
+  LangChain ───┤                (encadenado,        (contrato sellado,
+  OpenAI SDK ──┤                 con procedencia,     verificación, salud,
+  CrewAI ──────┤                 exactamente una vez)  familia)
+  Cualquier HTTP ──┤
+  Cualquier app OTel ┘
+
+  Costuras: 1 En proceso  2 MCP  3 Hooks CLI  4 Gateway  5 OTel
+```
+
+### Las tres garantías (la demo prueba cada una)
+
+1. **Sin auto certificación.** El estado reportado por el agente es `EXTERNAL_AGENT` y degrada a `REQUIRES_REVIEW` hasta un `REVIEW_CONFIRMED` humano. Solo escritores confiables producen estado `DETERMINISTIC`.
+2. **Los efectos secundarios requieren reclamos.** Cada efecto externo se reclama en un libro mayor idempotente antes de dispararse. Los efectos no reclamados se bloquean en el límite, los duplicados se rechazan, los resultados inciertos se elevan para reconciliación.
+3. **La recuperación verifica contra la realidad.** La reanudación comprueba digests de archivos, versiones de dependencias e identidad del modelo antes de decir que es seguro. La obsolescencia se propaga `dependency -> evidence -> finding -> decision` más `PlanStep.depends_on` por lo que solo los pasos afectados se reparan.
