@@ -29,17 +29,20 @@ from typing import Any
 
 from continuum.environment.diff import EnvironmentDiff, ResourceChange, diff_environments
 from continuum.models import (
+    Action,
+    ActionStatus,
     ApprovalStatus,
     Component,
     ComponentValidationEntry,
     EnvironmentSnapshot,
     SemanticState,
+    StateCheckpoint,
     StateStatus,
     StateValidationResult,
     utcnow,
 )
 
-__all__ = ["StateValidator", "ValidationOutcome", "validate_state"]
+__all__ = ["StateValidator", "ValidationOutcome", "validate_state", "AdmissibilityResult", "check_admissibility"]
 
 
 #: Statuses that mean the component cannot be relied on as-is.
@@ -60,6 +63,99 @@ _UNUSABLE = frozenset(
         StateStatus.REQUIRES_REVIEW,
     }
 )
+
+
+@dataclass(frozen=True, slots=True)
+class AdmissibilityResult:
+    """Result of checking whether a checkpoint is admissible for plain RESUME.
+
+    A checkpoint is inadmissible when a completed downstream action consumed
+    state produced after the checkpoint. The check is a deterministic graph
+    reachability over hash-chained positions, no heuristics.
+    """
+
+    admissible: bool
+    blocking: tuple[Action, ...]
+    reason: str
+    details: tuple[dict[str, Any], ...]
+
+
+def check_admissibility(
+    checkpoint: StateCheckpoint | None,
+    actions: Iterable[Action],
+) -> AdmissibilityResult:
+    """Check whether ``checkpoint`` is admissible given downstream ``actions``.
+
+    A checkpoint is inadmissible for plain RESUME when any COMPLETED action
+    consumed inputs that were produced after the checkpoint. Consumed inputs
+    include checkpoint_seq, event_positions, component_ids and prior action_ids.
+    Empty consumed_inputs is always admissible and old rows without the field
+    remain admissible.
+
+    ``checkpoint`` may be None when restoring without a checkpoint (pure event
+    replay); such restores are always admissible. ``actions`` is the full
+    ledger fold; only COMPLETED actions are examined, since other statuses
+    have not committed downstream work.
+    """
+    if checkpoint is None:
+        return AdmissibilityResult(admissible=True, blocking=(), reason="", details=())
+    blocking: list[Action] = []
+    details: list[dict[str, Any]] = []
+    actions_list = list(actions)
+    known_ids: set[str] = set()
+    for d in checkpoint.state.decisions:
+        known_ids.add(d.decision_id)
+    for f in checkpoint.state.findings:
+        known_ids.add(f.finding_id)
+    for e in checkpoint.state.evidence:
+        known_ids.add(e.evidence_id)
+    for p in checkpoint.state.plan:
+        known_ids.add(p.step_id)
+    for w in checkpoint.state.pending_work:
+        known_ids.add(w.task_id)
+    for dep in checkpoint.state.external_dependencies:
+        known_ids.add(dep.resource)
+    for pid in checkpoint.state.pins:
+        known_ids.add(pid)
+    for idx, action in enumerate(actions_list):
+        if action.status is not ActionStatus.COMPLETED:
+            continue
+        ci = action.consumed_inputs
+        if ci.checkpoint_seq == 0 and not ci.event_positions and not ci.component_ids and not ci.action_ids:
+            continue
+        reasons: list[str] = []
+        chain_pos = idx + 1
+        if ci.checkpoint_seq > checkpoint.version:
+            reasons.append(f"checkpoint_seq {ci.checkpoint_seq} after checkpoint version {checkpoint.version}")
+        for pos in ci.event_positions:
+            if pos > checkpoint.state.source_sequence:
+                reasons.append(f"event position {pos} after checkpoint source_sequence {checkpoint.state.source_sequence}")
+                break
+        if ci.component_ids:
+            for cid in ci.component_ids:
+                if cid not in known_ids:
+                    reasons.append(f"component {cid!r} not in checkpoint (produced after)")
+                    break
+        if ci.action_ids:
+            reasons.append(f"consumed prior action(s) {', '.join(ci.action_ids)}")
+        if reasons:
+            blocking.append(action)
+            details.append(
+                {
+                    "action_id": action.action_id,
+                    "action_type": action.action_type,
+                    "chain_position": chain_pos,
+                    "consumed_inputs": ci.model_dump(),
+                    "reason": "; ".join(reasons),
+                }
+            )
+    if not blocking:
+        return AdmissibilityResult(admissible=True, blocking=(), reason="", details=())
+    reason = f"checkpoint v{checkpoint.version} inadmissible: {len(blocking)} blocking commitment(s): " + "; ".join(
+        f"{d['action_id'][:12]} at position {d['chain_position']} ({d['reason']})" for d in details[:3]
+    )
+    return AdmissibilityResult(admissible=False, blocking=tuple(blocking), reason=reason, details=tuple(details))
+
 
 
 @dataclass(frozen=True, slots=True)

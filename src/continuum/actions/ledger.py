@@ -73,7 +73,7 @@ from continuum.budgets import (
 )
 from continuum.concurrency.lease import LeaseCoordinator
 from continuum.events import EventType
-from continuum.models import Action, ActionStatus, UnknownSideEffect, utcnow
+from continuum.models import Action, ActionStatus, ConsumedInputs, UnknownSideEffect, utcnow
 from continuum.security.hashing import stable_hash
 from continuum.storage.base import Storage
 
@@ -220,6 +220,26 @@ def _superset_derives_from_subset(subset: frozenset[str], superset: frozenset[st
         if ext.lstrip(".").lower() not in _KNOWN_SUFFIXES:
             return False
     return True
+
+
+def _normalize_consumed_inputs(
+    consumed: ConsumedInputs | Mapping[str, Any] | None,
+) -> ConsumedInputs | None:
+    """Validate and normalize caller-supplied consumed_inputs.
+
+    Accepts a ``ConsumedInputs`` instance, a plain mapping with
+    ``checkpoint_seq``, ``event_positions``, ``action_ids``, or None.
+    Returns a validated ``ConsumedInputs`` or None when nothing was
+    supplied. Invalid shapes raise ``ValueError`` so the caller learns
+    at the boundary rather than storing an un-auditable commitment.
+    """
+    if consumed is None:
+        return None
+    if isinstance(consumed, ConsumedInputs):
+        return consumed
+    if isinstance(consumed, Mapping):
+        return ConsumedInputs.model_validate(dict(consumed))
+    raise ValueError("consumed_inputs must be a mapping or ConsumedInputs")
 
 
 class LedgerError(RuntimeError):
@@ -925,6 +945,7 @@ class ActionLedger:
         *,
         external_id: str | None = None,
         result: Mapping[str, Any] | None = None,
+        consumed_inputs: ConsumedInputs | Mapping[str, Any] | None = None,
     ) -> Action:
         """Record that the effect succeeded.
 
@@ -964,6 +985,8 @@ class ActionLedger:
             )
         settled_external = external_id if external_id is not None else existing.external_id
         settled_result = dict(result) if result is not None else existing.result
+        normalized = _normalize_consumed_inputs(consumed_inputs)
+        settled_consumed = normalized if normalized is not None else existing.consumed_inputs
         action = existing.model_copy(
             update={
                 "status": ActionStatus.COMPLETED,
@@ -974,6 +997,7 @@ class ActionLedger:
                 ),
                 "completed_at": utcnow(),
                 "side_effect_uncertain": False,
+                "consumed_inputs": settled_consumed,
             }
         )
         recorded = self._record(key, action)
@@ -1015,6 +1039,7 @@ class ActionLedger:
         external_id: str | None = None,
         result: Mapping[str, Any] | None = None,
         note: str = "",
+        consumed_inputs: ConsumedInputs | Mapping[str, Any] | None = None,
     ) -> Action:
         """Resolve an uncertain action using evidence from the outside world.
 
@@ -1043,6 +1068,8 @@ class ActionLedger:
             # receipt disappears; a caller replacing the evidence passes it.
             settled_external = external_id if external_id is not None else existing.external_id
             settled_result = dict(result) if result is not None else existing.result
+            normalized = _normalize_consumed_inputs(consumed_inputs)
+            settled_consumed = normalized if normalized is not None else existing.consumed_inputs
             action = existing.model_copy(
                 update={
                     "status": ActionStatus.COMPLETED,
@@ -1054,6 +1081,7 @@ class ActionLedger:
                     "completed_at": utcnow(),
                     "side_effect_uncertain": False,
                     "last_error": note or existing.last_error,
+                    "consumed_inputs": settled_consumed,
                 }
             )
         else:
@@ -1065,6 +1093,7 @@ class ActionLedger:
                     "result_hash": None,
                     "side_effect_uncertain": False,
                     "last_error": note or "reconciliation found no external effect",
+                    "consumed_inputs": ConsumedInputs(),
                 }
             )
         recorded = self._record(key, action, EventType.ACTION_RECONCILED)
