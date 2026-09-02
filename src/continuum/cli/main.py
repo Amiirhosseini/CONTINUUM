@@ -62,6 +62,7 @@ from continuum.models import (
     StateStatus,
 )
 from continuum.observability import render_dashboard
+from continuum.provenance.graph import build_provenance_graph, downstream_of
 from continuum.provenance_map import summarize
 from continuum.recovery import RecoveryEngine, render_contract
 from continuum.security.attestation import (
@@ -673,6 +674,74 @@ def cmd_events(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -
         as_json=args.json,
         stream=out,
     )
+    return ExitCode.OK
+
+
+def cmd_provenance(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Show provenance DAG with per-node Origin (issue #552). Read-only."""
+    storage.get_run(args.run_id)
+    events = storage.read_events(args.run_id)
+    graph = build_provenance_graph(events)
+    if getattr(args, "json", False):
+        payload = graph.to_dict()
+        payload["run_id"] = args.run_id
+        _emit(payload, "", as_json=True, stream=out)
+        return ExitCode.OK
+    lines = [
+        f"run: {args.run_id}  (provenance DAG)",
+        f"nodes: {len(graph.nodes)}  edges: {sum(len(v) for v in graph.edges.values())}",
+    ]
+    for node in sorted(graph.nodes.values(), key=lambda n: n.sequence):
+        parents = graph.reverse_edges.get(node.event_id, [])
+        children = graph.edges.get(node.event_id, [])
+        parents_str = ",".join(p[:8] for p in parents) if parents else "-"
+        children_str = ",".join(c[:8] for c in children) if children else "-"
+        lines.append(
+            f"  {node.sequence:>3}  {node.type.value:<18} {node.event_id[:8]}  origin={node.origin.value}  parents={parents_str}  children={children_str}  {node.label}"
+        )
+    _emit({}, "\n".join(lines), as_json=False, stream=out, palette=getattr(args, "_palette", None))
+    return ExitCode.OK
+
+
+def cmd_impact(args: argparse.Namespace, storage: Storage, out: Any, err: Any) -> int:
+    """Show downstream impact of an evidence item (issue #552). Read-only."""
+    storage.get_run(args.run_id)
+    evidence_id = getattr(args, "evidence", None)
+    if not evidence_id:
+        print("error: --evidence is required", file=err)
+        return ExitCode.ERROR
+    events = storage.read_events(args.run_id)
+    graph = build_provenance_graph(events)
+    downstream = downstream_of(graph, evidence_id)
+    if getattr(args, "json", False):
+        payload = {
+            "run_id": args.run_id,
+            "evidence": evidence_id,
+            "downstream": [
+                {
+                    "event_id": n.event_id,
+                    "sequence": n.sequence,
+                    "type": n.type.value,
+                    "origin": n.origin.value,
+                    "label": n.label,
+                }
+                for n in downstream
+            ],
+        }
+        _emit(payload, "", as_json=True, stream=out)
+        return ExitCode.OK
+    if not downstream:
+        _emit({}, f"no downstream artefacts for {evidence_id!r}", as_json=False, stream=out)
+        return ExitCode.OK
+    lines = [
+        f"run: {args.run_id}  impact of {evidence_id!r}",
+        f"downstream: {len(downstream)} node(s)",
+    ]
+    for node in downstream:
+        lines.append(
+            f"  {node.sequence:>3}  {node.type.value:<18} {node.event_id[:8]}  origin={node.origin.value}  {node.label}"
+        )
+    _emit({}, "\n".join(lines), as_json=False, stream=out, palette=getattr(args, "_palette", None))
     return ExitCode.OK
 
 
