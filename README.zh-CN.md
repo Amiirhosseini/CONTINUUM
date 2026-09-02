@@ -98,3 +98,44 @@ mypy src/continuum               # CI 强制的三扇门禁
 ```
 
 核心库只有一个运行时依赖（`pydantic>=2.7`），其余均为可选。完整的包映射、extras 矩阵、Postgres 测试配置和按命令验证说明见 [references/install.md](references/install.md)。
+
+### 两分钟接入编码智能体
+
+对于 Claude Code、Gemini CLI 或 Codex，你无需编写 Python 也无需提示词文件：
+
+```bash
+continuum start my-task --goal "智能体应该做什么"
+continuum hooks install claude-code --with-gate   # 同样支持：gemini、codex
+```
+
+此后智能体写入的每个文件都会被捕获为哈希链证据，会话开始时自动获得状态简报，在 `.continuum/gate.json` 中注册的未声明副作用会在触发前被拒绝，而任何崩溃后的全新会话都会带着可执行的下一步恢复。无需 CLAUDE.md。
+
+最小化库示例，记录与恢复：
+
+```python
+from continuum import EventType, Run, SQLiteStorage, project
+
+store = SQLiteStorage("agent.db")
+store.create_run(Run(run_id="run_4821", goal="分析 10,000 份文档"))
+store.append_event("run_4821", EventType.RUN_STARTED, {"goal": "分析 10,000 份文档", "total": 10_000})
+
+for i, doc in enumerate(documents):
+    analyze(doc)
+    store.append_event("run_4821", EventType.WORK_COMPLETED, {"doc": i})
+
+# 崩溃后，新进程从停止的地方精确接续：
+state = project("run_4821", store.read_events("run_4821"))
+print(state.progress.completed)            # 已完成，不会重复
+print(store.verify_events("run_4821").ok)  # True，崩溃后链仍然完整
+```
+
+**亲自运行验证：**
+
+```bash
+python examples/crash_recovery_agent.py   # 真实进程杀死，真实副作用
+python examples/context_compaction.py     # 转录丢失，检查点存活
+python examples/model_switch.py           # 模型 A 死亡，模型 B 安全接管
+python scripts/mcp_smoke.py               # 真实子进程，真实 JSON-RPC 流量
+```
+
+`e2e-autonomy-test/` 套件脚本化了一个真实的发票批量任务、在运行中硬杀，以及全新的恢复会话，然后在带外对 outbox、账本和事件链进行评分。Run 1 对真实的 Claude Code 会话取得了 **7/7 机制** 评分。完整 walkthrough 见 [references/e2e.md](references/e2e.md)。
