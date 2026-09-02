@@ -376,3 +376,45 @@ Cada `continuum resume` devolve um contrato selado com: estado de recuperação 
 * **Tokens:** Checkpoint semântico armazena `Goal + Plan + Progress` não um despejo de transcrição. O briefing serve apenas estado verificado mais um resumo de raciocínio com teto de 4096, não a cauda de erros que o auto condicionamento mostra que degrada a próxima sessão. A retentativa informada `recovery/summary.py` injeta um resumo redigido pelo motor, não histórico bruto.
 * **Custo:** O ledger `action_index` recusa efeitos colaterais duplicados mesmo sob deriva de argumentos como caminhos relativos versus absolutos (`invoice:INV-001` chave estável), de modo que a mesma API não é paga duas vezes após uma retomada. Orçamentos `budgets.py` limitam tempestades de retentativas ao reivindicar. `continuum benchmark` imprime `0 duplicatas` para o continuum versus `50` para o ingênuo.
 * **Chamadas inválidas:** A porta, o gateway e `replayguard` com `langgraph_protected_node` bloqueiam chamadas de ferramentas não reivindicadas ou reproduzidas antes de disparar. A fixação `pinning.py` expõe deriva de prompt ou ferramenta ao retomar.
+
+### Arquitetura de armazenamento
+
+Esquema v6. SQLite é primário, Postgres verificado por CI. Um log, muitas projeções.
+
+| Tabela | Propósito |
+|:--|:--|
+| `events` | Log somente anexado encadeado (44 tipos de eventos em v0.2) |
+| `runs` | Metadados de execução com `parent_run_id` para multiagente |
+| `versions` | Instantâneos de SemanticState por checkpoint |
+| `checkpoints` | Registros de checkpoint selados com âncoras `RECOVERY` |
+| `action_index` | Projeção de idempotência entre execuções (schema v3+), leituras indexadas, não varreduras completas |
+| `events_archive` | Armazenamento de prefixo compactado (schema v5+), `continuum compact` limita o log vivo para execuções de meses |
+| `lg_checkpoints` / `lg_writes` | Persistência nativa do LangGraph (schema v4+), `make_continuum_checkpointer(storage)` |
+
+### Mapa de módulos, uma biblioteca, muitas superfícies
+
+O CONTINUUM é uma biblioteca (`src/continuum`, 104 módulos) mais uma suíte de testes grande (98 arquivos de teste, ~1,380 testes). Todos os módulos acrescentam e reproduzem um log de eventos encadeado:
+
+| Módulo | Papel |
+|:--|:--|
+| `events.py` | Log somente anexado encadeado e `verify() trusted_through` |
+| `state/` | Projeção `project()`, validação, extração, propagação de obsolescência |
+| `storage/` | `SQLiteStorage` v6, `postgres.py`, `migrations.py`, `actionindex.py` |
+| `actions/` | Ledger idempotente `claim/complete/reconcile`, `idempotency.py` chave e canonização e fallback por token, rastreamento de concessão consumida `GRANT_DENIED` |
+| `checkpoint/` | Checkpoints orientados por políticas `manager.py` `policy.py` com âncoras `RECOVERY` e `prune` |
+| `recovery/` | Motor, planejador, contrato selado `contract.py`, `guidance` `human_steps`, `observations` verificadas em disco, `family` rollup, `fork` semântica, `summary` retentativa informada |
+| `gate.py` | Cumprimento antes da ferramenta: permitir ou negar contra reivindicações do ledger |
+| `gateway.py` | Proxy HTTP de cumprimento: reivindicar antes de disparar para solicitações de saída |
+| `replayguard.py` | Guarda portátil: `evaluate, protected_call, langgraph_protected_node`, fecha risco de reprodução do ACRFence |
+| `hooks.py` `clienthooks.py` | Hooks de checkpoint compartilhados e perfis de instalador `claude-code gemini codex` |
+| `budgets.py` | Registro e avaliação de orçamento de tentativas por tipo de ação |
+| `pinning.py` | Normalização de fixação de versões e detecção de deriva ao retomar |
+| `replay_similarity.py` | Backends de similaridade semântica exact/fuzzy/embedding para reprodução vs bifurcação |
+| `reconcilers.py` | Registro de sondas `.continuum/reconcilers.json` para liquidação automática |
+| `adapters/` | 9 adaptadores de classe + hooks finos `thin.py` CrewAI AutoGen Pydantic AI + armazém LangGraph |
+| `mcp/` | 12 ferramentas stdio mais autorização `authz.py` autenticação por token, allowlist, token de confirmação |
+| `serve/` | Sidecar stdio fio JSON + HTTP `CONTINUUM_SERVE_TOKEN` |
+| `dashboard/` | Dashboard web `app.py` `hitl.py` com botões HITL confirmar/reconciliar/completar, aviso de confiança de prefixo, fixações |
+| `cli/` | 38 comandos argparse, códigos de saída como veredito, `runs, start, inspect, resume, verify, health, tree, benchmark, attest, dashboard` |
+| `otel.py` | Ponte de processador de spans do OpenTelemetry |
+| `benchmark/` | Harness do CONTINUUM-Bench, 5 cenários de queda + deriva de argumentos + suíte de recuperação de 12 cenários |
