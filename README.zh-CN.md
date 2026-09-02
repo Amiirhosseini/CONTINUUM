@@ -374,3 +374,45 @@ RESUME < REPAIR_AND_RESUME < REPLAN < WAIT < REQUEST_HUMAN < ROLLBACK < ABORT
 * **Token：** 语义检查点存储 `Goal + Plan + Progress` 而非转录转储。简报仅提供已验证状态加上 4096 字符上限的推理摘要，而非导致下一会话退化的错误尾部。带信息的重试 `recovery/summary.py` 注入引擎撰写的摘要，而非原始历史。
 * **成本：** 账本 `action_index` 即使在参数漂移如相对与绝对路径（`invoice:INV-001` 稳定键）下也拒绝重复副作用，因此同一 API 在恢复后不会被二次付费。预算 `budgets.py` 在声明时限制重试风暴。`continuum benchmark` 为 continuum 打印 `0 重复`，而对朴素方案则为 `50`。
 * **无效调用：** 门控、网关和 `replayguard` 的 `langgraph_protected_node` 在触发前阻止未声明或被重放的工具调用。钉扎 `pinning.py` 在恢复时显露 prompt 或工具漂移。
+
+### 存储架构
+
+Schema v6。SQLite 为主，Postgres 经 CI 验证。单一日志，多重投影。
+
+| 表 | 用途 |
+|:--|:--|
+| `events` | 哈希链仅追加日志（v0.2 中 44 种事件类型） |
+| `runs` | Run 元数据，带 `parent_run_id` 用于多智能体 |
+| `versions` | 每个检查点的 SemanticState 快照 |
+| `checkpoints` | 带 `RECOVERY` 锚点的密封检查点记录 |
+| `action_index` | 跨 run 幂等投影（schema v3+），索引读取而非全表扫描 |
+| `events_archive` | 压缩前缀存储（schema v5+），`continuum compact` 为长达数月的运行限制活跃日志 |
+| `lg_checkpoints` / `lg_writes` | LangGraph 原生持久化（schema v4+），`make_continuum_checkpointer(storage)` |
+
+### 模块映射，一库多面
+
+CONTINUUM 是一个库（`src/continuum`，104 个模块）加上大型测试套件（98 个测试文件，约 1,380 个测试）。所有模块追加并重放同一个哈希链事件日志：
+
+| 模块 | 职责 |
+|:--|:--|
+| `events.py` | 仅追加、哈希链事件日志和 `verify() trusted_through` |
+| `state/` | 投影 `project()`、验证、提取，过期性传播 |
+| `storage/` | `SQLiteStorage` v6、`postgres.py`、`migrations.py`、`actionindex.py` |
+| `actions/` | 幂等账本 `claim/complete/reconcile`、`idempotency.py` 键与规范化与 token 回退、已消耗授权追踪 `GRANT_DENIED` |
+| `checkpoint/` | 策略驱动检查点 `manager.py` `policy.py` 带 `RECOVERY` 锚点和 `prune` |
+| `recovery/` | 引擎、规划器、密封合约 `contract.py`、`guidance` `human_steps`、`observations` 磁盘检查、`family` 聚合、`fork` 语义、`summary` 带信息重试 |
+| `gate.py` | 工具前强制：基于账本声明放行或拒绝 |
+| `gateway.py` | 强制 HTTP 代理：外发请求需先声明 |
+| `replayguard.py` | 可移植守卫：`evaluate、protected_call、langgraph_protected_node`，关闭 ACRFence 重放风险 |
+| `hooks.py` `clienthooks.py` | 共享检查点钩子和安装器档案 `claude-code gemini codex` |
+| `budgets.py` | 按动作类型重试预算注册与评估 |
+| `pinning.py` | 恢复时版本钉扎归一化与漂移检测 |
+| `replay_similarity.py` | 重放与分支的语义相似度后端 exact、fuzzy、embedding |
+| `reconcilers.py` | 探针注册表 `.continuum/reconcilers.json` 用于自动结算 |
+| `adapters/` | 9 个类适配器 + 薄钩子 `thin.py` 覆盖 CrewAI、AutoGen、Pydantic AI + LangGraph 存储 |
+| `mcp/` | 12 个 stdio 工具加上鉴权 `authz.py` token 鉴权、allowlist、确认 token |
+| `serve/` | Sidecar stdio JSON 线路 + HTTP `CONTINUUM_SERVE_TOKEN` |
+| `dashboard/` | Web 仪表板 `app.py` `hitl.py` 带 HITL 按钮确认、对账和完成，前缀信任建议，钉扎 |
+| `cli/` | 38 个 argparse 命令，退出码即裁决，`runs、start、inspect、resume、verify、health、tree、benchmark、attest、dashboard` |
+| `otel.py` | OpenTelemetry 跨度处理器桥 |
+| `benchmark/` | CONTINUUM-Bench  harness，5 个崩溃场景 + 参数漂移 + 12 场景恢复套件 |
