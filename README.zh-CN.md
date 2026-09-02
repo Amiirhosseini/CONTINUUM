@@ -67,3 +67,34 @@ CONTINUUM 提出一个更窄但更难的问题：智能体能否从任务状态�
 | 浏览器中的完整开发环境 | [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/Cyrax321/CONTINUUM?quickstart=1) |
 
 Docker 镜像由 CI 在每次推送到 `main` 和每个发布标签时发布到 GHCR（`.github/workflows/docker-publish.yml`）。Codespace 在 `.devcontainer/` 中定义。
+
+```bash
+git clone https://github.com/Cyrax321/CONTINUUM.git
+cd CONTINUUM
+
+uv venv && source .venv/bin/activate     # macOS / Linux; Windows: .venv\Scripts\activate
+
+# 贡献者（推荐）：库 + CLI + 全部测试工具 + 全部适配器
+uv pip install -e ".[dev]"
+
+# 或按需选择：.（最小）、[mcp]、[otel]、[langgraph]、
+# [openai]、[langchain]、[attest]、[postgres]
+
+# 或完全跳过克隆：
+uv pip install git+https://github.com/Cyrax321/CONTINUUM.git
+uv pip install "continuum-agent[mcp] @ git+https://github.com/Cyrax321/CONTINUUM.git"
+```
+
+> **pip 回退：** 将上面所有命令中的 `uv pip install` 替换为 `pip install`。
+
+验证：
+
+```bash
+continuum --help                 # CLI 入口
+continuum-mcp --help             # MCP 服务器入口（需要 [mcp] 或 [dev]）
+pytest -q                        # 约 1,380 个用例被收集（具体数量和跳过数因环境而异）
+ruff check src/ tests/ examples/ && ruff format --check src/ tests/ examples/
+mypy src/continuum               # CI 强制的三扇门禁
+```
+
+核心库只有一个运行时依赖（`pydantic>=2.7`），其余均为可选。完整的包映射、extras 矩阵、Postgres 测试配置和按命令验证说明见 [references/install.md](references/install.md)。
