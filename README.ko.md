@@ -140,3 +140,24 @@ python scripts/mcp_smoke.py               # 실제 서브프로세스, 실제 JS
 ```
 
 `e2e-autonomy-test/` 키트는 실제 인보이스 배치 작업, 실행 중 하드킬, 그리고 새로운 재개 세션을 스크립트화한 뒤, outbox, 원장, 이벤트 체인을 대역 외에서 채점한다. 실행 1은 실제 Claude Code 세션에서 **7/7 메커니즘**을 획득했다. 전체 워크스루는 [references/e2e.md](references/e2e.md)에 있다.
+
+## 작동 방식
+
+CONTINUUM은 **LLM 컨텍스트**(일시적)와 **지속적인 작업 상태**(영구적)를 분리한다. 대화 기록을 저장하는 대신, 계속하는 데 필요한 최소한의 검증된 정보인 시맨틱 체크포인트를 구축한다.
+
+![CONTINUUM 작동 방식](docs/assets/architecture.svg)
+
+자세한 설명, 프로젝션 모델, 복구 컨텍스트는 [references/architecture.md](references/architecture.md)에 있다.
+
+## CONTINUUM의 위치
+
+네 가지 관심사가 모든 장시간 실행 에이전트에서 겹친다. CONTINUUM은 마지막 하나만 소유하고, 다른 세 가지는 명시적인 심을 통해 건드린다. 경쟁자를 지명하지 않으며, 제공된 모듈이나 게시된 스위트가 이미 출력하지 않은 주장을 하지 않는다.
+
+| 레이어 | 질문에 답함 | 연결 방법 (제공된 모듈 또는 게시된 출력) |
+|:--|:--|:--|
+| Harness | 에이전트는 도구를 어떻게 호출하고 목표를 향해 나아가는가 | CONTINUUM 외부. 연결 지점은 `src/continuum/adapters/generic.py`(`GenericAgentAdapter`), `src/continuum/adapters/thin.py`(CrewAI, AutoGen, Pydantic AI 훅), `src/continuum/mcp/server.py`(MCP stdio), `src/continuum/hooks.py`와 `src/continuum/clienthooks.py`(코딩 CLI 수명 주기 훅), `src/continuum/gateway.py`(모든 언어용 강제 HTTP 프록시), `src/continuum/otel.py`(OpenTelemetry 브리지)에서 제공된다. 레시피는 `docs/recipes/`와 `references/adapters.md`에 있다. |
+| 내구성 있는 실행 | 충돌 전에 무슨 일이 일어났고, 무엇을 잃지 않고 재생할 수 있는가 | 해시 체인 이벤트 로그 `src/continuum/events.py`와 `verify()`와 `trusted_through`, 영속 저장소 `src/continuum/storage/sqlite.py`(WAL, `synchronous=FULL`, schema v6)와 `src/continuum/storage/postgres.py` plus `src/continuum/storage/migrations.py`, 정책 기반 체크포인트 `src/continuum/checkpoint/manager.py`와 `src/continuum/checkpoint/policy.py`가 `restore()`에서 간격을 재생한다. 워크스루는 `docs/recovery_walkthrough.md`(`examples/recovery_walkthrough.py`의 출력)에 있다. |
+| 제어 평면 | 어떤 실행이 활성 상태이며, 누가 그것에 대해 행동할 수 있고, 출력은 어디로 가는가 | 실행 레지스트리와 부모-자식 계층 `src/continuum/storage/`와 `src/continuum/recovery/family.py`(`continuum tree`), allowlist 인가 `src/continuum/mcp/authz.py`(`CONTINUUM_MCP_MUTATING_CLIENTS` / `CONTINUUM_MCP_TOKEN`), 표현 표면 `src/continuum/dashboard/app.py`와 `src/continuum/serve/server.py`, CLI `src/continuum/cli/main.py`(`continuum runs`, `continuum tree`, `continuum health`). |
+| 검증 기판 | 시간 T의 체크포인트와 지금의 세계가 주어졌을 때, 계속하는 것이 여전히 안전하고 정확한가 | `src/continuum/state/validator.py`(오래됨 `dependency -> evidence -> finding -> decision` plus `PlanStep.depends_on`), `src/continuum/provenance_map.py`(`Origin`에서 `REQUIRES_REVIEW`까지 `REVIEW_CONFIRMED`까지), `src/continuum/actions/ledger.py`와 `src/continuum/actions/idempotency.py` 및 `src/continuum/gate.py` / `src/continuum/gateway.py`(실행 전 청구, 중복 거부, 조정을 위해 `UnknownSideEffect` 발생), `src/continuum/replayguard.py`(휴대용 가드), `src/continuum/pinning.py`와 `src/continuum/replay_similarity.py`(재생 정확성), `src/continuum/budgets.py`(재시도 상한), `src/continuum/recovery/engine.py` + `src/continuum/recovery/contract.py` + `src/continuum/recovery/planner.py` + `src/continuum/recovery/observations.py`(최대 심각도 `RESUME < ... < ABORT`, `evidence` / `reason` / `next_allowed_action` / `human_steps`가 있는 봉인된 계약), `src/continuum/checkpoint/rewind.py`(원자적 이중 상태 되감기), `src/continuum/analysis/prefix_trust.py`(조언적 신뢰). 게시된 검사: `docs/recovery_walkthrough.md`, `benchmarks/fault_injection/`(`detection_rate` / `unsafe_resume_rate`를 출력하는 스위트), `src/continuum/benchmark/phase6/`(복구 정확성 스위트), `docs/RESULTS.md` 그리고 아래의 재생성 가능한 시각화. |
+
+위의 각 행은 태그가 지정된 커밋 시점에 `main`에 존재하는 경로로 추적 가능하다. 이 표에서는 벤치마크 수치를 다시 게시하지 않는다. 벤치마크는 이미 출력한 스위트 출력에만 존재한다. 게시된 스위트와 설계 문서의 전체 목록은 `docs/research.md`에 있다.
