@@ -271,3 +271,24 @@ stdio 経由の十一のツール。三つは読み取り専用（`continuum_val
 | Pydantic AI | 非同期 Hooks ケーパビリティ | `Agent(capabilities=[wrap_pydantic_ai_hooks(storage, run_id)])` |
 
 これらのいずれにも届かないスタックでは：`continuum gateway` が任意の言語からの外向き HTTP にクレームを強制し、`continuum.otel.make_span_processor(storage)` が既存の OpenTelemetry ツールスパンを証拠に変え、`continuum serve` が MCP ツールと同じ操作を言語非依存の JSON ワイヤプロトコルで公開する（stdio、または `--transport http` による HTTP と `CONTINUUM_SERVE_TOKEN` 認証）。
+
+### エージェントまたは MCP が報告した実行の再開
+
+MCP 経由、または OpenAI アダプター経由で報告された状態は来歴 `Origin.EXTERNAL_AGENT` を持ち、`request_human` に解決されるまで確認されない。LangGraph と LangChain の実行は `Origin.DETERMINISTIC` を使い直接再開する。レビューをクリアして再開するには：
+
+```bash
+continuum confirm <run_id>   # REVIEW_CONFIRMED を記録し、再評価する
+continuum resume <run_id>    # 今度は RESUME を報告する
+```
+
+MCP 上では同等物が `continuum_confirm` ツールの後の `continuum_resume` である。確認は一回限りの人間による証明イベントであり、自己認証の安全性の逃げ道である。したがって外部駆動の実行が永続的に詰まることはない。
+
+## コアコンセプト
+
+各コンセプトの深いリファレンスは [references/concepts.md](references/concepts.md) にある。
+
+- **セマンティックチェックポイント**、エージェントが継続するために必要なコンパクトでバージョン管理された表現。
+- **状態検証**、各コンポーネントが独立して検証され、陳腐化は依存グラフを通じて伝播する。
+- **冪等なアクション台帳**、外部副作用が追跡され重複排除され、不確かな結果は静かに再試行されるのではなく送出される。
+- **リカバリモード**、`RESUME`、`REPAIR_AND_RESUME`、`ROLLBACK`、`WAIT`、`REQUEST_HUMAN`、`ABORT`（さらに `REPLAN`）。
+- **リカバリ契約**、決定的で完全性が封印され、ゲートされた次のアクション。
