@@ -207,3 +207,23 @@ python demo-run/generate_crash_visual.py
 | 已消耗授权追踪 | 单次授权引用在终态时被标记为已消耗，恢复后重用会被拒绝（`GRANT_DENIED`），防御检查点恢复路径上的授权复活 |
 | 链证明 | `continuum attest` 使用 Ed25519 签署 run 的链头，外部验证者可证明历史在已知密钥下未被篡改 |
 | HITL 仪表板 | 确认、对账和完成按钮，与 CLI 保持审计一致性 |
+
+## 安全扩展
+
+两个增量式安全扩展位于恢复和检查点基座之上。它们不改变恢复、重放或现有的崩溃时重验证路径。
+
+- **安全规划循环**：观测携带可溯源性并由两个独立信号验证（`verified` / `unverified` / `contested`）。由未验证或有争议观测所门控的计划分支会被提升至 `REQUIRES_REVIEW`。决策作为 `PERCEPTION_OBSERVED` 和 `BRANCH_RESOLVED` 事件追加到账本。
+- **周期性重验证**：按步骤间隔（默认 25）和应用切换时复用恢复引擎，因此运行中环境漂移在一个周期内就会被捕获，而不是等到下一次崩溃。
+
+见 [docs/PROBLEM.md](docs/PROBLEM.md)、[docs/RESULTS.md](docs/RESULTS.md) 和 [STATUS.md](STATUS.md)。
+
+## 实证验证
+
+CONTINUUM 针对真实 LLM 智能体、真实协议边界和硬进程崩溃进行验证，而不仅仅是模拟单元测试。
+
+- **真实智能体**：多会话 Claude Code 发票批次在运行中 `SIGKILL`，在机制上取得 7/7 评分，恢复会话查询了 `continuum_resume`、通过两阶段账本路由副作用、拒绝重复已验证写入并尊重 `request_human`。真实测试暴露了 prompt 漂移去重缺口，已通过 `ActionLedger.claim()` 中的规范路径归一化和基于 token 的回退关闭。
+- **第三方客户端**：Gemini CLI 和 Kilo Code 通过 stdio JSON-RPC 对接真实 SQLite 存储，验证多智能体共存和鉴权隔离。
+- **协议合规**：使用 `@modelcontextprotocol/inspector --cli` 在进程死亡间端到端驱动，变更工具默认拒绝并位于 `CONTINUUM_MCP_MUTATING_CLIENTS` 后，外部声明降级为 `REQUIRES_REVIEW`（`safe: false`）。
+- **自愈**：硬杀的服务器在启动时通过单次重试清理孤立的 SQLite `-wal`/`-shm` 伴生文件来恢复。
+- **规模**：约 1,380 个测试被收集（约 1,360 通过，其余在缺少可选服务时跳过），覆盖 Python 3.11、3.12 和 3.13（单元、`hypothesis` 属性测试、并发、对抗）。CONTINUUM-Bench 运行五个崩溃场景加一个专门的参数漂移场景，对 CONTINUUM 测量到 0 重复工作和 0 重复副作用，而对朴素重放则为完全重复，另有一个 12 场景恢复正确性套件（`continuum.benchmark.phase6`）将持久执行调研中的崩溃点编码为可执行断言。
+- **对抗审计**：完整 MCP 面已在真实协议上被审计，发现并修复了三个缺陷。方法和复现步骤见 [test.md](test.md)。
