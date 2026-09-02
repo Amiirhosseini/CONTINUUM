@@ -150,7 +150,27 @@ Every memory write is a ledger row keyed by tenant namespace. Enumeration is the
 continuum actions <run> --json | python -c "import json,sys; data=json.load(sys.stdin); print([a for a in data['actions'] if 'mem:' in a['action_id']])"
 ```
 
-A future `continuum forget --tenant X` builds on this enumeration to list exactly what to delete externally and to append a tombstone event. Chain verification keeps hashes, so logical deletion does not break `verify()`. Physical removal of historical hashes is out of scope by design, the chain keeps evidence that something was written and later tombstoned.
+`continuum forget --tenant X` builds on this enumeration to list exactly what to delete externally and to append a tombstone event:
+
+```bash
+# Dry run: list what would be tombstoned
+continuum forget --tenant acme --dry-run --json | python -m json.tool
+
+# Tombstone and keep audit trail
+continuum forget --tenant acme --reason "gdpr request" --json
+continuum verify <run_id>  # still passes, chain keeps hashes
+```
+
+Forensic join links a poisoned record back to its origin. Each claim may carry `origin_digest`, the hash of the originating observation. Given a bad record, `ActionLedger.forensic_lookup(record_key)` and `forensic_join_across_runs(storage, record_key)` return the actions and their joined `PERCEPTION_OBSERVED` events, so sibling writes from the same contaminated origin can be enumerated:
+
+```python
+from continuum.actions.ledger import forensic_join_across_runs
+hits = forensic_join_across_runs(store, "rec-42")
+for h in hits:
+    print(h["rendered_key"], h["origin_digest"], h["observation_event"])
+```
+
+Chain verification keeps hashes, so logical deletion does not break `verify()`. Physical removal of historical hashes is out of scope by design, the chain keeps evidence that something was written and later tombstoned. Tombstones are `MEMORY_TOMBSTONED` events, hash-chained like any other, with `hashes_kept: true` in the payload.
 
 ## Limitations
 
