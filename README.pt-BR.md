@@ -209,3 +209,23 @@ Passo a passo completo com código em `docs/recovery_walkthrough.md` (`examples/
 | Rastreamento de concessões consumidas | Referências de autoridade de uso único são marcadas como gastas em estado terminal, reutilização após restauração é recusada (`GRANT_DENIED`), defendendo o caminho de restauração contra ressurreição de autoridade |
 | Atestação de cadeia | `continuum attest` assina a cabeça da cadeia de uma execução com Ed25519 para que um verificador externo possa provar que o histórico não foi adulterado com uma chave conhecida |
 | Superfície HITL do dashboard | Botões de confirmar, reconciliar e completar com paridade de auditoria em relação à CLI |
+
+## Extensão de segurança
+
+Duas extensões de segurança aditivas se assentam sobre o substrato de recuperação e checkpoint. Elas não mudam a retomada, a reprodução ou o caminho existente de revalidação no momento da queda.
+
+- **Loop de planejamento seguro**: observações carregam proveniência e são verificadas com dois sinais independentes (`verified` / `unverified` / `contested`). Um ramo do plano protegido por uma observação não verificada ou contestada é escalado para `REQUIRES_REVIEW`. Decisões são acrescentadas ao ledger como eventos `PERCEPTION_OBSERVED` e `BRANCH_RESOLVED`.
+- **Revalidação periódica**: reutiliza o motor de recuperação em um intervalo de passos (padrão 25) e na troca de app, de modo que a deriva do ambiente no meio da execução seja capturada dentro de um ciclo em vez de apenas na próxima queda.
+
+Veja [docs/PROBLEM.md](docs/PROBLEM.md), [docs/RESULTS.md](docs/RESULTS.md) e [STATUS.md](STATUS.md).
+
+## Verificação empírica
+
+O CONTINUUM é verificado contra agentes LLM reais, limites de protocolo ao vivo e quedas duras de processo, não apenas testes unitários com mocks.
+
+- **Agentes reais**: lotes de faturas multi sessão com Claude Code com `SIGKILL` no meio da execução, pontuados 7/7 em mecânicas, sessões retomadas consultaram `continuum_resume`, rotearam efeitos colaterais pelo ledger em duas fases, recusaram-se a duplicar escritas verificadas e respeitaram `request_human`. Testes ao vivo expuseram lacunas de deduplicação por deriva de prompt, fechadas com normalização de caminho canônico e fallback baseado em tokens em `ActionLedger.claim()`.
+- **Clientes de terceiros**: Gemini CLI e Kilo Code conectados via stdio JSON-RPC contra o armazenamento SQLite ao vivo, validando coexistência multiagente e isolamento de autorização.
+- **Conformidade de protocolo**: conduzido de ponta a ponta com `@modelcontextprotocol/inspector --cli` através de mortes de processo, ferramentas mutantes negam por padrão atrás de `CONTINUUM_MCP_MUTATING_CLIENTS`, reivindicações externas degradam para `REQUIRES_REVIEW` (`safe: false`).
+- **Auto reparo**: servidores mortos de forma brusca se recuperam de sidecars órfãos `-wal`/`-shm` do SQLite por meio de limpeza de uma única tentativa ao iniciar.
+- **Escala**: cerca de 1,380 testes coletados (~1,360 passando, o resto pula sem serviços opcionais) em Python 3.11, 3.12 e 3.13 (unitários, baseados em propriedades com `hypothesis`, concorrência, adversariais). O CONTINUUM-Bench executa cinco cenários de queda mais um cenário dedicado de deriva de argumentos, medindo 0 trabalho duplicado e 0 efeitos colaterais duplicados para o CONTINUUM frente à duplicação total para a reprodução ingênua, mais uma suíte separada de 12 cenários de correção de recuperação (`continuum.benchmark.phase6`) que codifica os pontos de queda do estudo de execução durável como asserções executáveis.
+- **Auditoria adversarial**: a superfície MCP completa foi auditada sobre o protocolo ao vivo, três defeitos foram encontrados e corrigidos. Método e passos de reprodução em [test.md](test.md).
