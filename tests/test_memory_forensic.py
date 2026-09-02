@@ -13,9 +13,9 @@ import pytest
 
 from continuum.actions.ledger import ActionLedger, fold_action_events, forensic_join_across_runs
 from continuum.events import EventType
-from continuum.gateway import GatewayConfigError, load_gateway_config, match_route
 from continuum.gate import derive_memory_key, is_memory_key
-from continuum.models import ActionStatus, Run
+from continuum.gateway import load_gateway_config, match_route
+from continuum.models import Run
 from continuum.security.hashing import stable_hash
 from continuum.security.provenance import PlanBranch
 from continuum.security.trust_gate import record_memory_observation, resolve_branch
@@ -30,7 +30,9 @@ def test_origin_digest_round_trips_via_ledger(tmp_path) -> None:
         store.append_event("run_1", EventType.RUN_STARTED, {"goal": "g"})
         ledger = ActionLedger(store, "run_1")
         rendered = "mem:pgvector_main:acme:rec-42"
-        outcome = ledger.claim("mem_write", {}, key=rendered, scoped_to_run=False, origin_digest=digest)
+        outcome = ledger.claim(
+            "mem_write", {}, key=rendered, scoped_to_run=False, origin_digest=digest
+        )
         assert outcome.fresh is True
         assert outcome.action.origin_digest == digest
         # Payload top-level also carries it
@@ -52,7 +54,13 @@ def test_origin_digest_rejects_bad_hex(tmp_path) -> None:
         store.append_event("run_1", EventType.RUN_STARTED, {"goal": "g"})
         ledger = ActionLedger(store, "run_1")
         with pytest.raises(Exception, match="origin_digest"):
-            ledger.claim("mem_write", {}, key="mem:pgvector_main:acme:rec-42", scoped_to_run=False, origin_digest="bad")
+            ledger.claim(
+                "mem_write",
+                {},
+                key="mem:pgvector_main:acme:rec-42",
+                scoped_to_run=False,
+                origin_digest="bad",
+            )
 
 
 def test_forensic_join_record_key_to_observation(tmp_path) -> None:
@@ -68,10 +76,14 @@ def test_forensic_join_record_key_to_observation(tmp_path) -> None:
         # Claim a memory write that cites that observation
         ledger = ActionLedger(store, "run_1")
         rendered = "mem:pgvector_main:acme:rec-99"
-        outcome = ledger.claim("mem_write", {}, key=rendered, scoped_to_run=False, origin_digest=digest)
+        outcome = ledger.claim(
+            "mem_write", {}, key=rendered, scoped_to_run=False, origin_digest=digest
+        )
         # Also claim a sibling write from same origin
         rendered2 = "mem:pgvector_main:acme:rec-100"
-        outcome2 = ledger.claim("mem_write", {}, key=rendered2, scoped_to_run=False, origin_digest=digest)
+        outcome2 = ledger.claim(
+            "mem_write", {}, key=rendered2, scoped_to_run=False, origin_digest=digest
+        )
         assert outcome.fresh and outcome2.fresh
         # Forensic lookup by record_key should find both and join to observation
         hits = ledger.forensic_lookup("rec-99")
@@ -98,10 +110,22 @@ def test_forensic_join_across_runs_tenant_scoped(tmp_path) -> None:
             store.append_event(rid, EventType.RUN_STARTED, {"goal": "g"})
         ledger1 = ActionLedger(store, "run_1")
         digest = "b" * 64
-        ledger1.claim("mem_write", {}, key="mem:pgvector_main:acme:rec-42", scoped_to_run=False, origin_digest=digest)
+        ledger1.claim(
+            "mem_write",
+            {},
+            key="mem:pgvector_main:acme:rec-42",
+            scoped_to_run=False,
+            origin_digest=digest,
+        )
         ledger2 = ActionLedger(store, "run_2")
         # Different tenant, same record_key, should be separate hits
-        ledger2.claim("mem_write", {}, key="mem:pgvector_main:globex:rec-42", scoped_to_run=False, origin_digest=digest)
+        ledger2.claim(
+            "mem_write",
+            {},
+            key="mem:pgvector_main:globex:rec-42",
+            scoped_to_run=False,
+            origin_digest=digest,
+        )
         hits = forensic_join_across_runs(store, "rec-42")
         # Both tenants should appear
         tenants = set()
@@ -224,9 +248,14 @@ def test_memory_observation_unverified_escalates(tmp_path) -> None:
         ev = record_memory_observation(store, "run_1", content_hash, "retrieved rec-42")
         assert ev.type == EventType.PERCEPTION_OBSERVED
         assert ev.payload["trust_level"] == "unverified"
-        assert ev.payload["source"] == "memory"
+        assert ev.payload["source"] == "environment_observed"
         # High-risk branch gated on that observation should require review
-        branch = PlanBranch(branch_id="b1", risk_tier="high", description="use memory rec-42")
+        branch = PlanBranch(
+            branch_id="b1",
+            risk_tier="high",
+            action_intent="submit_payment",
+            depends_on_observation=True,
+        )
         # Fetch the observation provenance back
         from continuum.security.provenance import ObservationProvenance
 
@@ -234,12 +263,16 @@ def test_memory_observation_unverified_escalates(tmp_path) -> None:
         gate = resolve_branch(branch, obs, storage=store, run_id="run_1")
         assert gate.requires_review is True
         # Low-risk branch should not
-        branch_low = PlanBranch(branch_id="b2", risk_tier="low", description="read rec-42")
+        branch_low = PlanBranch(
+            branch_id="b2", risk_tier="low", action_intent="read_text", depends_on_observation=True
+        )
         gate2 = resolve_branch(branch_low, obs)
         assert gate2.requires_review is False
 
 
 def test_derive_memory_key_and_is_memory_helpers() -> None:
     assert is_memory_key("mem:pgvector_main:acme:rec-1") is True
-    rendered = derive_memory_key({"store_id": "pgvector_main", "tenant": "acme", "record_key": "rec-42"})
+    rendered = derive_memory_key(
+        {"store_id": "pgvector_main", "tenant": "acme", "record_key": "rec-42"}
+    )
     assert rendered == "mem:pgvector_main:acme:rec-42"

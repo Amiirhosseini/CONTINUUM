@@ -146,7 +146,7 @@ def record_memory_observation(
     """
     obs = ObservationProvenance(
         observation_id=observation_id or make_id("obs"),
-        source="memory",
+        source="environment_observed",
         trust_level="unverified",
         verifier="memory_retrieval",
         content_hash=content_hash,

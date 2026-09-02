@@ -43,7 +43,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import timedelta
 from functools import wraps
@@ -737,10 +737,8 @@ class ActionLedger:
         elif action.arguments and "record_key" in action.arguments:
             # Fallback for callers that supplied record_key via arguments
             # rather than explicit key; keep forensic searchable.
-            try:
+            with suppress(Exception):
                 payload["rendered_key"] = str(action.arguments.get("record_key"))
-            except Exception:
-                pass
         self.storage.append_event(self.run_id, event_type, payload)
         return action
 
@@ -881,7 +879,9 @@ class ActionLedger:
                 import re as _re
 
                 if not _re.fullmatch(r"[0-9a-f]{64}", origin_digest):
-                    raise LedgerError(f"origin_digest must be 64 lowercase hex, got {origin_digest!r}")
+                    raise LedgerError(
+                        f"origin_digest must be 64 lowercase hex, got {origin_digest!r}"
+                    )
             action = Action(
                 run_id=self.run_id,
                 action_type=action_type,
@@ -893,7 +893,12 @@ class ActionLedger:
                 origin_digest=origin_digest,
             )
             self._record(
-                key, action, pinning=pinning, grant=grant_clean, origin_digest=origin_digest, rendered_key=rendered_key
+                key,
+                action,
+                pinning=pinning,
+                grant=grant_clean,
+                origin_digest=origin_digest,
+                rendered_key=rendered_key,
             )
             return ActionOutcome(key=key, action=action, fresh=True)
 
@@ -1193,7 +1198,7 @@ class ActionLedger:
                 action = Action.model_validate(payload["action"])
             except Exception:
                 continue
-            digest = payload.get("origin_digest") or action.origin_digest
+            digest = payload.get("origin_digest") or action.origin_digest  # type: ignore[assignment]
             obs_ev = obs_by_digest.get(digest) if isinstance(digest, str) else None
             hits.append(
                 {
@@ -1227,6 +1232,7 @@ class ActionLedger:
                 f"continuum_list_actions, and pass the action_key or action_id from there."
             )
         return resolved, self._replay()[resolved]
+
 
 def forensic_join_across_runs(storage: Storage, record_key: str) -> list[dict[str, Any]]:
     """Store-global forensic join: record_key -> originating observations.
@@ -1285,7 +1291,7 @@ def forensic_join_across_runs(storage: Storage, record_key: str) -> list[dict[st
                 action = Action.model_validate(payload["action"])
             except Exception:
                 continue
-            digest = payload.get("origin_digest") or getattr(action, "origin_digest", None)
+            digest = payload.get("origin_digest") or getattr(action, "origin_digest", None)  # type: ignore[assignment]
             obs_ev = obs_by_digest.get(digest) if isinstance(digest, str) else None
             hits.append(
                 {
@@ -1297,4 +1303,3 @@ def forensic_join_across_runs(storage: Storage, record_key: str) -> list[dict[st
                 }
             )
     return hits
-
