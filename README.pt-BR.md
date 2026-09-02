@@ -177,3 +177,35 @@ python demo-run/generate_crash_visual.py
 ![Recuperação de falha: morte brusca no meio do lote, recusa, reconciliação, retomada](docs/assets/crash-recovery.svg)
 
 Passo a passo completo com código em `docs/recovery_walkthrough.md` (`examples/recovery_walkthrough.py`). O harness mínimo de bench está em `references/bench.md` (`continuum benchmark`).
+
+## Funcionalidades
+
+| Capacidade | O que te entrega |
+|:--|:--|
+| Checkpoints semânticos | Estado compacto, versionado e inspecionável, não um despejo de transcrição |
+| Ledger idempotente | Recusa efeitos colaterais externos duplicados, expõe os incertos para reconciliação |
+| Revalidação do ambiente | Cada componente do checkpoint é verificado contra o mundo atual antes de retomar |
+| Estado com proveniência | Progresso reportado pelo agente é marcado `REQUIRES_REVIEW`, nunca se auto certifica |
+| Motor de recuperação | Sete modos de recuperação com um contrato determinístico e selado para a próxima ação |
+| Servidor MCP que nega por padrão | Onze ferramentas, separação leitura/mutação, allowlist de chamadores |
+| Adaptadores de frameworks | Integrações Python genérico, OpenAI Agents SDK, LangGraph e LangChain |
+| Loop de planejamento seguro | Verificação de observações com dois sinais escala ramos de alto risco para REQUIRES_REVIEW |
+| Revalidação periódica | Ambiente verificado novamente em agenda, detectando deriva no meio da execução dentro de um ciclo |
+| Log à prova de adulteração | Log de eventos encadeado (36 tipos de eventos) com verificação de integridade |
+| Porta de cumprimento | Chamadas de efeitos colaterais não reivindicadas são recusadas antes de disparar, mensagens de negação ensinam o protocolo de reivindicação |
+| Hooks de observação | Cada arquivo que uma CLI de código escreve se torna evidência verificada por digest, fora do controle do modelo |
+| Briefing de sessão | Sessões frescas aprendem o estado da execução de forma determinística no início, incluindo o resumo de raciocínio da sessão anterior |
+| Sondas reconciliadoras | Comandos registrados liquidam efeitos colaterais incertos automaticamente, humanos só veem o resto |
+| Guia executável | Resume e validate renderizam próximos passos como comandos executáveis, não como estados |
+| Gateway HTTP de cumprimento | Chamadas de saída em qualquer linguagem requerem reivindicações, respostas são liquidadas a partir do código de estado real |
+| Ponte OpenTelemetry | Spans de chamadas de ferramentas do tracing de produção se tornam evidência sem mudanças de código |
+| Índice de ações | Buscas de idempotência entre execuções são leituras indexadas, não varreduras completas |
+| Fixação de versões | Hashes de prompt, ferramenta e modelo afirmados pelo chamador são armazenados por reivindicação, deriva aflora ao retomar |
+| Orçamentos de tentativas | Limites de tentativas por tipo de ação impostos ao reivindicar, agentes veem tentativas restantes |
+| Pai/filho multiagente | Retomada do pai compõe o pior estado da família, filho incerto bloqueia o pai |
+| Retentativa informada | Resumos de falha redigidos pelo motor são injetados em retomadas pós recuperação |
+| Semântica de bifurcação | Continuações divergentes se ramificam em execuções filhas com autoridade fresca |
+| Compactação de log | Prefixo pré-âncora arquivado verbatim, log vivo permanece limitado para execuções de meses |
+| Rastreamento de concessões consumidas | Referências de autoridade de uso único são marcadas como gastas em estado terminal, reutilização após restauração é recusada (`GRANT_DENIED`), defendendo o caminho de restauração contra ressurreição de autoridade |
+| Atestação de cadeia | `continuum attest` assina a cabeça da cadeia de uma execução com Ed25519 para que um verificador externo possa provar que o histórico não foi adulterado com uma chave conhecida |
+| Superfície HITL do dashboard | Botões de confirmar, reconciliar e completar com paridade de auditoria em relação à CLI |
