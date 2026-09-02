@@ -12,15 +12,8 @@ from continuum.models import Run
 from continuum.provenance.graph import build_provenance_graph, downstream_of
 from continuum.storage.sqlite import SQLiteStorage
 
+
 # Use CLI helper from tests
-from tests.test_cli import run_cli  # type: ignore
-
-try:
-    from tests.test_cli import run as _run_cli  # fallback
-except ImportError:
-    _run_cli = None
-
-
 def _run(*args: str, db: str | None = None):
     """Helper to run continuum CLI via subprocess."""
     cmd = (
@@ -92,7 +85,7 @@ def test_graph_nodes_carry_origin():
     run_id = "run_prov_origin"
     storage.create_run(Run(run_id=run_id, goal="g"))
     ev = storage.append_event(run_id, EventType.EVIDENCE_ADDED, {"evidence_id": "ev1"})
-    dec = storage.append_event(
+    storage.append_event(
         run_id, EventType.DECISION_CREATED, {"decision": "d", "caused_by": [ev.event_id]}
     )
     graph = build_provenance_graph(storage.read_events(run_id))
