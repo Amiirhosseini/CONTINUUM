@@ -50,3 +50,20 @@ CONTINUUM 提出一个更窄但更难的问题：智能体能否从任务状态�
 - **语义检查点**：所需继续执行的最小化、带版本的紧凑表示，而非对话转储。
 - **独立的环境重验证**：恢复前每个检查点组件都会对照当前环境进行验证，过期状态会通过依赖图传播。
 - **可溯源的状态**：每个事实都可追溯到其来源，因此智能体报告的进度永远不会自我认证。
+
+## 快速开始
+
+以 `continuum-agent` 0.1.0 发布至 PyPI，执行 `pip install continuum-agent` 即可（固定版本请用 `pip install continuum-agent==0.1.0`）。发布标签还会将构建好的 wheel 附加到 [GitHub Releases](https://github.com/Cyrax321/CONTINUUM/releases)。
+
+零配置路径（无需克隆、无需安装、无需发布）：
+
+| 路径 | 方法 |
+|:--|:--|
+| 从 PyPI 安装 | `pip install continuum-agent==0.1.0`，然后执行 `continuum --help` |
+| 端到端观看崩溃恢复 | `docker run --rm ghcr.io/cyrax321/continuum` |
+| 通过 Docker 使用 CLI | `docker run --rm ghcr.io/cyrax321/continuum continuum --help` |
+| 无需克隆即可运行 CLI | `uvx --from git+https://github.com/Cyrax321/CONTINUUM.git continuum --help` |
+| Windows PowerShell（在克隆中） | `powershell -ExecutionPolicy Bypass -File .\try-it.ps1` 或 `powershell -ExecutionPolicy Bypass -File .\try-it.ps1 cli --help` |
+| 浏览器中的完整开发环境 | [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/Cyrax321/CONTINUUM?quickstart=1) |
+
+Docker 镜像由 CI 在每次推送到 `main` 和每个发布标签时发布到 GHCR（`.github/workflows/docker-publish.yml`）。Codespace 在 `.devcontainer/` 中定义。
