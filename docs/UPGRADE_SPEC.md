@@ -123,6 +123,7 @@ Grouped from `gh issue list --state open` and label counts (`good first issue` 3
 **Research novelty, not yet implemented:**
 
 * #288 Claim-level provenance graph with staleness propagation (`enhancement` `research` `state`)
+  - #551 caused_by payload on DECISION_CREATED and ACTION_RECORDED, validation against log ids, hash-covered, max 32, 1-128 chars, defaults to [] (Refs #551)
 * #289 Authority lifecycle: consumed-credential tracking and resurrection prevention (`enhancement` `mcp` `security`, complements 239 grant work in 287)
 * #292 Atomic dual-state rewind, context plus environment revert in one command (`enhancement` `research`)
 * #293 Public recovery-correctness benchmark, fault-injection grading for any framework (`enhancement` `benchmark` `research`)
