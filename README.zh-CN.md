@@ -488,3 +488,19 @@ continuum tree <parent_run_id>                   # 多智能体层级视图
 | 工作流引擎 | 恢复层，而非编排器 |
 
 核心抽象：`语义状态 + 环境验证 + 动作对账 = 安全恢复`。
+
+## 相关工作
+
+CONTINUUM 位于持久执行、幂等副作用追踪和针对 LLM 智能体的崩溃恢复的交叉点。最近的邻域是经机器检查的恢复合约（Khan 2026）、带约束门控准入的智能体事务处理（Mnemosyne 2026）、检查点回滚攻击分析（ACRFence 2026）和设计级 prompt 注入防御（CaMeL 2025）。完整的带注释列表、基础和引用审计见 [references/related-work.md](references/related-work.md)。
+
+## 状态与局限
+
+- **已测试**：在 2026-08-24 对本树的完整运行中为 1,360 通过 + 23 跳过，CI 在 Python 3.11、3.12 和 3.13 上强制执行套件，计数因平台和 Postgres 等可选服务而异（见 [STATUS.md](STATUS.md)）。MCP 面也已在真实协议上被对抗性审计，见 [test.md](test.md)。
+- **在 PyPI 上为 `continuum-agent` 0.1.0**（`pip install continuum-agent`，克隆仍可通过 `pip install .` 见 Quick Start）。
+- **MCP 调用者认证按部署可选。** 当设置 `CONTINUUM_MCP_TOKEN` 时，服务器会拒绝每个变更工具，除非调用者在 `initialize` 握手的 `_meta.authToken` 中出示该共享密钥，通过 `CONTINUUM_MCP_CLIENT_TOKENS`（`name:secret` 对）支持按调用者的密钥。未配置任何 token 时，鉴权仅按声明身份（历史默认值，为本地单用户使用保留）。
+- **通过 MCP 确认自我报告状态需要单独的密钥。** `continuum_confirm` 会拒绝每个调用者，直至操作员设置 `CONTINUUM_MCP_CONFIRM_TOKEN`，因为被允许记录进度的智能体不能同时被允许确认它。默认路径保持人类驱动：在主机上运行 `continuum confirm <run_id>`。
+- **未构建组件**：云 API（阶段 13）。
+- **Shell 命令强制缺口**：门控对结构化工具调用强制声明，但无法洞察 Bash 和 curl 命令内部。文档化为 v1 范围拒止。
+- **框架适配器仍为实验性。** 全部三个框架适配器现在都携带真实模型的软恢复和硬崩溃证明（OpenRouter，`gpt-4o-mini`），包括阻塞在不确定副作用上的崩溃合约，并且现在拥有与通用门面一致的崩溃与恢复验证测试（Refs #285）。生产恢复请优先使用 `GenericAgentAdapter`。
+- **智能体和 MCP 运行在自动恢复前需要显式确认。** 外部报告的状态为 `REQUIRES_REVIEW`，因此 `continuum resume` 会返回 `request_human` 直至人类确认。按设计如此，不是缺陷，见 [框架集成](#框架集成)。
+- **e2e 自主测试系列**（issue [#6](https://github.com/Cyrax321/CONTINUUM/issues/6)）：三轮完整 Claude Code 运行在机制上取得 7/7 评分，观察到无提示的恢复行为。跨多样 prompt 风格的进一步迭代仍开放。
