@@ -2996,7 +2996,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     with_run(add("history", cmd_history, "List state versions and checkpoints."))
 
-    provenance = with_run(add("provenance", cmd_provenance, "Show provenance DAG. Read-only."))
+    with_run(add("provenance", cmd_provenance, "Show provenance DAG. Read-only."))
     impact = with_run(
         add("impact", cmd_impact, "Show downstream impact of an evidence item. Read-only.")
     )
