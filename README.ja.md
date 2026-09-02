@@ -140,3 +140,24 @@ python scripts/mcp_smoke.py               # 実際の子プロセス、実際の
 ```
 
 `e2e-autonomy-test/` キットは実際の請求書バッチタスク、実行中のハードキル、そして新しい再開セッションをスクリプト化し、その後 outbox、台帳、イベントチェーンを帯域外で採点する。実行 1 は実際の Claude Code セッションで **7/7 のメカニクス** を獲得した。完全なウォークスルーは [references/e2e.md](references/e2e.md) にある。
+
+## 仕組み
+
+CONTINUUM は **LLM コンテキスト**（一時的）と **永続的なタスク状態**（永続的）を分離する。会話履歴を保存する代わりに、継続するために必要な最小限の検証済み情報であるセマンティックチェックポイントを構築する。
+
+![CONTINUUM の仕組み](docs/assets/architecture.svg)
+
+詳細な説明、投影モデル、リカバリコンテキストは [references/architecture.md](references/architecture.md) にある。
+
+## CONTINUUM の位置づけ
+
+四つの関心事が長時間実行されるすべてのエージェントで重なる。CONTINUUM は最後の一つだけを所有し、他の三つには明示的な継ぎ目を通じて触れる。競合を名指しすることも、提供済みモジュールや公開済みスイートが既に印字していない主張をすることもない。
+
+| レイヤー | 問いに答える | 接続方法（提供済みモジュールまたは公開済み出力） |
+|:--|:--|:--|
+| Harness | エージェントはどのようにツールを呼び出し目標に向かって進むか | CONTINUUM の外。接続点は `src/continuum/adapters/generic.py`（`GenericAgentAdapter`）、`src/continuum/adapters/thin.py`（CrewAI、AutoGen、Pydantic AI フック）、`src/continuum/mcp/server.py`（MCP stdio）、`src/continuum/hooks.py` と `src/continuum/clienthooks.py`（コーディング CLI ライフサイクルフック）、`src/continuum/gateway.py`（任意の言語向け強制 HTTP プロキシ）、`src/continuum/otel.py`（OpenTelemetry ブリッジ）で提供。レシピは `docs/recipes/` と `references/adapters.md` にある。 |
+| 耐久実行 | クラッシュ前に何が起こり、何が失われずに再生できるか | ハッシュチェーンイベントログ `src/continuum/events.py` と `verify()` と `trusted_through`、永続ストレージ `src/continuum/storage/sqlite.py`（WAL、`synchronous=FULL`、schema v6）と `src/continuum/storage/postgres.py` に加え `src/continuum/storage/migrations.py`、ポリシー駆動チェックポイント `src/continuum/checkpoint/manager.py` と `src/continuum/checkpoint/policy.py` が `restore()` でギャップを再生。ウォークスルーは `docs/recovery_walkthrough.md`（`examples/recovery_walkthrough.py` の出力）にある。 |
+| コントロールプレーン | どの実行がアクティブで、誰がそれに作用でき、出力はどこへ行くか | 実行レジストリと親子階層 `src/continuum/storage/` と `src/continuum/recovery/family.py`（`continuum tree`）、allowlist 認可 `src/continuum/mcp/authz.py`（`CONTINUUM_MCP_MUTATING_CLIENTS` / `CONTINUUM_MCP_TOKEN`）、表示面 `src/continuum/dashboard/app.py` と `src/continuum/serve/server.py`、CLI `src/continuum/cli/main.py`（`continuum runs`、`continuum tree`、`continuum health`）。 |
+| 検証基盤 | 時刻 T のチェックポイントと今の世界が与えられたとき、継続しても安全かつ正確か | `src/continuum/state/validator.py`（陳腐化 `dependency -> evidence -> finding -> decision` に加え `PlanStep.depends_on`）、`src/continuum/provenance_map.py`（`Origin` から `REQUIRES_REVIEW` まで `REVIEW_CONFIRMED` まで）、`src/continuum/actions/ledger.py` と `src/continuum/actions/idempotency.py` および `src/continuum/gate.py` / `src/continuum/gateway.py`（実行前にクレーム、重複を拒否し、照合のために `UnknownSideEffect` を送出）、`src/continuum/replayguard.py`（ポータブルガード）、`src/continuum/pinning.py` と `src/continuum/replay_similarity.py`（再生の正確性）、`src/continuum/budgets.py`（リトライ上限）、`src/continuum/recovery/engine.py` + `src/continuum/recovery/contract.py` + `src/continuum/recovery/planner.py` + `src/continuum/recovery/observations.py`（最大深刻度 `RESUME < ... < ABORT`、`evidence` / `reason` / `next_allowed_action` / `human_steps` を持つ密封契約）、`src/continuum/checkpoint/rewind.py`（アトミックな二重状態巻き戻し）、`src/continuum/analysis/prefix_trust.py`（助言的信頼）。公開済みチェック：`docs/recovery_walkthrough.md`、`benchmarks/fault_injection/`（`detection_rate` / `unsafe_resume_rate` を印字するスイート）、`src/continuum/benchmark/phase6/`（リカバリ正確性スイート）、`docs/RESULTS.md`、そして下の再生成可能なビジュアル。 |
+
+上記の各行は、タグ付けされたコミット時点で `main` に存在するパスに追跡可能である。この表ではベンチマーク数値を再掲しない。ベンチマークはそれらを既に印字したスイート出力の中にのみ生きる。公開済みスイートと設計文書の完全なリストは `docs/research.md` にある。
