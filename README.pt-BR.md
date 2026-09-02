@@ -465,3 +465,28 @@ continuum tree <parent_run_id>                   # visão de hierarquia multiage
 Registros opcionais vivem ao lado do seu código e são dados, não código: `.continuum/gate.json` (ferramentas de efeito colateral + templates de chave estável), `.continuum/reconcilers.json` (sondas que checam sistemas externos), `.continuum/gateway.json` (rotas upstream).
 
 Cada comando aceita `--json`, e comandos somente leitura nunca escrevem, de modo que são seguros contra um banco de dados vivo enquanto um agente está no meio da execução. Códigos de saída são um contrato de segurança (apenas uma execução verificada segura sai com 0). Lista completa de comandos, tabela de códigos de saída e saída de diff de estado em [references/cli.md](references/cli.md).
+
+## Roteiro
+
+| Fase | Componente | Estado |
+|:--:|:--|:--|
+| 1-11 | Modelos de dados, estado semântico, persistência, checkpointing, validação, ledger de ações, motor de recuperação, CLI, exemplos de recuperação de falha, snapshots e diffs de ambiente, adaptadores de framework | Completo |
+| 12 | Suíte de benchmarks (CONTINUUM-Bench) | Completo (harness mínimo) |
+| 13 | API na nuvem (FastAPI + PostgreSQL) | Parcial: o backend de armazenamento PostgreSQL e o transporte sidecar HTTP (`continuum serve --transport http`) estão entregues e testados por CI, o serviço multi-tenant hospedado não foi iniciado |
+| 14 | Dashboard | Completo (`continuum dashboard`) |
+| 15+ | Durabilidade imposta: hooks de observação, porta, briefing de sessão, sondas reconciliadoras, gateway de cumprimento, ponte OTel, índice de ações, guia executável, instaladores multi cliente, detecção de reprodução semântica, fixação de versões, orçamentos de tentativas, compactação de log, superfície HITL, semântica de bifurcação, retentativa informada, agregação multiagente | Completo (ver issue #213) |
+| Próximo | Plano de durabilidade em escala de meses: planos ancorados em marcos (#312), memória de tentativas estruturada (#313), rebobinamento atômico de estado duplo (#292), benchmark público de correção de recuperação (#293), notificações de saída por webhook (#305) | Planejado (rascunho da especificação em [docs/UPGRADE_SPEC.md](docs/UPGRADE_SPEC.md)) |
+
+Além do plano original: o servidor MCP, as camadas de autorização MCP e autenticação de chamador, proveniência e anti auto certificação, arquivos de comunidade, versionamento de esquema com migrações para frente, um contexto de recuperação limitado, rastreamento de concessões consumidas, atestação de cadeia de eventos Ed25519, o checkpointer nativo do LangGraph e artefatos wheel em cada push para `main` estão entregues. Veja [STATUS.md](STATUS.md) para a divisão verificado versus acreditado e os defeitos de correção abertos.
+
+## O que o CONTINUUM não é
+
+| Não é isto | Em vez disso é isto |
+|:--|:--|
+| Um LLM | Uma camada de confiabilidade para agentes que usam LLMs |
+| Um framework de agentes | Uma camada de recuperação que se conecta a qualquer framework |
+| Um banco de dados vetorial | Estado semântico estruturado, não embeddings |
+| Um sistema RAG | Checkpoints verificados, não memória aumentada por recuperação |
+| Um motor de fluxo de trabalho | Uma camada de recuperação, não um orquestrador |
+
+A abstração central: `estado semântico + validação do ambiente + reconciliação de ações = recuperação segura`.
