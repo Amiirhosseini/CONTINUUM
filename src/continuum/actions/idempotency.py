@@ -553,8 +553,9 @@ def resolve_authorization_id(
        by shared identity tokens anchors the id, reusing the same containment,
        derivation and location-agreement checks as ``ActionLedger.claim``'s
        fallback; without a ledger the id is the hash of the canonical leaf
-       tokens of the incoming arguments. Weak tokens (counts, status words,
-       stopwords) never produce an id.
+       tokens of the incoming arguments. A token is dropped when it is
+       shorter than three characters or appears in the fixed weak-token or
+       stopword lists. Arguments made only of such tokens produce no id.
     3. Unbound (neither key nor distinctive tokens, or an ambiguous
        multi-match): ``None`` is returned. The caller keeps today's
        behaviour (no authorization-bound budget) byte-identical.
