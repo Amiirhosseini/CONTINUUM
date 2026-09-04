@@ -110,9 +110,11 @@ project root as cwd and the default database path would otherwise be ambiguous.
 To see what was installed, inspect the settings file after install:
 
 ```bash
-continuum --db /tmp/test.db hooks install claude-code
+continuum hooks install claude-code --db /tmp/test.db
 cat .claude/settings.json
 ```
 
-If the command looks unexpected after moving a virtualenv, re-run
-`continuum hooks install` for that host; it rewrites the baked command path.
+If the command looks unexpected after moving a virtualenv, re-run the
+same install command for that host, including the original `--db` value
+when one was used (for example `continuum hooks install claude-code --db /tmp/test.db`);
+it rewrites the baked command path without changing the database target.
