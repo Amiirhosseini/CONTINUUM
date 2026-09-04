@@ -29,7 +29,8 @@ All notable changes to this project are documented here. The format follows
   status-word category: a token is dropped only when it is shorter than three
   characters or appears in `_WEAK_TOKENS` or `_STOPWORDS`. Words such as
   `pending` and `queued` therefore bind an id, and the old sentence contradicted
-  testing. Wording only; no runtime change.
+  testing. The same false "status words" claim in `identity_tokens` is corrected
+  for consistency. Wording only; no runtime change.
 
 - Make `continuum complete` idempotent for runs that are already completed (#356).
 

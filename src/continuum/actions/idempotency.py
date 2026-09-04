@@ -308,8 +308,9 @@ def identity_tokens(
     rendered as one, since a row id of ``4821`` identifies a row as well as
     ``INV-001`` identifies an invoice (issue #36) -- plus the basename and
     basename-stem of any path-like value, and the same for ``external_id``.
-    Weak tokens are dropped so the fallback never matches on incidental values
-    like counts or status words.
+    Weak tokens are dropped so the fallback never matches on incidental values:
+    tokens shorter than three characters, or ones that appear in the fixed
+    weak-token or stopword lists.
     """
     tokens: set[str] = set()
 
